@@ -4,7 +4,7 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, listAudioDevices, openUrl } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
@@ -336,6 +336,7 @@ function mount() {
   ctx.cleanup.splice(0).forEach((fn) => fn());
   ctx.binder = new Binder();
   ctx.onMicLevel = null;
+  ctx.onLevels = null;
   ctx.refreshDevices = null;
   const view = document.getElementById('view');
   buildNav();
@@ -428,6 +429,7 @@ async function meterLoop() {
     db = talking ? -22 - Math.random() * 12 : -62 - Math.random() * 6;
   }
   ctx.onMicLevel?.(db);
+  if (ctx.onLevels) ctx.onLevels(await audioLevels().catch(() => null));
   if (ctx.ducker.tick(db)) ctx.binder.run();
   setTimeout(meterLoop, conn.mode === 'live' ? 70 : 90);
 }

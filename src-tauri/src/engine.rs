@@ -359,6 +359,8 @@ pub struct EngineDevice {
     pub guid: String,
     pub name: String,
     pub installed: bool,
+    /// How the engine is hooked in on this output: "lfx-gfx", "sfx-mfx" or "sfx-efx".
+    pub mode: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -403,7 +405,9 @@ pub fn devices() -> Vec<EngineDevice> {
             (true, false) => conn,
             _ => guid.clone(),
         };
-        out.push(EngineDevice { id: endpoint_id(&guid), installed: device_installed(&guid), guid, name });
+        let installed = device_installed(&guid);
+        let mode = if installed { load_device(&guid).ok().map(|d| d.mode.as_str().to_string()) } else { None };
+        out.push(EngineDevice { id: endpoint_id(&guid), installed, mode, guid, name });
     }
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     out
@@ -446,6 +450,24 @@ enum Mode {
     LfxGfx,
     SfxMfx,
     SfxEfx,
+}
+
+impl Mode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Mode::LfxGfx => "lfx-gfx",
+            Mode::SfxMfx => "sfx-mfx",
+            Mode::SfxEfx => "sfx-efx",
+        }
+    }
+    fn parse(s: &str) -> Option<Mode> {
+        match s {
+            "lfx-gfx" => Some(Mode::LfxGfx),
+            "sfx-mfx" => Some(Mode::SfxMfx),
+            "sfx-efx" => Some(Mode::SfxEfx),
+            _ => None,
+        }
+    }
 }
 
 struct DeviceState {
@@ -638,13 +660,23 @@ fn uninstall_device(d: &DeviceState) -> Result<(), String> {
 }
 
 /// Installs on exactly `wanted` (endpoint ids or GUIDs) and removes the engine from all other outputs.
-fn apply_devices(wanted: &[String], log: &mut Vec<String>) -> Result<(), String> {
+/// `mode` forces another way of hooking in (Equalizer APO's "troubleshooting options") for outputs
+/// that don't play through the default one; outputs already installed differently are reinstalled.
+fn apply_devices(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -> Result<(), String> {
     let want = |guid: &str| wanted.iter().any(|w| w.to_lowercase().ends_with(&guid.to_lowercase()));
+    let forced = mode.and_then(Mode::parse);
     for dev in devices() {
-        let d = load_device(&dev.guid)?;
+        let mut d = load_device(&dev.guid)?;
+        if want(&dev.guid) && d.installed && forced.is_some_and(|m| m != d.mode) {
+            uninstall_device(&d)?;
+            d = load_device(&dev.guid)?;
+        }
         if want(&dev.guid) && !d.installed {
+            if let Some(m) = forced {
+                d.mode = m;
+            }
             install_device(&d)?;
-            log.push(format!("EQ-motor sat på: {}", dev.name));
+            log.push(format!("EQ-motor sat på: {} ({})", dev.name, d.mode.as_str()));
         } else if !want(&dev.guid) && d.installed {
             uninstall_device(&d)?;
             log.push(format!("EQ-motor fjernet fra: {}", dev.name));
@@ -663,9 +695,17 @@ fn apply_devices(wanted: &[String], log: &mut Vec<String>) -> Result<(), String>
 pub enum Task {
     /// Install (or update) the built-in engine and put it on these outputs. A separate
     /// Equalizer APO is backed up and uninstalled first.
-    Install { devices: Vec<String> },
-    /// Change which outputs the engine runs on.
-    SetDevices { devices: Vec<String> },
+    Install {
+        devices: Vec<String>,
+        #[serde(default)]
+        mode: Option<String>,
+    },
+    /// Change which outputs the engine runs on (and optionally how it hooks in).
+    SetDevices {
+        devices: Vec<String>,
+        #[serde(default)]
+        mode: Option<String>,
+    },
     /// Remove the built-in engine completely.
     Uninstall,
     /// Keep a separate Equalizer APO but let it read GoXLR Studio's config folder.
@@ -787,7 +827,7 @@ fn remove_external(log: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn install_engine(devices: &[String], log: &mut Vec<String>) -> Result<bool, String> {
+fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>) -> Result<bool, String> {
     if !bundled() {
         return Err("Denne version af GoXLR Studio indeholder ikke EQ-motoren".into());
     }
@@ -825,12 +865,12 @@ fn install_engine(devices: &[String], log: &mut Vec<String>) -> Result<bool, Str
     reg::write_str(APP_KEY, "EnableTrace", "false")?;
     reg::create(AUDIO_KEY)?;
     reg::write_dword(AUDIO_KEY, "DisableProtectedAudioDG", 1)?;
-    apply_devices(devices, log)?;
+    apply_devices(devices, mode, log)?;
     Ok(!restart_audio(log))
 }
 
 fn uninstall_engine(log: &mut Vec<String>) -> Result<bool, String> {
-    apply_devices(&[], log)?;
+    apply_devices(&[], None, log)?;
     let dir = install_dir();
     let dll = dir.join("EqualizerAPO.dll");
     if dll.exists() {
@@ -881,8 +921,8 @@ fn use_external(enable: bool, log: &mut Vec<String>) -> Result<bool, String> {
 pub fn run_task(task: &Task) -> TaskResult {
     let mut log = Vec::new();
     let res = match task {
-        Task::Install { devices } => install_engine(devices, &mut log),
-        Task::SetDevices { devices } => apply_devices(devices, &mut log).map(|_| !restart_audio(&mut log)),
+        Task::Install { devices, mode } => install_engine(devices, mode.as_deref(), &mut log),
+        Task::SetDevices { devices, mode } => apply_devices(devices, mode.as_deref(), &mut log).map(|_| !restart_audio(&mut log)),
         Task::Uninstall => uninstall_engine(&mut log),
         Task::UseExternal => use_external(true, &mut log),
         Task::RestoreExternal => use_external(false, &mut log),
@@ -982,6 +1022,18 @@ mod tests {
         let d = dev([NOVALUE, NOVALUE, "{S}", "{M}", NOVALUE], Mode::LfxGfx);
         assert_eq!(original_pre_mix(&d), "{S}");
         assert_eq!(original_post_mix(&d), "{M}");
+    }
+
+    #[test]
+    fn install_modes_roundtrip() {
+        for m in ["lfx-gfx", "sfx-mfx", "sfx-efx"] {
+            assert_eq!(Mode::parse(m).unwrap().as_str(), m);
+        }
+        assert!(Mode::parse("nope").is_none());
+        let t: Task = serde_json::from_str(r#"{"action":"set-devices","devices":["{a}"],"mode":"sfx-efx"}"#).unwrap();
+        assert!(matches!(t, Task::SetDevices { mode: Some(ref m), .. } if m == "sfx-efx"));
+        let t: Task = serde_json::from_str(r#"{"action":"install","devices":[]}"#).unwrap();
+        assert!(matches!(t, Task::Install { mode: None, .. }));
     }
 
     #[test]

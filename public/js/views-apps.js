@@ -122,9 +122,10 @@ export function appsView(ctx) {
       const pin = h('button', { class: `btn sm ${rule ? 'on' : ''}`, title: rule ? 'Glem reglen' : 'Husk valget – håndhæves automatisk hvert 5. sekund', onclick: () => {
         if (rule) ctx.appRules.splice(ctx.appRules.indexOf(rule), 1);
         else {
-          const first = g.sessions[0];
-          const output = isStale(first.output, devs, 'render') ? null : first.output ?? null;
-          const input = isStale(first.input, devs, 'capture') ? null : first.input ?? null;
+          // Apps like Discord run several processes; use the one that actually has a device set.
+          const pick = (key, flow) => g.sessions.map((x) => x[key]).find((id) => id != null && !isStale(id, devs, flow)) ?? null;
+          const output = pick('output', 'render');
+          const input = pick('input', 'capture');
           ctx.appRules.push({ exe: g.exe, output, output_name: deviceName(devs, output), input, input_name: deviceName(devs, input) });
         }
         ctx.saveAppRules(); render();
@@ -149,7 +150,39 @@ export function appsView(ctx) {
         h('div', { class: 'spacer' }),
         h('button', { class: 'btn sm', onclick: () => { ctx.appRules.splice(ctx.appRules.indexOf(r), 1); ctx.saveAppRules(); render(); } }, '✕'));
     }));
-    if (!ctx.appRules.length) rulesList.append(h('div', { class: 'hint' }, 'Ingen regler. Tryk "Husk" ud for en app for at låse dens enheder.'));
+    if (!ctx.appRules.length) rulesList.append(h('div', { class: 'hint' }, 'Ingen regler. Tryk "Husk" ud for en app, eller tilføj en nedenfor.'));
+    renderAddForm();
+  };
+
+  // Rules for apps that aren't running right now (e.g. Spotify → Music).
+  const addForm = h('div', { class: 'row add-rule', style: { flexWrap: 'wrap', marginTop: '10px' } });
+  let addFormKey = '';
+  const renderAddForm = () => {
+    const key = devs.map((d) => d.id).join('|');
+    if (key === addFormKey || addForm.contains(document.activeElement)) return;
+    addFormKey = key;
+    const known = [...new Set([...groups.map((g) => g.exe), 'Spotify.exe', 'Discord.exe', 'chrome.exe', 'msedge.exe', 'firefox.exe', 'steam.exe'])];
+    const exe = h('input', { type: 'text', placeholder: 'fx Spotify.exe', list: 'rule-exes', style: { width: '150px' } });
+    const opts = (flow) => [h('option', { value: '' }, 'Windows-standard'), ...devs.filter((d) => d.flow === flow).map((d) => h('option', { value: d.id }, shortName(d.name)))];
+    const out = h('select', {}, h('option', { value: '__keep' }, 'Udgang: uændret'), opts('render'));
+    const inp = h('select', {}, h('option', { value: '__keep' }, 'Mikrofon: uændret'), opts('capture'));
+    const add = h('button', { class: 'btn sm primary', onclick: () => {
+      let name = exe.value.trim();
+      if (!name) { exe.focus(); return; }
+      if (!/\.exe$/i.test(name)) name += '.exe';
+      const val = (sel) => (sel.value === '__keep' ? undefined : sel.value || null);
+      const rule = { exe: name, output: val(out), input: val(inp) };
+      if (rule.output === undefined && rule.input === undefined) { toast('Vælg en udgang og/eller mikrofon'); return; }
+      rule.output_name = rule.output ? deviceName(devs, rule.output) : null;
+      rule.input_name = rule.input ? deviceName(devs, rule.input) : null;
+      const i = ctx.appRules.findIndex((r) => sameExe(r.exe, name));
+      if (i >= 0) ctx.appRules[i] = rule; else ctx.appRules.push(rule);
+      ctx.saveAppRules();
+      toast(`Regel for ${name} gemt – den bruges, så snart appen spiller lyd`, 'info');
+      exe.value = '';
+      render();
+    } }, 'Tilføj regel');
+    addForm.replaceChildren(exe, h('datalist', { id: 'rule-exes' }, known.map((k) => h('option', { value: k }))), out, inp, add);
   };
 
   const refresh = async () => {
@@ -184,7 +217,7 @@ export function appsView(ctx) {
         h('div', { class: 'row', style: { marginTop: '10px' } }, fixBtn, h('div', { class: 'spacer' }),
           h('span', { class: 'hint' }, 'Ret automatisk'), h('label', { class: 'switch' }, autoFix, h('span'))),
         h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Apps uden regel sættes tilbage til Windows-standard; apps med regel får deres huskede enhed.')),
-      h('div', { class: 'card' }, h('h2', {}, 'Regler'), rulesList,
+      h('div', { class: 'card' }, h('h2', {}, 'Regler'), rulesList, addForm,
         h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Reglerne håndhæves hvert 5. sekund, også når appen ligger i bakken – fx Spotify → Music, Discord → Chat.'))),
     triggersCard(ctx, () => groups));
 }

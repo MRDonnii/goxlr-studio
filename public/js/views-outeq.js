@@ -23,6 +23,9 @@ export async function importPeacePresets(ctx) {
   return { names, total: files.length };
 }
 
+const ENGINE_MODES = ['lfx-gfx', 'sfx-efx', 'sfx-mfx'];
+const ENGINE_MODE_LABEL = { 'lfx-gfx': 'LFX/GFX – standard', 'sfx-efx': 'SFX/EFX', 'sfx-mfx': 'SFX/MFX' };
+
 // "EQ follows profile": pick a preset per GoXLR profile; applied whenever the profile changes.
 function profileLinksCard(ctx) {
   const state = ctx.outputEq;
@@ -393,6 +396,16 @@ export function outputEqView(ctx) {
     if (info.kind === 'builtin') {
       if (!info.uses_our_config) list.push(btn('Reparér', 'primary', needDevices(() => run({ action: 'install', devices: [...chosen] }, 'Reparerer EQ-motoren…'))));
       else if (selectionChanged()) list.push(btn('Gem udgange', 'primary', () => run({ action: 'set-devices', devices: [...chosen] }, 'Opdaterer udgange…')));
+      // Equalizer APO's "troubleshooting options": some drivers only play through the engine when
+      // it is hooked in another way. Cycle through the three ways.
+      if (installedIds().length && !selectionChanged()) {
+        list.push(btn('Hører du ikke EQ’en? Prøv en anden måde', '', () => {
+          const cur = info.devices.find((d) => d.installed)?.mode || 'lfx-gfx';
+          const next = ENGINE_MODES[(ENGINE_MODES.indexOf(cur) + 1) % ENGINE_MODES.length];
+          if (!confirm(`Sæt EQ-motoren på de markerede udgange på en anden måde (${ENGINE_MODE_LABEL[next]})?\n\nLyden afbrydes et øjeblik. Virker det heller ikke, så prøv igen – der er tre måder – og genstart pc’en til sidst.`)) return;
+          run({ action: 'set-devices', devices: [...chosen], mode: next }, 'Skifter måde…');
+        }));
+      }
       list.push(btn('Fjern EQ-motor', '', () => { if (confirm('Fjern GoXLR Studios EQ-motor fra alle udgange?')) run({ action: 'uninstall' }, 'Fjerner EQ-motoren…'); }));
     }
     if (info.external_config) list.push(importApoBtn);
@@ -401,7 +414,7 @@ export function outputEqView(ctx) {
   const renderDevices = () => {
     devList.replaceChildren(...info.devices.map((d) => {
       const cb = h('input', { type: 'checkbox', checked: chosen.has(d.id), onchange: () => { if (cb.checked) chosen.add(d.id); else chosen.delete(d.id); renderActions(); } });
-      return h('label', { class: 'engine-dev', title: d.name }, cb, h('span', {}, shortName(d.name)), d.installed ? h('span', { class: 'badge ok' }, 'aktiv') : null);
+      return h('label', { class: 'engine-dev', title: d.mode ? `${d.name} – ${ENGINE_MODE_LABEL[d.mode] || d.mode}` : d.name }, cb, h('span', {}, shortName(d.name)), d.installed ? h('span', { class: 'badge ok' }, 'aktiv') : null);
     }));
     if (!info.devices.length) devList.append(h('div', { class: 'hint' }, 'Fandt ingen udgange.'));
   };

@@ -222,3 +222,11 @@ a { color: var(--accent); }
 .app-item .app-name { min-width: 0; flex: 1 1 260px; }
 .app-item .app-name .hint { white-space: normal; max-width: none; }
 .steps { margin: 8px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+
+/* VU meters next to the faders */
+.fader-row { display: flex; align-items: stretch; gap: 8px; }
+.vu { position: relative; width: 10px; border-radius: 5px; background: #080b12; border: 1px solid var(--line); overflow: hidden; }
+.vu.none { opacity: .25; }
+.vu-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(to top, #22c55e 0, #22c55e 138px, #facc15 184px, #ef4444 230px); background-size: 100% 230px; background-position: bottom; }
+.vu::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(to top, transparent 0 6px, #080b12 6px 8px); pointer-events: none; }
+.vu-peak { position: absolute; left: 0; right: 0; height: 2px; background: #f8fafc; opacity: 0; }

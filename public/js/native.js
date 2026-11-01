@@ -65,7 +65,7 @@ export async function setOutputEqEngine(eq) {
 }
 
 // Browser demo of the EQ engine: starts as a separately installed Equalizer APO.
-const demoEngine = { kind: 'external', uses_our_config: false, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) };
+const demoEngine = { kind: 'external', mode: 'lfx-gfx', uses_our_config: false, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) };
 
 export async function engineInfo() {
   if (isNative()) return invoke('engine_info');
@@ -77,7 +77,10 @@ export async function engineInfo() {
     config_path: null,
     uses_our_config: demoEngine.uses_our_config,
     external_config: demoEngine.kind === 'external' ? 'C:\\Program Files\\EqualizerAPO\\config' : null,
-    devices: demoDevices.filter((d) => d.flow === 'render').map((d) => ({ id: d.id, guid: d.id, name: d.name, installed: demoEngine.kind !== 'none' && demoEngine.installed.has(d.id) })),
+    devices: demoDevices.filter((d) => d.flow === 'render').map((d) => {
+      const installed = demoEngine.kind !== 'none' && demoEngine.installed.has(d.id);
+      return { id: d.id, guid: d.id, name: d.name, installed, mode: installed ? demoEngine.mode : null };
+    }),
   };
 }
 
@@ -91,7 +94,9 @@ export async function engineTask(task) {
     demoEngine.kind = 'builtin'; demoEngine.uses_our_config = true; demoEngine.installed = new Set(task.devices);
     log.push('Motorfiler lagt i C:\\Program Files\\GoXLR Studio Engine', ...task.devices.map((d) => `EQ-motor sat på: ${demoDevices.find((x) => x.id === d)?.name || d}`), 'Windows-lydtjenesten er genstartet');
   } else if (task.action === 'set-devices') {
-    demoEngine.installed = new Set(task.devices); log.push('Udgange opdateret', 'Windows-lydtjenesten er genstartet');
+    demoEngine.installed = new Set(task.devices);
+    if (task.mode) demoEngine.mode = task.mode;
+    log.push(task.mode ? `EQ-motoren sat på igen (${task.mode})` : 'Udgange opdateret', 'Windows-lydtjenesten er genstartet');
   } else if (task.action === 'uninstall') {
     demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); log.push('EQ-motoren er fjernet');
   } else if (task.action === 'use-external') { demoEngine.uses_our_config = true; log.push('Equalizer APO læser nu GoXLR Studios EQ'); }
@@ -244,7 +249,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.3.1', installed: false, browser: true };
+  return { version: '0.3.2', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {
@@ -264,4 +269,12 @@ export async function sendKeys(accel) {
 export async function discordRunning() {
   if (isNative()) return invoke('discord_running');
   return true;
+}
+
+// Peak level (0–1) per audio endpoint, for the VU meters.
+export async function audioLevels() {
+  if (isNative()) return invoke('audio_levels');
+  const t = performance.now() / 1000;
+  const wave = (base, speed) => Math.max(0, base * (0.75 + 0.25 * Math.sin(t * speed)) * (0.85 + Math.random() * 0.3));
+  return { 'out-goxlr-music': wave(0.5, 2.1), 'out-goxlr-system': wave(0.2, 3.3), 'out-goxlr-chat': wave(0.12, 4.7), 'out-goxlr-game': wave(0.3, 1.7) };
 }

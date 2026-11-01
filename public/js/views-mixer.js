@@ -1,4 +1,4 @@
-import { FADER_LEDS, faderLeds } from './extras.js';
+import { FADER_LEDS, faderLeds, peakToMeter, dbToMeter, channelEndpoint, vuStep } from './extras.js';
 import { h, slider, segmented, selectBox, toggle, throttle, toast } from './ui.js';
 import { CHANNELS, INPUTS, OUTPUTS } from './demo.js';
 import { listAudioDevices, setDefaultDevice } from './native.js';
@@ -12,6 +12,14 @@ export const OUTPUT_LABEL = { Headphones: 'Hovedtelefoner', BroadcastMix: 'Strea
 const MUTE_FN_LABEL = { All: 'Alt', ToStream: 'Stream', ToVoiceChat: 'Voice chat', ToPhones: 'Hovedtelefoner', ToLineOut: 'Line Out' };
 
 export const pct = (v) => `${Math.round((v / 255) * 100)} %`;
+
+function vuMeter(list, fader) {
+  const fill = h('div', { class: 'vu-fill' });
+  const peak = h('div', { class: 'vu-peak' });
+  const el = h('div', { class: 'vu', title: 'Lydniveau' }, fill, peak);
+  list.push({ fader, el, fill, peak, state: { level: 0, peak: 0, peakAt: 0 } });
+  return el;
+}
 
 function verticalFader(binder, { get, set, colours, style }) {
   // 15 LEDs on each side of the slot, coloured exactly like the hardware (see faderLeds).
@@ -77,6 +85,29 @@ export function mixerView(ctx) {
   root.append(quickSwitchCard(ctx));
 
   const strips = h('div', { class: 'strips' });
+  // VU meters: the mic level comes from the GoXLR, the other channels from Windows' meter on the
+  // GoXLR output that feeds them (System, Game, Chat, Music, Sample).
+  let devices = [];
+  listAudioDevices().then((d) => { devices = d; }).catch(() => {});
+  const vus = [];
+  let micDb = null;
+  ctx.onLevels = (levels) => {
+    const now = performance.now();
+    for (const v of vus) {
+      const ch = m()?.fader_status[v.fader].channel;
+      let target = null;
+      if (ch === 'Mic') target = dbToMeter(micDb);
+      else {
+        const id = channelEndpoint(ch, devices);
+        if (id && levels && id in levels) target = peakToMeter(levels[id]);
+      }
+      v.el.classList.toggle('none', target == null);
+      v.state = vuStep(v.state, target ?? 0, now);
+      v.fill.style.height = `${(v.state.level * 100).toFixed(1)}%`;
+      v.peak.style.bottom = `${(v.state.peak * 100).toFixed(1)}%`;
+      v.peak.style.opacity = v.state.peak > 0.02 ? 1 : 0;
+    }
+  };
   for (const f of ['A', 'B', 'C', 'D']) {
     const fs = () => m().fader_status[f];
     const pctEl = h('div', { class: 'pct' });
@@ -90,12 +121,14 @@ export function mixerView(ctx) {
     const strip = h('div', { class: 'strip' },
       scribble,
       selectBox(binder, { options: CHANNELS.map((c) => [c, CHANNEL_LABEL[c]]), get: () => fs().channel, set: (v) => conn.command('SetFader', f, v) }),
-      verticalFader(binder, {
-        get: () => m().levels.volumes[fs().channel],
-        set: (v) => conn.command('SetVolume', fs().channel, v),
-        colours: () => m().lighting?.faders?.[f]?.colours,
-        style: () => m().lighting?.faders?.[f]?.style,
-      }),
+      h('div', { class: 'fader-row' },
+        verticalFader(binder, {
+          get: () => m().levels.volumes[fs().channel],
+          set: (v) => conn.command('SetVolume', fs().channel, v),
+          colours: () => m().lighting?.faders?.[f]?.colours,
+          style: () => m().lighting?.faders?.[f]?.style,
+        }),
+        vuMeter(vus, f)),
       pctEl,
       muteBtn,
       selectBox(binder, { options: Object.entries(MUTE_FN_LABEL), get: () => fs().mute_type, set: (v) => conn.command('SetFaderMuteFunction', f, v) }),
@@ -123,6 +156,7 @@ export function mixerView(ctx) {
   const meterBar = h('div');
   const meterVal = h('span', { class: 'val' }, '—');
   ctx.onMicLevel = (db) => {
+    micDb = db;
     const p = db == null ? 0 : Math.max(0, (db + 72.2) / 72.2) * 100;
     meterBar.style.width = `${p}%`;
     meterVal.textContent = db == null ? '—' : `${db.toFixed(0)} dB`;

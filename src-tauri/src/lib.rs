@@ -6,6 +6,7 @@ mod daemon;
 mod daemon_host;
 mod engine;
 mod keys;
+mod meters;
 mod migrate;
 mod osd;
 mod store;
@@ -276,6 +277,12 @@ async fn run_uninstaller(key: String) -> Result<String, String> {
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     migrate::open_path(path)
+}
+
+/// Peak levels (0–1) per audio endpoint id, for the VU meters.
+#[tauri::command]
+fn audio_levels() -> HashMap<String, f32> {
+    meters::levels()
 }
 
 /// Presses a key combination (Discord's "Toggle Mute" keybind).
@@ -555,6 +562,7 @@ pub fn run() {
             open_path,
             open_url,
             send_keys,
+            audio_levels,
             discord_running,
             show_osd,
             start_daemon,

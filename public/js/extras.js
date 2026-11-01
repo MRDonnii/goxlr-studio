@@ -262,3 +262,28 @@ export function micMutedForChat(mixer, opts = {}) {
   const fader = opts.fader !== false && Object.values(mixer.fader_status || {}).some((f) => f.channel === 'Mic' && mutedFor(f.mute_state, f.mute_type));
   return cough || fader;
 }
+
+// ---------- VU meters ----------
+// Peak (0–1, linear) or dB → 0–1 on a −60…0 dB scale.
+export function peakToMeter(peak) {
+  if (!peak || peak <= 0) return 0;
+  return Math.min(1, Math.max(0, (20 * Math.log10(peak) + 60) / 60));
+}
+export const dbToMeter = (db) => (db == null ? 0 : Math.min(1, Math.max(0, (db + 60) / 60)));
+
+// The GoXLR's Windows output for a fader channel ("Music (TC-Helicon GoXLR)", "2- System (TC-Helicon GoXLR Mini)" …).
+const CHANNEL_ENDPOINT = { System: 'System', Game: 'Game', Chat: 'Chat', Music: 'Music', Sample: 'Sample' };
+export function channelEndpoint(channel, devices) {
+  const n = CHANNEL_ENDPOINT[channel];
+  if (!n) return null;
+  const re = new RegExp(`^(\\d+\\s*-\\s*)?${n}\\b`, 'i');
+  return devices.find((d) => d.flow === 'render' && re.test(d.name) && /goxlr|tc-helicon/i.test(d.name))?.id || null;
+}
+
+// VU ballistics: instant attack, smooth release, peak hold.
+export function vuStep(state, target, now, { release = 0.86, hold = 1200 } = {}) {
+  const level = target >= state.level ? target : Math.max(target, state.level * release);
+  let { peak, peakAt } = state;
+  if (level >= peak || now - peakAt > hold) { peak = level; peakAt = now; }
+  return { level, peak, peakAt };
+}

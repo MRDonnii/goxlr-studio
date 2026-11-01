@@ -151,3 +151,28 @@ test('mic mute for Discord: cough button and Mic fader, only when chat is affect
   assert.equal(x.micMutedForChat(m('Unmuted', 'All', 'MutedToX', 'ToVoiceChat')), true);
   assert.equal(x.micMutedForChat(m('Unmuted', 'All', 'MutedToX', 'All'), { fader: false }), false);
 });
+
+test('VU meter scale, channel → GoXLR output and ballistics', () => {
+  assert.equal(x.peakToMeter(0), 0);
+  assert.equal(x.peakToMeter(1), 1);
+  assert.ok(Math.abs(x.peakToMeter(0.1) - 2 / 3) < 1e-9); // −20 dB
+  assert.equal(x.dbToMeter(-90), 0);
+  const devs = [
+    { id: 'chatmic', name: 'Chat Mic (TC-Helicon GoXLR)', flow: 'capture' },
+    { id: 'chat', name: 'Chat (TC-Helicon GoXLR)', flow: 'render' },
+    { id: 'sys', name: '2- System (TC-Helicon GoXLR Mini)', flow: 'render' },
+    { id: 'realtek', name: 'Music (Realtek Audio)', flow: 'render' },
+  ];
+  assert.equal(x.channelEndpoint('Chat', devs), 'chat');
+  assert.equal(x.channelEndpoint('System', devs), 'sys');
+  assert.equal(x.channelEndpoint('Music', devs), null, 'only GoXLR outputs');
+  assert.equal(x.channelEndpoint('Mic', devs), null);
+  let s = { level: 0, peak: 0, peakAt: 0 };
+  s = x.vuStep(s, 0.8, 0);
+  assert.equal(s.level, 0.8);
+  s = x.vuStep(s, 0, 100);
+  assert.ok(s.level < 0.8 && s.level > 0.6);
+  assert.equal(s.peak, 0.8);
+  s = x.vuStep(s, 0, 2000);
+  assert.ok(s.peak < 0.8, 'peak falls after the hold time');
+});
