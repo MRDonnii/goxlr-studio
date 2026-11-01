@@ -45,6 +45,7 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 - Presets, including your old Peace/Equalizer APO presets, imported with one click
 - AutoEQ search that finds the correction for your exact headphones
 - Crossfeed, loudness, mono and balance for headphones
+- **Sounds wrong?** Pick e.g. "harsh" or "muddy", and the EQ is adjusted one small step. Export and import all presets
 - EQ that follows the GoXLR profile, e.g. one preset for "Headset" and another for "Speakers"
 - Listening test in the app, so you can hear the difference with and without EQ
 
@@ -129,7 +130,9 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 
 - **Discord:** the GoXLR's mute button also mutes (and can deafen) Discord, with the red icon
 - **Mic safety:** a warning when you talk while muted, and the mic is muted when you lock the PC (Win+L)
-- Auto-ducking that turns music and games down while you talk
+- Auto-ducking that turns music and games down while you talk – or while your friends talk in Discord
+- **Hearing protection:** a reminder after a long time of loud sound and an optional ceiling for the headphones
+- **Profile history:** earlier versions of your GoXLR and mic profiles can be restored
 - Start with Windows and close to the tray icon
 - Automatic updates
 - **Home Assistant** via MQTT: GoXLR Studio shows up as a device with mic mute, "Mic open" (e.g. for an ON AIR lamp), GoXLR profile, EQ preset, scene and volumes

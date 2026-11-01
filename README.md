@@ -43,6 +43,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
 - Crossfeed, loudness, mono og balance til hovedtelefoner
+- **Lyder det forkert?** Vælg fx "skarp" eller "mudret", og EQ'en justeres et lille skridt. Eksport og import af alle presets
 - EQ der skifter med GoXLR-profilen, fx ét preset til "Headset" og et andet til "Speakers"
 - Lyttetest i appen, så du kan høre forskellen med og uden EQ
 
@@ -122,7 +123,9 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 ![Indstillinger](docs/screenshots/indstillinger.png)
 
 - **Discord:** GoXLR'ens mute-knap muter også Discord, med det røde ikon
-- Auto-ducking, der skruer ned for musik og spil, mens du taler
+- Auto-ducking, der skruer ned for musik og spil, mens du taler – eller mens vennerne taler i Discord
+- **Høreværn:** påmindelse efter lang tid med høj lyd og et valgfrit loft for hovedtelefonerne
+- **Profilhistorik:** tidligere versioner af dine GoXLR- og mikrofonprofiler kan gendannes
 - Start med Windows og luk til bakke-ikonet
 - Automatiske opdateringer
 - **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
