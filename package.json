@@ -1,0 +1,11 @@
+{
+  "name": "goxlr-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Modern control surface for the GoXLR (via GoXLR Utility) with a built-in parametric output EQ",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}
