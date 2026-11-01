@@ -42,10 +42,11 @@ export function loudnessBands(amount) {
   ];
 }
 
-// The payload sent to the Rust engine: the active slot plus crossfeed/loudness.
-export function enginePayload(eq, extras = {}, target = null) {
+// The payload sent to the Rust engine: the active slot plus crossfeed/loudness. `offset` is added to
+// the preamp (klip-beskyttelse and the loudness-matched A/B, see eqchain.js).
+export function enginePayload(eq, extras = {}, target = null, offset = 0) {
   const loud = extras.loudness?.enabled ? loudnessBands(extras.loudness.amount) : [];
-  const preamp = eq.preamp - (loud.length ? extras.loudness.amount : 0);
+  const preamp = (eq.preamp || 0) - (loud.length ? extras.loudness.amount : 0) + (offset || 0);
   return {
     ...eq,
     preamp,

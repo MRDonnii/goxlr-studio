@@ -192,6 +192,21 @@ export class EqGraph {
     g.stroke();
     g.shadowBlur = 0;
 
+    // The whole chain as played (Loudness, Crossfeed, klip-beskyttelse), dashed.
+    const chain = this.opts.chainCurve?.(this.freqs);
+    if (chain) {
+      g.beginPath();
+      chain.forEach((db, k) => {
+        const x = this.xOf(this.freqs[k]), y = this.yOf(Math.min(Math.max(db, minDb - 5), maxDb + 5));
+        k ? g.lineTo(x, y) : g.moveTo(x, y);
+      });
+      g.setLineDash([5, 4]);
+      g.strokeStyle = 'rgba(230,235,245,.7)';
+      g.lineWidth = 1.5;
+      g.stroke();
+      g.setLineDash([]);
+    }
+
     pts.forEach((pt, i) => {
       const x = this.xOf(pt.freq), y = this.yOf(pt.dot ?? pt.gain);
       const active = i === this.selected || i === this.hover;

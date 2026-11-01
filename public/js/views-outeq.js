@@ -1,6 +1,7 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
-import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, suggestedPreamp, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
+import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
+import { chainResponse, clipGuard, safePreamp, headroomInfo, bandWarnings } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative } from './native.js';
 import { shortName } from './views-mixer.js';
 import { applyEqPreset, toggleEq } from './actions.js';
@@ -203,6 +204,8 @@ export function outputEqView(ctx) {
   const redo = () => { if (future.length) { const s = future.pop(); history.push(s); restore(s); } };
 
   const bar = presetBar(ctx);
+  const fmt1 = (v) => String(Math.round(Math.abs(v) * 10) / 10).replace('.', ',');
+  const chainLegend = h('div', { class: 'hint chain-legend' }, h('span', { class: 'chain-dash' }), 'Stiplet: det der faktisk spilles – med Loudness, Crossfeed og klip-beskyttelse.');
   const canvas = h('canvas', { class: 'eq-canvas', style: { height: '360px' } });
   const graph = new EqGraph(canvas, {
     minDb: -18, maxDb: 18,
@@ -211,6 +214,8 @@ export function outputEqView(ctx) {
       color: BAND_COLORS[i % BAND_COLORS.length], label: String(i + 1), fixedGain: !FILTER_TYPES[b.type].gain,
     })),
     curve: (freqs) => (eq().enabled ? totalResponse(eq(), freqs) : freqs.map(() => 0)),
+    // What is really played (Loudness, Crossfeed, klip-beskyttelse) – only when it differs.
+    chainCurve: (freqs) => (chainDiffers() ? chainResponse(eq(), state.extras, freqs, guardDb()) : null),
     bandCurve: (i, freqs) => (eq().bands[i] ? bandResponse(eq().bands[i], freqs) : null),
     onSelect: (i) => { selected = i; renderBands(); },
     onDrag: (i, { freq, gain }, e) => {
@@ -237,27 +242,37 @@ export function outputEqView(ctx) {
     bandsBody.replaceChildren(...eq().bands.map((b, i) => {
       const num = (key, min, max, step, disabled) => {
         const inp = h('input', { type: 'number', min, max, step, value: b[key], disabled });
-        inp.addEventListener('change', () => { b[key] = Math.min(Math.max(Number(inp.value), min), max); changed(); });
+        inp.addEventListener('change', () => { b[key] = Math.min(Math.max(Number(inp.value), min), max); changed(); warn(); });
         inp.addEventListener('focus', () => { selected = i; redraw(); });
         return inp;
       };
       const type = h('select', { onchange: () => { b.type = type.value; changed(); renderBands(); } },
         Object.entries(FILTER_TYPES).map(([k, v]) => h('option', { value: k, selected: k === b.type }, v.label)));
-      const en = h('input', { type: 'checkbox', checked: b.enabled, onchange: () => { b.enabled = en.checked; changed(); } });
+      const en = h('input', { type: 'checkbox', checked: b.enabled, onchange: () => { b.enabled = en.checked; changed(); warn(); } });
+      // Big boosts and very narrow boosts get a ⚠ with the reason (Tillæg 2).
+      const warnIcon = h('span', { class: 'band-warn', 'data-testid': 'band-warn' }, '⚠');
+      const warn = () => { const w = bandWarnings(b); warnIcon.style.display = w.length ? '' : 'none'; warnIcon.title = w.join('\n'); };
+      warn();
       return h('tr', { class: i === selected ? 'sel' : '', onclick: () => { if (selected !== i) { selected = i; redraw(); bandsBody.querySelectorAll('tr').forEach((tr, k) => tr.classList.toggle('sel', k === i)); } } },
         h('td', {}, h('span', { class: 'band-dot', style: { background: BAND_COLORS[i % BAND_COLORS.length] } })),
         h('td', {}, h('label', { class: 'switch' }, en, h('span'))),
         h('td', {}, type),
         h('td', {}, num('freq', 20, 20000, 1), ' Hz'),
         h('td', {}, num('gain', -24, 24, 0.1, !FILTER_TYPES[b.type].gain), ' dB'),
-        h('td', {}, num('q', 0.1, 20, 0.01)),
+        h('td', {}, num('q', 0.1, 20, 0.01), warnIcon),
         h('td', {}, h('button', { class: 'btn sm', title: 'Slet bånd', onclick: (e) => { e.stopPropagation(); eq().bands.splice(i, 1); selected = Math.max(0, Math.min(selected, eq().bands.length - 1)); changed(); renderBands(); } }, '✕')));
     }));
   };
 
   const preampIn = h('input', { type: 'number', min: -30, max: 12, step: 0.1 });
   preampIn.addEventListener('change', () => { eq().preamp = Number(preampIn.value); changed(); });
-  const clipWarn = h('span', { class: 'badge warn' }, 'Kan klippe');
+  // Headroom of the whole chain (EQ + Loudness + Crossfeed); "Klip-beskyttelse" lowers the preamp
+  // in the engine when the chain would go above 0 dB, without changing the preset.
+  const headBadge = h('span', { class: 'badge', 'data-testid': 'eq-headroom' });
+  const guardOn = () => state.clipGuard !== false;
+  const guardDb = () => (guardOn() ? clipGuard(eq(), state.extras) : 0);
+  const chainDiffers = () => eq().enabled && (!!state.extras?.loudness?.enabled || !!state.extras?.crossfeed?.enabled || guardDb() !== 0);
+  const guardBox = h('input', { type: 'checkbox', 'data-testid': 'eq-clip-guard', onchange: () => { state.clipGuard = guardBox.checked; persist(); apply(); redraw(); } });
   const abSeg = h('div', { class: 'seg' });
   const abBtns = ['A', 'B'].map((k) => {
     const b = h('button', { onclick: () => { state.active = k; history = [JSON.stringify(eq())]; future = []; selected = 0; persist(); apply(); renderBands(); redraw(); } }, k);
@@ -267,9 +282,15 @@ export function outputEqView(ctx) {
   const bypass = h('input', { type: 'checkbox', onchange: () => { eq().enabled = bypass.checked; changed(); ctx.onStateChanged?.('eq-local'); } });
   const syncTop = () => {
     if (document.activeElement !== preampIn) preampIn.value = eq().preamp;
-    const peak = Math.max(...totalResponse(eq(), graph.freqs));
-    clipWarn.style.display = eq().enabled && peak > 0.05 ? '' : 'none';
-    clipWarn.textContent = `Kan klippe (+${peak.toFixed(1)} dB)`;
+    const head = headroomInfo(eq(), state.extras, guardOn());
+    headBadge.textContent = head.text;
+    headBadge.className = `badge ${head.kind === 'ok' ? 'ok' : head.kind === 'clip' ? 'warn' : head.kind === 'guard' ? 'info' : ''}`;
+    headBadge.title = head.kind === 'guard'
+      ? `EQ’en ville gå ${fmt1(head.peak)} dB over 0 dB og klippe. Motoren sænker derfor lyden ${fmt1(-head.guard)} dB – dit preset er uændret. Tryk "Auto" for at sætte preamp selv.`
+      : head.kind === 'clip' ? 'Lyden kan forvrænge (klippe) ved høj lydstyrke. Tryk "Auto", eller slå klip-beskyttelse til.'
+        : head.kind === 'ok' ? 'Afstanden fra EQ’ens højeste punkt (inkl. Loudness og Crossfeed) til 0 dB. Over 0 dB kan lyden klippe.' : '';
+    guardBox.checked = guardOn();
+    chainLegend.style.display = chainDiffers() ? '' : 'none';
     bypass.checked = eq().enabled;
     // Keep the "modified" dot on the active preset chip in sync while editing.
     const active = bar.querySelector('.chip.on:not(.power)');
@@ -286,8 +307,9 @@ export function outputEqView(ctx) {
     h('label', { class: 'switch', title: 'EQ til/fra (bypass)' }, bypass, h('span')),
     h('span', {}, 'EQ aktiv'),
     h('span', { class: 'lbl', style: { minWidth: 0, marginLeft: '12px' } }, 'Preamp'), preampIn, h('span', {}, 'dB'),
-    h('button', { class: 'btn sm', onclick: () => { eq().preamp = suggestedPreamp(eq()); changed(); } }, 'Auto'),
-    clipWarn,
+    h('button', { class: 'btn sm', 'data-testid': 'eq-auto-preamp', title: 'Sæt preamp, så det højeste punkt af hele kæden (inkl. Loudness og Crossfeed) lige rammer 0 dB', onclick: () => { eq().preamp = safePreamp(eq(), state.extras); changed(); } }, 'Auto'),
+    headBadge,
+    h('label', { class: 'check-inline', title: 'Sænker automatisk preamp, så EQ’en – også med Loudness og Crossfeed – aldrig klipper. Dit preset ændres ikke.' }, guardBox, h('span', {}, 'Klip-beskyttelse')),
     h('div', { class: 'spacer' }),
     h('span', { class: 'lbl', style: { minWidth: 0 } }, 'Sammenlign'), abSeg,
     h('button', { class: 'btn sm', onclick: () => { state.slots[state.active === 'A' ? 'B' : 'A'] = structuredClone(eq()); persist(); toast(`Kopieret til ${state.active === 'A' ? 'B' : 'A'}`, 'info'); } }, 'Kopiér til den anden'),
@@ -521,7 +543,7 @@ export function outputEqView(ctx) {
     soundBox,
     h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'EQ gælder for'), targetSel), targetWarn, targetHint);
 
-  const preview = makePreview(eq);
+  const preview = makePreview(() => (ctx.playbackEq ? ctx.playbackEq() : eq()));
   const previewCard = h('div', { class: 'card' }, h('h2', {}, 'Lyttetest'),
     h('div', { class: 'hint' }, 'Afspil lyd gennem EQ’en her i appen og skift mellem med/uden for at høre forskellen.'),
     preview.controls);
@@ -546,9 +568,10 @@ export function outputEqView(ctx) {
     h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar,
       h('div', { class: 'eq-wrap', style: { marginTop: '12px' } }, canvas),
       h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
+      chainLegend,
       h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody)),
     h('div', { class: 'grid cols-3' }, presetsCard, engineCard, previewCard),
-    h('div', { class: 'grid cols-3' }, profileLinksCard(ctx), extrasCard(ctx, apply), autoEqCard(ctx)));
+    h('div', { class: 'grid cols-3' }, profileLinksCard(ctx), extrasCard(ctx, () => { apply(); redraw(); }), autoEqCard(ctx)));
 }
 
 function makePreview(getEq) {

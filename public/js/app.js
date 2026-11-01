@@ -11,6 +11,7 @@ import { soundsView } from './views-sounds.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
+import { playbackOffset } from './eqchain.js';
 import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
@@ -118,6 +119,7 @@ const ctx = {
     if (kind === 'eq' && current === 'outeq') mount();
   },
   applyOutputEq: () => applyOutputEq(),
+  playbackEq: () => playbackEq(),
 };
 
 // The EQ target is stored by id and name, so it survives GoXLR driver updates that change ids.
@@ -130,7 +132,14 @@ async function applyOutputEq() {
     if (r && r !== target) { st.target = target = r; storeSet('output-eq', st); }
     if (r && !st.target_name) { st.target_name = deviceName(devs, r); storeSet('output-eq', st); }
   }
-  return setOutputEqEngine(enginePayload(st.slots[st.active], st.extras, target));
+  return setOutputEqEngine(playbackEq(target));
+}
+
+// What the engine plays: the active slot with Loudness/Crossfeed and the preamp offset from the
+// clip guard (eqchain.js). The EQ page's Lyttetest plays the same.
+function playbackEq(target = null) {
+  const st = ctx.outputEq;
+  return enginePayload(st.slots[st.active], st.extras, target, playbackOffset(st));
 }
 
 // ---------- updates ----------

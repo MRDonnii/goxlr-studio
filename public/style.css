@@ -297,3 +297,11 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .sound-name { font-weight: 600; overflow-wrap: anywhere; }
 .sound-key { font: 11px ui-monospace, Consolas, monospace; opacity: .7; }
 .sound-tools { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+
+/* EQ: headroom, klip-beskyttelse, chain curve legend, band warnings */
+.badge.info { background: rgba(56,189,248,.15); color: #7dd3fc; }
+.check-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.check-inline input { margin: 0; }
+.band-warn { color: var(--warn); margin-left: 6px; cursor: help; }
+.chain-legend { display: flex; align-items: center; gap: 8px; }
+.chain-dash { display: inline-block; width: 22px; border-top: 2px dashed rgba(230,235,245,.7); }
