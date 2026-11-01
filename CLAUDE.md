@@ -4,7 +4,7 @@ Selvstændig Windows-app (Tauri 2: Rust + vanilla JS) der erstatter GoXLR Utilit
 
 ## Arkitektur
 - `public/` – UI (ES-moduler, ingen build). `js/api.js` taler med GoXLR-motoren (via Tauri-kommandoen `daemon_request` eller WebSocket i browser) og falder tilbage til `js/demo.js` når der ingen motor er.
-- `src-tauri/src/daemon_host.rs` – **indbygget GoXLR-motor**: GoXLR Utility's `goxlr-daemon.exe` (v1.2.4, MIT) bygges i CI og indlejres (build.rs, env `GOXLR_DAEMON_EXE`); pakkes ud til `%LOCALAPPDATA%\GoXLR Studio\engine\` og startes skjult (`--disable-tray true`) hvis ingen daemon svarer efter 2,5 s; stoppes ved Afslut. Samme profil-/indstillingsmapper som GoXLR Utility (`%APPDATA%\GoXLR-on-Linux\GoXLR-Utility`).
+- `src-tauri/src/daemon_host.rs` – **indbygget GoXLR-motor**: GoXLR Utility's `goxlr-daemon.exe` (v1.2.4, MIT) bygges i CI og indlejres (build.rs, env `GOXLR_DAEMON_EXE`); pakkes ud til `%LOCALAPPDATA%\GoXLR Studio\engine\` og startes skjult (`--disable-tray true`) 2,5 s efter appstart – kører en installeret GoXLR Utility, overtages den først (`take_over`); stoppes ved Afslut. Samme profil-/indstillingsmapper som GoXLR Utility (`%APPDATA%\GoXLR-on-Linux\GoXLR-Utility`).
 - `src-tauri/src/daemon.rs` – WebSocket-klient til motoren (`ws://127.0.0.1:14564/api/websocket`), JSON-patches sendes som `daemon-patch`-events.
 - `src-tauri/src/engine.rs` – **indbygget EQ-motor**: Equalizer APO 1.4.2's motorfiler (GPL, uændrede, hentet + SHA-256-tjekket i CI, indlejret via env `ENGINE_DIR`) installeres i `C:\Program Files\GoXLR Studio Engine` og registreres (regsvr32 + port af Equalizer APO's `DeviceAPOInfo` install/uninstall: FxProperties, `Child APOs`, ejerskab). `ConfigPath` peger på `%ProgramData%\GoXLR Studio\engine` (overvåges af motoren → ændringer høres straks). Alt med admin kører i en elevated kopi af exe'en: `--engine-task <task.json> <result.json>` (`Task`: install/set-devices/uninstall/use-external/restore-external). En separat Equalizer APO tages backup af (`%ProgramData%\GoXLR Studio\apo-backup-*`) og afinstalleres stille før installation.
 - `src-tauri/src/apo.rs` – renderer EQ til APO-syntaks og skriver `config.txt` i motorens mappe; finder gamle Peace/APO-presets (separat installation eller backups).
@@ -30,8 +30,9 @@ Selvstændig Windows-app (Tauri 2: Rust + vanilla JS) der erstatter GoXLR Utilit
 - Firmware til GoXLR'en røres ikke (lukket, risiko for brick).
 
 ## Status og næste skridt
-Version 0.3.2 – selvstændig. Færdigt:
+Version 0.3.3 – selvstændig. Færdigt:
 - Indbygget GoXLR-motor og EQ-motor (se Arkitektur), siden **Overflytning** (backup, AHK→genveje, Peace-presets, TC-Helicon-profiler, "husk lyd pr. app", afinstallér gamle programmer; driveren markeres BEHOLD), EQ-motor-kort med valg af udgange.
+- 0.3.3: **ét program**: ved start overtager GoXLR Studio fra en kørende GoXLR Utility (`daemon_host::take_over`: stopper goxlr-daemon/launcher/utility-ui uden for vores sti, flytter `GoXLR Utility.lnk` fra Startup til backup, starter den indbyggede motor; starter GoXLR Utility igen hvis vores fejler). Pref `builtinEngine` (standard til), events `engine-takeover`/`engine-takeover-failed`, kommando `daemon_takeover`. NSIS-hook `src-tauri/windows/hooks.nsh` kører `--engine-uninstall` ved afinstallation (ikke ved `/UPDATE`): fjerner den udpakkede GoXLR-motor og EQ-motoren. Auto-opdatering kører installer med `/S /UPDATE`.
 - 0.3.2: VU-metre ved hver fader (`meters.rs`: baggrundstråd læser Windows' `IAudioMeterInformation` for alle aktive endpoints ~30 Hz mens UI'et spørger; `audio_levels`; mic fra daemonens `GetMicLevel`; kanal→GoXLR-udgang via `channelEndpoint`); EQ-motor kan sættes på "en anden måde" (`mode`: lfx-gfx/sfx-efx/sfx-mfx = Equalizer APO's fejlfindingsmuligheder) hvis EQ ikke høres; Lyd pr. app: "Tilføj regel" for apps der ikke kører, "Husk" vælger processen der har en enhed (Discord).
 - 0.3.1: mixerens faders tegnes som hardwarens 15 LED'er (`faderLeds`: `colour_one` = over knappen, `colour_two` = under; Gradient blender under knappen), demo matcher Mini-layoutet; Discord-mute-synk (`discord.js`: når GoXLR-mic-mute mod voice chat skifter, trykkes Discords "Toggle Mute"-genvej via `send_keys`/SendInput, standard Ctrl+Shift+Alt+D, kun hvis Discord kører); dansk README med download-link.
 - Fra 0.2: genveje, lyd pr. app, bakkemenu, hurtig-skift, preset-chips, AutoEQ, EQ følger profil, crossfeed/loudness, OSD, API, backup, Diagnose, auto-opdatering.
@@ -39,5 +40,4 @@ Version 0.3.2 – selvstændig. Færdigt:
 
 Næste skridt:
 - Test hos brugeren på Windows: "Erstat med indbygget motor" (afinstallerer Equalizer APO efter backup), at EQ høres på GoXLR-udgangene, at den indbyggede GoXLR-motor overtager efter afinstallation af GoXLR Utility, AHK-import, OSD i spil.
-- GoXLR Studios egen afinstallation fjerner ikke EQ-motoren endnu (brug "Fjern EQ-motor" først). `goxlr-studio.exe --engine-uninstall` findes; mangler NSIS-hook der springer over ved opdatering.
 - Mulige forbedringer: niveaumåler i bakken, MQTT, signerede opdateringer.

@@ -500,6 +500,12 @@ async function registerNativeHooks() {
     const b = ctx.hotkeys.find((x) => x.id === ev.payload);
     if (b?.action) ctx.runAction(b.action);
   });
+  // GoXLR Studio switched off an installed GoXLR Utility and started its own engine.
+  await listen('engine-takeover', (ev) => {
+    const t = ev.payload || {};
+    if (t.stopped?.length) toast('GoXLR Studio bruger nu sin egen GoXLR-motor – GoXLR Utility er koblet fra', 'info');
+  });
+  await listen('engine-takeover-failed', (ev) => toast(`Kunne ikke starte den indbyggede GoXLR-motor: ${ev.payload}`));
   // Tray ids are action ids: profile:…, eq-preset:…, eq-toggle, scene:…, mute-mic.
   await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });
   await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });

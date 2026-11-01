@@ -1,7 +1,7 @@
 import { h, toast } from './ui.js';
 import {
   isNative, migrateScan, migrateBackup, migrateCopyProfiles, migrateDisableStartup, migrateStopAhk,
-  installedApps, runUninstaller, openPath, engineInfo, daemonInfo, appSessions, listAudioDevices, storeGet,
+  installedApps, runUninstaller, openPath, engineInfo, daemonInfo, daemonTakeover, appSessions, listAudioDevices, storeGet,
 } from './native.js';
 import { parseAhk, deviceName } from './extras.js';
 import { importPeacePresets } from './views-outeq.js';
@@ -128,14 +128,19 @@ export function migrateView(ctx) {
         toast(`Kopierede ${n1 + n2} profiler (eksisterende blev ikke overskrevet)`, 'info');
       } catch (e) { toast(String(e)); }
     } }, `Kopiér ${tc.profiles.length + tc.mic_profiles.length} TC-Helicon-profiler`) : null;
-    const state = daemon.started_by_us ? [true, 'GoXLR Studios indbyggede GoXLR-motor kører.']
-      : daemon.process_running ? [null, 'GoXLR Utility’s motor kører lige nu. Når du afinstallerer GoXLR Utility, starter GoXLR Studio sin egen motor automatisk.']
+    const state = daemon.foreign?.length ? [false, 'GoXLR Utility styrer stadig GoXLR’en. Lad GoXLR Studio overtage – GoXLR Utility stoppes og starter ikke længere med Windows.']
+      : daemon.started_by_us ? [true, 'GoXLR Studios indbyggede GoXLR-motor kører. GoXLR Utility kan afinstalleres.']
         : [false, 'Ingen GoXLR-motor kører.'];
+    const takeBtn = daemon.bundled && daemon.foreign?.length ? h('button', { class: 'btn sm primary', onclick: async () => {
+      takeBtn.disabled = true;
+      try { const t = await daemonTakeover(); toast(`${t.started} – GoXLR Utility er koblet fra`, 'info'); } catch (e) { toast(String(e)); }
+      reload();
+    } }, 'Lad GoXLR Studio overtage nu') : null;
     return h('div', { class: 'card' }, h('h2', {}, '4 · GoXLR-motor og profiler'),
       check(state[0], 'GoXLR-motor', daemon.bundled ? state[1] : 'Denne version har ikke GoXLR-motoren indbygget – behold GoXLR Utility.'),
       check(null, 'Profiler', `Dine profiler (${(ctx.conn.status?.files?.profiles || []).join(', ') || '–'}) ligger i GoXLR-motorens mappe og bliver ved med at virke.`),
       tc.dir ? check(null, 'TC-Helicons app', `${tc.profiles.length} profiler og ${tc.mic_profiles.length} mikrofonprofiler i ${tc.dir}`) : null,
-      tcBtn ? h('div', { class: 'row', style: { marginTop: '10px' } }, tcBtn) : null);
+      h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap' } }, takeBtn, tcBtn));
   };
 
   // ---------- 5. per-app audio ----------
@@ -166,7 +171,7 @@ export function migrateView(ctx) {
 
   // ---------- 6. uninstall ----------
   const uninstallCard = () => {
-    const ready = { 'GoXLR Utility': daemon.bundled, AutoHotkey: !!done.hotkeys || !scan.ahk.length };
+    const ready = { 'GoXLR Utility': daemon.bundled && !daemon.foreign?.length, AutoHotkey: !!done.hotkeys || !scan.ahk.length };
     return h('div', { class: 'card' }, h('h2', {}, '6 · Afinstallér de gamle programmer'),
       h('div', { class: 'hint' }, 'Hvert program åbner sin egen afinstallation, så du bekræfter selv. Tag backup først (trin 1).'),
       h('div', { class: 'list', style: { marginTop: '10px' } }, apps.length ? apps.map((a) => {
@@ -197,7 +202,7 @@ export function migrateView(ctx) {
         check(!!done.hotkeys || !scan.ahk.length, 'Genveje flyttet'),
         check(!!done.presets || !scan.apo.config_dir, 'Peace-presets importeret'),
         check(engine.kind === 'builtin', 'Indbygget EQ-motor'),
-        check(daemon.started_by_us || (!daemon.process_running && daemon.bundled), 'Indbygget GoXLR-motor'),
+        check(!daemon.foreign?.length && (daemon.started_by_us || daemon.bundled), 'Indbygget GoXLR-motor'),
         check(!leftovers.length, leftovers.length ? `${leftovers.length} gamle programmer tilbage` : 'Gamle programmer fjernet')));
   };
 

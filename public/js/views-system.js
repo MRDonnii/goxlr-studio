@@ -1,5 +1,5 @@
 import { h, toggle, toast } from './ui.js';
-import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo } from './native.js';
+import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo, daemonTakeover } from './native.js';
 import { DEFAULT_DISCORD_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
 
@@ -26,16 +26,29 @@ export function systemSettings(ctx) {
 
   // ---- built-in GoXLR engine ----
   const daemonState = h('div', { class: 'hint' }, '…');
-  daemonInfo().then((d) => {
+  const takeoverBtn = h('button', { class: 'btn sm primary', style: { display: 'none' }, onclick: async () => {
+    takeoverBtn.disabled = true;
+    try {
+      const t = await daemonTakeover();
+      toast(`${t.started}${t.stopped.length ? ' – GoXLR Utility er koblet fra' : ''}`, 'info');
+    } catch (e) { toast(String(e)); }
+    takeoverBtn.disabled = false;
+    refreshDaemon();
+  } }, 'Brug den indbyggede motor nu');
+  const refreshDaemon = () => daemonInfo().then((d) => {
     daemonState.textContent = !d.bundled ? 'Denne version har ikke GoXLR-motoren indbygget – den bruger en installeret GoXLR Utility.'
-      : d.started_by_us ? `Den indbyggede GoXLR-motor kører (GoXLR Utility ${d.version}, MIT-licens).`
-        : d.process_running ? 'En installeret GoXLR Utility kører og bruges. Afinstallér den under Overflytning, så overtager den indbyggede motor.'
+      : d.foreign?.length ? 'GoXLR Utility kører stadig og styrer GoXLR’en. Tryk nedenfor for at lade GoXLR Studio overtage.'
+        : d.started_by_us ? `GoXLR Studios indbyggede GoXLR-motor kører (GoXLR Utility ${d.version}, MIT-licens).`
           : 'GoXLR-motoren kører ikke.';
+    takeoverBtn.style.display = d.bundled && d.foreign?.length ? '' : 'none';
   }).catch(() => {});
+  refreshDaemon();
   const daemonCard = h('div', { class: 'card' }, h('h2', {}, 'GoXLR-motor'),
     daemonState,
     toggle(binder, { label: 'Start automatisk med GoXLR Studio', get: () => p.autoStartDaemon !== false, set: (v) => { p.autoStartDaemon = v; ctx.savePrefs(); } }),
-    h('div', { class: 'row' }, h('button', { class: 'btn sm', disabled: !isNative(), onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start nu')),
+    toggle(binder, { label: 'Brug altid GoXLR Studios egen motor', get: () => p.builtinEngine !== false, set: (v) => { p.builtinEngine = v; ctx.savePrefs(); } }),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, takeoverBtn,
+      h('button', { class: 'btn sm', disabled: !isNative(), onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start nu')),
     h('div', { class: 'hint' }, 'Motoren taler med GoXLR’en over USB og bruger samme profiler og indstillinger som GoXLR Utility.'));
 
   // ---- updates ----

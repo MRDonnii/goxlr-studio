@@ -167,9 +167,18 @@ export async function startDaemon() {
   return invoke('start_daemon');
 }
 
+const demoDaemon = { started_by_us: false, foreign: ['C:\\Program Files\\GoXLR Utility\\goxlr-daemon.exe'] };
 export async function daemonInfo() {
   if (isNative()) return invoke('daemon_info');
-  return { bundled: true, version: '1.2.4', started_by_us: false, process_running: true };
+  return { bundled: true, version: '1.2.4', started_by_us: demoDaemon.started_by_us, process_running: true, foreign: [...demoDaemon.foreign] };
+}
+
+// Switch from an installed GoXLR Utility to GoXLR Studio's own engine.
+export async function daemonTakeover() {
+  if (isNative()) return invoke('daemon_takeover');
+  const stopped = demoDaemon.foreign.splice(0);
+  demoDaemon.started_by_us = true;
+  return { stopped, autostart_disabled: stopped.length ? 'backup\\autostart-slået-fra\\GoXLR Utility.lnk' : null, started: 'GoXLR-motoren er startet', restored_utility: false };
 }
 
 // ---------- moving over from the old programs ----------
@@ -249,7 +258,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.3.2', installed: false, browser: true };
+  return { version: '0.3.3', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {

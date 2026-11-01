@@ -224,6 +224,14 @@ struct DaemonInfo {
     version: String,
     started_by_us: bool,
     process_running: bool,
+    /// Paths of other GoXLR engines running (an installed GoXLR Utility).
+    foreign: Vec<String>,
+}
+
+/// Switches from an installed GoXLR Utility to GoXLR Studio's own engine.
+#[tauri::command]
+async fn daemon_takeover() -> Result<daemon_host::Takeover, String> {
+    blocking(|| daemon_host::take_over(start_installed_utility)).await
 }
 
 #[tauri::command]
@@ -234,6 +242,7 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
             version: daemon_host::DAEMON_VERSION.into(),
             started_by_us: daemon_host::started_by_us(),
             process_running: daemon_host::daemon_process_running(),
+            foreign: daemon_host::foreign_engines(),
         })
     })
     .await
@@ -424,7 +433,9 @@ fn rebuild_tray_menu(app: &AppHandle) -> tauri::Result<()> {
 pub fn helper_main(args: &[String]) -> Option<i32> {
     match args.first().map(String::as_str) {
         Some("--engine-task") => Some(engine::task_main(&args[1..])),
+        // Called by GoXLR Studio's uninstaller (not during updates): remove everything the app set up.
         Some("--engine-uninstall") => {
+            daemon_host::remove_ours();
             if engine::info().kind != "builtin" {
                 return Some(0);
             }
@@ -480,12 +491,23 @@ pub fn run() {
             state.close_to_tray.store(prefs_close_to_tray(&handle), Ordering::SeqCst);
             state.daemon.clone().spawn(handle.clone(), DAEMON_URL.to_string());
             update::cleanup();
-            // Start the built-in GoXLR engine unless another daemon answers within a moment.
+            // One app: GoXLR Studio runs its own GoXLR engine. An installed GoXLR Utility that is
+            // running is switched off (and kept from autostarting) unless the user turned that off.
             if prefs_flag(&handle, "autoStartDaemon", true) {
                 let h = handle.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(2500));
-                    if !h.state::<AppState>().daemon.connected() {
+                    let builtin = daemon_host::bundled() && prefs_flag(&h, "builtinEngine", true);
+                    if builtin && !daemon_host::foreign_engines().is_empty() {
+                        match daemon_host::take_over(start_installed_utility) {
+                            Ok(t) => {
+                                let _ = h.emit("engine-takeover", serde_json::to_value(&t).unwrap_or_default());
+                            }
+                            Err(e) => {
+                                let _ = h.emit("engine-takeover-failed", e);
+                            }
+                        }
+                    } else if !h.state::<AppState>().daemon.connected() {
                         let res = if daemon_host::bundled() { daemon_host::start() } else { start_installed_utility() };
                         if let Err(e) = res {
                             log::warn!("GoXLR-motor: {e}");
@@ -552,6 +574,7 @@ pub fn run() {
             engine_info,
             engine_task,
             daemon_info,
+            daemon_takeover,
             migrate_scan,
             migrate_backup,
             migrate_copy_profiles,

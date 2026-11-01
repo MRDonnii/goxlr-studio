@@ -73,7 +73,8 @@ pub fn prepare(url: &str, sha256: Option<&str>) -> Result<(), String> {
     let f = ps_quote(&file.display().to_string());
     let e = ps_quote(&exe.display().to_string());
     let body = if is_installed() {
-        format!("Start-Process -Wait -FilePath {f} -ArgumentList '/S'; Start-Process -FilePath {e}")
+        // /UPDATE: Tauri's installer updates in place and never runs the old uninstaller.
+        format!("Start-Process -Wait -FilePath {f} -ArgumentList '/S','/UPDATE'; Start-Process -FilePath {e}")
     } else {
         format!("Move-Item -Force -LiteralPath {e} -Destination ({e} + '.old'); Copy-Item -Force -LiteralPath {f} -Destination {e}; Start-Process -FilePath {e}")
     };
