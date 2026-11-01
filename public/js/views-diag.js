@@ -76,7 +76,7 @@ export function diagView(ctx) {
         section('GoXLR', [row('Forbindelse', g.mode === 'live' ? 'Live' : g.mode, g.mode === 'live' ? 'ok' : 'warn'),
           row('GoXLR-motor', g.engine?.started_by_us ? `I appen (${g.engine.version})` : g.engine?.foreign?.length ? 'GoXLR Utility' : g.engine?.last_error ? `Stoppet: ${g.engine.last_error}` : 'Kører ikke', g.engine?.started_by_us ? 'ok' : 'warn'),
           g.model ? row('Model', g.model === 'Mini' ? 'GoXLR Mini' : 'GoXLR') : null, g.firmware ? row('Firmware', g.firmware) : null,
-          g.daemon ? row('GoXLR Utility', g.daemon) : null, g.profile ? row('Profil', `${g.profile} / ${g.mic_profile}`) : null].filter(Boolean)),
+          g.daemon ? row('Motor-version', g.daemon) : null, g.profile ? row('Profil', `${g.profile} / ${g.mic_profile}`) : null].filter(Boolean)),
         section('Afspilnings-EQ', [row('EQ-motor', e.running ? 'Aktiv' : e.available ? 'Klar' : 'Ikke aktiv', e.running ? 'ok' : 'warn'),
           row('Type', { builtin: `Indbygget (${e.version || '?'})`, external: 'Separat Equalizer APO', none: 'Ingen' }[e.kind] || '–'),
           row('Læser GoXLR Studios EQ', e.taken_over ? 'Ja' : 'Nej', e.taken_over ? 'ok' : null), row('Preset', r.eq.preset || 'Tilpasset'),

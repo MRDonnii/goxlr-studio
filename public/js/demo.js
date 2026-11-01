@@ -26,7 +26,7 @@ export function createDemoStatus() {
   const fader = (channel, text) => ({ channel, mute_type: 'All', mute_state: 'Unmuted', scribble: { file_name: null, bottom_text: text, left_text: null, inverted: false } });
   const presetNames = { Preset1: 'Studie', Preset2: 'Radio', Preset3: 'Robot', Preset4: 'Hal', Preset5: 'Telefon', Preset6: 'Dyb' };
   return {
-    config: { daemon_version: 'demo', platform: 'demo', http_settings: { port: 14564 } },
+    config: { daemon_version: '1.2.4', platform: 'demo', http_settings: { port: 14564 } },
     firmware: {},
     paths: {},
     files: { profiles: ['Headset', 'Speakers', 'Stream'], mic_profiles: ['SM7B', 'Standard'], presets: [], samples: {}, icons: [] },

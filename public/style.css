@@ -116,7 +116,8 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 .preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .preset-grid .btn { padding: 12px; }
 .fx-toggle { display: flex; gap: 8px; flex-wrap: wrap; }
-.color-row input[type=color] { width: 40px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; cursor: pointer; }
+.color-row { flex-wrap: wrap; row-gap: 8px; }
+.color-row input[type=color] { flex: none; width: 40px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; cursor: pointer; }
 .list { display: flex; flex-direction: column; gap: 6px; }
 .list .item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid transparent; }
 .list .item.active { border-color: var(--accent); }

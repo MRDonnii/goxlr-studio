@@ -425,8 +425,8 @@ export function settingsView(ctx) {
       h('div', { class: 'item' }, 'Model', h('div', { class: 'spacer' }), hw.device_type === 'Mini' ? 'GoXLR Mini' : 'GoXLR'),
       h('div', { class: 'item' }, 'Serienummer', h('div', { class: 'spacer' }), hw.serial_number),
       h('div', { class: 'item' }, 'Firmware', h('div', { class: 'spacer' }), Array.isArray(fw) ? fw.join('.') : (fw ? Object.values(fw).join('.') : '–')),
-      h('div', { class: 'item' }, 'GoXLR Utility', h('div', { class: 'spacer' }), conn.status.config?.daemon_version || '–'),
-      h('div', { class: 'item' }, 'Forbindelse', h('div', { class: 'spacer' }), conn.mode === 'live' ? 'Live' : 'Demo (ingen daemon fundet)'));
+      h('div', { class: 'item' }, 'GoXLR-motor', h('div', { class: 'spacer' }), conn.status.config?.daemon_version ? `${conn.status.config.daemon_version} (i appen)` : '–'),
+      h('div', { class: 'item' }, 'Forbindelse', h('div', { class: 'spacer' }), conn.mode === 'live' ? 'Live' : 'Demo (ingen GoXLR-motor)'));
   });
   const behaviour = h('div', { class: 'card' }, h('h2', {}, 'GoXLR-adfærd'),
     slider(binder, { label: 'Mute-hold', min: 100, max: 2000, step: 50, get: () => m().settings.mute_hold_duration, set: (v) => conn.command('SetMuteHoldDuration', v), fmt: (v) => `${v} ms` }),
@@ -437,7 +437,7 @@ export function settingsView(ctx) {
     toggle(binder, { label: 'Auto-ducking', get: () => ctx.ducker.settings.enabled, set: (v) => { ctx.ducker.settings.enabled = v; ctx.ducker.save(); } }),
     isNative() ? toggle(binder, { label: 'Start med Windows', get: () => ctx.prefs.autostart, set: (v) => { ctx.prefs.autostart = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_autostart', { enabled: v }).catch((e) => toast(String(e))); } }) : null,
     isNative() ? toggle(binder, { label: 'Luk til bakke-ikon', get: () => ctx.prefs.closeToTray, set: (v) => { ctx.prefs.closeToTray = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_close_to_tray', { enabled: v }).catch(() => {}); } }) : null,
-    h('div', { class: 'hint' }, 'GoXLR Studio styrer GoXLR’en via GoXLR Utility-tjenesten (port 14564), som skal køre i baggrunden i stedet for TC-Helicons app.'));
+    h('div', { class: 'hint' }, 'Auto-ducking skruer ned for Music og Game, mens du taler. GoXLR Studio styrer GoXLR’en med sin egen indbyggede motor – GoXLR Utility og TC-Helicons app skal ikke køre.'));
   return h('div', { class: 'grid' }, h('div', { class: 'grid cols-2' }, h('div', { class: 'card' }, h('h2', {}, 'Enhed'), info), behaviour, app), systemSettings(ctx));
 }
 
