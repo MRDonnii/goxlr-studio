@@ -75,3 +75,32 @@ export function snapshotCommands(s, mini) {
   if (Number.isFinite(s.deess)) out.push(['SetDeeser', s.deess]);
   return out.filter((cmd) => cmd.slice(1).every((a) => a !== undefined && a !== null));
 }
+
+// ---------- Del opsætning ----------
+export const MIC_FILE_TYPE = 'goxlr-studio-mic';
+
+/** Your mic settings as a file to give to a friend (no profile names or device ids – only sound). */
+export function micShareFile(mixer, { mic = '', version = '' } = {}) {
+  return JSON.stringify({ type: MIC_FILE_TYPE, version: 1, app: version, mic, snapshot: micSnapshot(mixer) }, null, 1);
+}
+
+/** The settings from such a file, checked; throws on anything else. */
+export function readMicShare(text) {
+  let d;
+  try { d = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { throw new Error('Filen er ikke en GoXLR Studio-mikrofonfil'); }
+  const s = d?.snapshot;
+  if (d?.type !== MIC_FILE_TYPE || !s || typeof s !== 'object' || !['Dynamic', 'Condenser', 'Jack'].includes(s.type)) throw new Error('Filen er ikke en GoXLR Studio-mikrofonfil');
+  const num = (v, lo, hi) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : undefined);
+  const eq = (e) => (e && typeof e === 'object' ? { frequency: { ...(e.frequency || {}) }, gain: Object.fromEntries(Object.entries(e.gain || {}).map(([k, v]) => [k, num(v, -9, 9)])) } : null);
+  return {
+    mic: String(d.mic || '').slice(0, 80),
+    snapshot: {
+      type: s.type,
+      gains: Object.fromEntries(Object.entries(s.gains || {}).map(([k, v]) => [k, num(v, 0, 72)])),
+      eq: eq(s.eq), eqMini: eq(s.eqMini),
+      gate: { ...(s.gate || {}), threshold: num(s.gate?.threshold, -59, 0), attenuation: num(s.gate?.attenuation, 0, 100) },
+      comp: { ...(s.comp || {}), threshold: num(s.comp?.threshold, -40, 0), makeup_gain: num(s.comp?.makeup_gain, -6, 24) },
+      deess: num(s.deess, 0, 100) ?? null,
+    },
+  };
+}

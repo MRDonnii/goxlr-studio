@@ -128,3 +128,22 @@ test('snapshot of the mic settings puts everything back, also from names in olde
   assert.ok(mini.some((c) => c[0] === 'SetEqMiniGain' && c[2] === 2));
   assert.ok(!mini.some((c) => c[0] === 'SetEqGain'));
 });
+
+test('del opsætning: mic settings to a file and back, values kept in range', async () => {
+  const a = await import('../public/js/micassist.js');
+  const { demoState } = await import('../public/js/demo.js').catch(() => ({}));
+  const mixer = { mic_status: { mic_type: 'Condenser', mic_gains: { Condenser: 40, Dynamic: 50, Jack: 10 }, equaliser_mini: { frequency: { Equalizer90Hz: 90 }, gain: { Equalizer90Hz: 3 } }, noise_gate: { enabled: true, threshold: -45, attenuation: 80, attack: 0, release: 19 }, compressor: { threshold: -20, ratio: 8, attack: 4, release: 11, makeup_gain: 5 } }, levels: { deess: 30 } };
+  const file = a.micShareFile(mixer, { mic: 'Røde NT1' });
+  const back = a.readMicShare(file);
+  assert.equal(back.mic, 'Røde NT1');
+  assert.equal(back.snapshot.gains.Condenser, 40);
+  assert.equal(back.snapshot.eqMini.gain.Equalizer90Hz, 3);
+  const cmds = a.snapshotCommands(back.snapshot, true);
+  assert.ok(cmds.some((c) => c[0] === 'SetMicrophoneGain' && c[2] === 40));
+  const bad = JSON.parse(file); bad.snapshot.gains.Condenser = 500; bad.snapshot.gate.threshold = -200;
+  const fixed = a.readMicShare(JSON.stringify(bad)).snapshot;
+  assert.equal(fixed.gains.Condenser, 72);
+  assert.equal(fixed.gate.threshold, -59);
+  assert.throws(() => a.readMicShare('{"type":"x"}'), /mikrofonfil/);
+  void demoState;
+});

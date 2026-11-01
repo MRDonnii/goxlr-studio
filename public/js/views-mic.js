@@ -1,7 +1,7 @@
 import { h, slider, segmented, selectBox, toggle, throttle, promptDialog, confirmDialog, toast, logActivity } from './ui.js';
 import { MIC_MODELS, USB_ONLY, micSettings, micPresetCommands, describeMic } from './micpresets.js';
 import { GATE_TIMES, RATIOS, ATTACKS, RELEASES, enumIndex } from './micenums.js';
-import { analyzeMicTest, micSnapshot, snapshotCommands, SPEECH_TARGET } from './micassist.js';
+import { analyzeMicTest, micSnapshot, snapshotCommands, SPEECH_TARGET, micShareFile, readMicShare } from './micassist.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { coefficients, magnitudeDb, formatFreq } from './eq.js';
@@ -347,6 +347,29 @@ export function micView(ctx) {
   profiles.append(h('div', { class: 'row' }, h('label', {}, 'Aktiv'), profSel,
     h('button', { class: 'btn sm', onclick: () => conn.command('SaveMicProfile') }, 'Gem'),
     h('button', { class: 'btn sm', 'data-testid': 'mic-profile-save-as', onclick: async () => { const n = await promptDialog('Navn på ny mikrofonprofil'); if (n) conn.command('SaveMicProfileAs', n); } }, 'Gem som…')));
+  // Del opsætning: your mic settings as a file for a friend, and taking in a friend's.
+  const shareIn = h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' }, 'data-testid': 'mic-share-file', onchange: async () => {
+    const f = shareIn.files[0];
+    shareIn.value = '';
+    if (!f || !conn.mixer) return;
+    try {
+      const { mic: from, snapshot } = readMicShare(await f.text());
+      if (!(await confirmDialog(`Brug mikrofonindstillingerne fra filen${from ? ` (${from})` : ''}?\n\nType, gain, EQ, noise gate, kompressor og de-esser ændres. "Fortryd" sætter dine egne tilbage.`, { ok: 'Brug dem' }))) return;
+      undo.save('delte indstillinger');
+      for (const c of snapshotCommands(snapshot, isMini())) await conn.command(...c);
+      logActivity(`Mikrofon: delte indstillinger hentet fra ${f.name}`);
+      toast('Mikrofonindstillingerne fra filen er sat ind', 'info');
+    } catch (e) { toast(String(e.message || e)); }
+  } });
+  profiles.append(h('div', { class: 'row', style: { flexWrap: 'wrap', marginTop: '8px' } },
+    h('button', { class: 'btn sm', 'data-testid': 'mic-share-export', title: 'Dine mikrofonindstillinger som en fil, du kan give til en ven', onclick: () => {
+      const blob = new Blob([micShareFile(conn.mixer, { mic: MIC_MODELS.find((x) => x.id === ctx.prefs.micModel)?.name || '', version: ctx.updateState?.current || '' })], { type: 'application/json' });
+      const name = (m().mic_profile_name || 'indstillinger').replace(/[\\/:*?"<>|]/g, '');
+      const a = h('a', { href: URL.createObjectURL(blob), download: `GoXLR Studio mikrofon - ${name}.json` });
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } }, 'Del mine indstillinger…'),
+    h('button', { class: 'btn sm', 'data-testid': 'mic-share-import', onclick: () => shareIn.click() }, 'Brug delte indstillinger…'), shareIn),
+    h('div', { class: 'hint' }, 'Del: gem dine mikrofonindstillinger som en fil og send den til en ven – eller brug en, du har fået.'));
 
   const undo = micUndo(ctx);
   return h('div', { class: 'grid' }, h('div', { class: 'grid cols-2' }, micPresetCard(ctx, undo), micAssistCard(ctx, undo)), eqCard, h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp));

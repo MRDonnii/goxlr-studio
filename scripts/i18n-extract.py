@@ -35,6 +35,15 @@ def js_strings(src):
                             j += 2 if src[j] == '\\' else 1
                     elif ch == '`':
                         sub, j = read_template(j + 1); out.append(('tpl', sub)); continue
+                    elif ch == '/' and src[start:j].rstrip()[-1:] in tuple('(,=:[!&|?{};'):
+                        # A regex literal inside ${...}: skip it (it may hold quotes).
+                        j += 1; cls = False
+                        while j < n and src[j] != '\n':
+                            if src[j] == '\\': j += 2; continue
+                            if src[j] == '[': cls = True
+                            elif src[j] == ']': cls = False
+                            elif src[j] == '/' and not cls: break
+                            j += 1
                     elif ch == '{': depth += 1
                     elif ch == '}': depth -= 1
                     j += 1
