@@ -1,5 +1,5 @@
 import { GoXLRConnection } from './api.js';
-import { h, Binder, toast, icon, ICONS, logActivity } from './ui.js';
+import { h, Binder, toast, icon, ICONS, logActivity, confirmDialog } from './ui.js';
 import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
@@ -248,6 +248,22 @@ function renderBanners() {
   if (isNative() && conn.mode === 'demo') {
     items.push(h('div', { class: 'banner warn' }, 'GoXLR-motoren kører ikke, eller mixeren er ikke tilsluttet – du ser demo-data.',
       h('button', { class: 'btn sm primary', onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR-motoren')));
+  }
+  if (ctx.soundRescue) {
+    const r = ctx.soundRescue;
+    const close = () => { ctx.soundRescue = null; renderBanners(); };
+    items.push(h('div', { class: 'banner warn', 'data-testid': 'banner-restore-sound' },
+      'Gendan lyd: EQ’en er slået fra, så lyden går lige igennem. Er lyden tilbage og normal?',
+      h('button', { class: 'btn sm primary', onclick: close }, 'Ja, behold EQ fra'),
+      r.wasOn ? h('button', { class: 'btn sm', onclick: () => { ctx.runAction('eq-toggle', 'Gendan lyd'); close(); } }, 'Slå EQ til igen') : null,
+      h('button', { class: 'btn sm', 'data-testid': 'restore-sound-remove', onclick: async () => {
+        if (!(await confirmDialog('Lyden er stadig væk eller forkert, selv med EQ’en slået fra? Så fjern EQ-motoren fra alle udgange – Windows-lyden bliver, som den var før. Du kan installere den igen på Afspilnings-EQ-siden.', { ok: 'Fjern EQ-motoren', danger: true }))) return;
+        try {
+          const res = await engineTask({ action: 'uninstall' });
+          toast(res.ok ? 'EQ-motoren er fjernet – Windows-lyden er som før' : `Kunne ikke fjerne EQ-motoren: ${res.error}`, res.ok ? 'info' : undefined);
+          if (res.ok) close();
+        } catch (e) { toast(String(e.message || e)); }
+      } }, 'Lyden er stadig væk – fjern EQ-motoren')));
   }
   if (ctx.driverMissing) {
     const d = ctx.driverMissing;

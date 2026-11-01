@@ -454,6 +454,7 @@ export function outputEqView(ctx) {
           run({ action: 'set-devices', devices: [...chosen], mode: next }, 'Skifter måde…');
         }));
       }
+      list.push(btn('Gendan lyd', '', () => ctx.runAction('restore-sound', 'EQ-siden'), 'engine-restore-sound'));
       list.push(btn('Fjern EQ-motor', '', async () => { if (await confirmDialog('Fjern GoXLR Studios EQ-motor fra alle udgange?', { ok: 'Fjern', danger: true })) run({ action: 'uninstall' }, 'Fjerner EQ-motoren…'); }));
     }
     if (info.external_config) list.push(importApoBtn);

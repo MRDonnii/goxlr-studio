@@ -473,6 +473,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         menu.append(&sub)?;
     }
     menu.append(&MenuItem::with_id(app, "mute-mic", "Mute / unmute mikrofon", true, None::<&str>)?)?;
+    // Nødknap: the EQ off at once, and the window shows what to do next.
+    menu.append(&MenuItem::with_id(app, "restore-sound", "Gendan lyd (slå EQ fra)", true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, "quit", "Afslut", true, None::<&str>)?)?;
     Ok(menu)
@@ -612,6 +614,9 @@ pub fn run() {
                     "quit" => app.exit(0),
                     id => {
                         let _ = app.emit("tray-action", id.to_string());
+                        if id == "restore-sound" {
+                            show_main(app);
+                        }
                     }
                 })
                 .on_tray_icon_event(|tray, event| {

@@ -40,6 +40,19 @@ export function toggleEq(ctx) {
   notify(ctx, `EQ ${e.enabled ? 'til' : 'fra'}`, e.enabled ? 'ok' : 'mute');
 }
 
+// "Gendan lyd": the EQ off at once (Equalizer APO's engine then passes the sound straight through),
+// and a banner with the next step if the sound is still gone (remove the EQ engine).
+export function restoreSound(ctx) {
+  const e = ctx.outputEq.slots[ctx.outputEq.active];
+  ctx.soundRescue = { at: Date.now(), wasOn: e.enabled };
+  e.enabled = false;
+  storeSet('output-eq', ctx.outputEq);
+  ctx.applyOutputEq();
+  ctx.onStateChanged?.('eq');
+  ctx.renderBanners?.();
+  notify(ctx, 'Gendan lyd: EQ’en er slået fra', 'mute');
+}
+
 function loadProfile(ctx, name) {
   ctx.conn.command('LoadProfile', name, true);
   notify(ctx, `Profil: ${name}`);
@@ -91,6 +104,7 @@ export async function runAction(ctx, id, source = 'handling') {
     case 'discord-toggle': return ctx.discordToggle?.();
     case 'discord-deafen': return ctx.discordDeafen?.();
     case 'eq-toggle': return toggleEq(ctx);
+    case 'restore-sound': return restoreSound(ctx);
     case 'crossfeed-toggle':
     case 'loudness-toggle': {
       const k = kind === 'crossfeed-toggle' ? 'crossfeed' : 'loudness';
@@ -140,6 +154,7 @@ export async function actionCatalog(ctx) {
   g('Mikrofonprofil', micProfiles.map((p) => ({ id: `micprofile:${p}`, label: `Indlæs mikrofonprofil "${p}"` })));
   g('Afspilnings-EQ', [
     { id: 'eq-toggle', label: 'EQ til/fra' },
+    { id: 'restore-sound', label: 'Gendan lyd (slå EQ fra – nødknap)' },
     { id: 'eq-next', label: 'Næste EQ-preset' },
     { id: 'crossfeed-toggle', label: 'Crossfeed til/fra' },
     { id: 'loudness-toggle', label: 'Loudness til/fra' },
@@ -197,6 +212,7 @@ export function actionLabel(ctx, id) {
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;
     case 'eq-preset': return `EQ-preset "${arg}"`;
     case 'eq-toggle': return 'EQ til/fra';
+    case 'restore-sound': return 'Gendan lyd';
     case 'eq-next': return 'Næste EQ-preset';
     case 'crossfeed-toggle': return 'Crossfeed til/fra';
     case 'loudness-toggle': return 'Loudness til/fra';
