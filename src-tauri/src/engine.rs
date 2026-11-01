@@ -1242,9 +1242,13 @@ pub enum Coverage {
 
 /// Pure: the first Device: line of a config written by apo::render (no line = all outputs).
 pub fn parse_coverage(config: &str) -> Coverage {
+    // EQ pr. kanal writes several "Device:" sections; the EQ applies to the union of them.
+    let mut all: Vec<Vec<String>> = Vec::new();
+    let mut found = false;
     for line in config.lines() {
         let l = line.trim().trim_start_matches('\u{feff}');
         let Some(rest) = l.strip_prefix("Device:") else { continue };
+        found = true;
         let alts: Vec<Vec<String>> = rest
             .split(';')
             .map(|a| a.split_whitespace().map(|w| w.to_lowercase()).collect::<Vec<_>>())
@@ -1253,9 +1257,9 @@ pub fn parse_coverage(config: &str) -> Coverage {
         if alts.is_empty() || alts.iter().any(|w| w.len() == 1 && w[0] == "all") {
             return Coverage::All;
         }
-        return Coverage::Patterns(alts);
+        all.extend(alts);
     }
-    Coverage::All
+    if found { Coverage::Patterns(all) } else { Coverage::All }
 }
 
 impl Coverage {

@@ -5,7 +5,9 @@ import { chainResponse, safePreamp, headroomInfo, bandWarnings, abMatch, abText,
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
 import { t } from './i18n.js';
 import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
-import { shortName } from './views-mixer.js';
+import { shortName, CHANNEL_LABEL } from './views-mixer.js';
+import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChannels } from './channeleq.js';
+import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
 
@@ -378,6 +380,7 @@ export function outputEqView(ctx) {
     const goxlr = (d) => (/goxlr|tc-helicon/i.test(d.name) ? 0 : 1);
     renderDevs = devs.filter((d) => d.flow === 'render').sort((a, b) => goxlr(a) - goxlr(b));
     specSel.append(...renderDevs.map((d) => h('option', { value: d.id }, shortName(d.name))));
+    renderChannels();
     specSel.value = prefs.eqSpectrumDevice ?? 'auto';
     if (!specSel.value && prefs.eqSpectrumDevice) specSel.value = 'auto';
   }).catch(() => {});
@@ -523,12 +526,12 @@ export function outputEqView(ctx) {
       h('button', { class: 'btn sm', 'data-testid': 'preset-save-as', onclick: async () => {
         const n = await promptDialog('Navn på preset', state.presetName || '', { ok: 'Gem' });
         if (!n) return;
-        state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); toast(`Gemt "${n}"`, 'info'); ctx.onStateChanged?.('eq');
+        state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); apply(); renderChannels(); toast(`Gemt "${n}"`, 'info'); ctx.onStateChanged?.('eq');
       } }, 'Gem som…'),
       h('button', { class: 'btn sm', 'data-testid': 'preset-delete', onclick: async () => {
         const [k, ...r] = presetSel.value.split(':'); const n = r.join(':');
         if (k !== 'u' || !(await confirmDialog(`Slet "${n}"?`, { ok: 'Slet', danger: true }))) return;
-        delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); ctx.onStateChanged?.('eq');
+        delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); apply(); renderChannels(); ctx.onStateChanged?.('eq');
       } }, 'Slet')),
     h('div', { class: 'row wrap' },
       h('button', { class: 'btn sm', 'data-testid': 'preset-import-file', onclick: () => fileIn.click() }, 'Importér (APO, AutoEQ, presetfil)…'),
@@ -583,6 +586,9 @@ export function outputEqView(ctx) {
   };
   const targetSel = h('select', { 'data-testid': 'eq-target', onchange: () => setTarget(targetSel.value, targetSel.selectedOptions[0]?.dataset.name) });
   let info = { kind: 'none', devices: [] };
+  let renderChannels = () => {};
+  // EQ pr. kanal: which outputs have their own channel EQ right now (for the badges and the warning).
+  const channelOf = (id) => activeChannels(state, renderDevs, ctx.conn.mixer?.profile_name).find((c) => c.id.toLowerCase() === String(id).toLowerCase());
   let chosen = null;
   let lastTest = null; // { at, tests } from the last engine task
   storeGet('engine-test', null).then((t) => { lastTest = t; renderSound(t?.sound); if (info.devices.length) { renderDevices(); refreshText(); } }).catch(() => {});
@@ -663,9 +669,10 @@ export function outputEqView(ctx) {
       const cb = h('input', { type: 'checkbox', checked: chosen.has(d.id), onchange: () => { if (cb.checked) chosen.add(d.id); else chosen.delete(d.id); renderActions(); } });
       const t = d.installed ? testOf(d) : null;
       const status = !d.installed ? null : t && !t.error ? (t.ok ? 'kører' : 'ikke indlæst') : 'aktiv';
-      const applies = appliesTo(state, d.id);
+      const chan = channelOf(d.id);
+      const applies = chan || appliesTo(state, d.id);
       const badge = status && h('span', { class: `badge ${status === 'ikke indlæst' || !applies ? 'warn' : 'ok'}`, 'data-testid': 'engine-device-status' },
-        `${status} · EQ ${applies ? 'gælder her' : 'gælder ikke her'}`);
+        chan ? `${status} · kanal-EQ: ${chan.name === FLAT ? 'ingen' : chan.name}` : `${status} · EQ ${applies ? 'gælder her' : 'gælder ikke her'}`);
       return h('label', { class: 'engine-dev', title: d.mode ? `${d.name} – ${ENGINE_MODE_LABEL[d.mode] || d.mode}` : d.name }, cb, h('span', {}, shortName(d.name)), badge);
     }));
     if (!info.devices.length) devList.append(h('div', { class: 'hint' }, 'Fandt ingen udgange.'));
@@ -674,7 +681,7 @@ export function outputEqView(ctx) {
     const d = info.devices.find((x) => appliesTo(state, x.id) && state.target);
     targetHint.textContent = state.target && d && !d.installed ? 'EQ-motoren kører ikke på denne udgang endnu – markér den ovenfor.' : '';
     // Fejl 2: the engine sits on several outputs, but the EQ applies to one of them only.
-    const others = info.devices.filter((x) => x.installed && !appliesTo(state, x.id)).map((x) => shortName(x.name));
+    const others = info.devices.filter((x) => x.installed && !appliesTo(state, x.id) && !channelOf(x.id)).map((x) => shortName(x.name));
     targetWarn.replaceChildren(...(state.target && others.length ? [
       h('span', {}, `⚠ EQ’en gælder kun ${shortName(state.target_name || d?.name || 'én udgang')} – lyd på ${others.join(', ')} får ingen EQ.`),
       h('button', { class: 'btn sm primary', 'data-testid': 'eq-target-all', onclick: () => { targetSel.value = ''; setTarget(null); toast('EQ’en gælder nu alle markerede udgange', 'info'); } }, 'Gælder alle markerede udgange'),
@@ -689,7 +696,7 @@ export function outputEqView(ctx) {
     engineBadge.textContent = running ? 'Aktiv' : info.kind === 'none' ? 'Ikke installeret' : 'Ikke aktiv';
     engineBadge.className = `badge ${running ? 'ok' : 'warn'}`;
     refreshText();
-    renderDevices(); renderActions(); renderTarget();
+    renderDevices(); renderActions(); renderTarget(); renderChannels();
   };
   function refreshText() {
     const running = info.kind !== 'none' && info.uses_our_config && installedIds().length > 0;
@@ -718,6 +725,61 @@ export function outputEqView(ctx) {
     engineActions, engineLog,
     soundBox,
     h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'EQ gælder for'), targetSel), targetWarn, targetHint);
+
+  // ---- EQ pr. kanal: its own preset on Game, Music, Chat and System, optionally per GoXLR profile ----
+  const chanRows = h('div', { class: 'list', 'data-testid': 'channel-eq-rows' });
+  let chanProfile = ALL_PROFILES;
+  const chanProfileSel = h('select', { 'data-testid': 'channel-eq-profile', onchange: () => { chanProfile = chanProfileSel.value; renderChannels(); } });
+  const setChannel = (ch, value) => {
+    state.channelEq ??= {};
+    const set = (state.channelEq[chanProfile] ??= {});
+    if (value) set[ch] = value; else delete set[ch];
+    if (!Object.keys(set).length) delete state.channelEq[chanProfile];
+    persist(); apply(); renderChannels(); renderDevices(); renderTarget();
+  };
+  renderChannels = () => {
+    const profiles = ctx.conn.status?.files?.profiles || [];
+    const current = ctx.conn.mixer?.profile_name;
+    chanProfileSel.replaceChildren(h('option', { value: ALL_PROFILES }, 'Alle profiler'),
+      ...profiles.map((p) => h('option', { value: p }, p === current ? `${p} (aktiv)` : p)));
+    if (chanProfile !== ALL_PROFILES && !profiles.includes(chanProfile)) chanProfile = ALL_PROFILES;
+    chanProfileSel.value = chanProfile;
+    const mine = Object.keys(state.presets);
+    const builtin = Object.keys(BUILTIN_PRESETS).filter((n) => !(n in state.presets));
+    const installed = new Set(info.devices.filter((d) => d.installed).map((d) => d.id.toLowerCase()));
+    chanRows.replaceChildren(...EQ_CHANNELS.map((ch) => {
+      const own = state.channelEq?.[chanProfile]?.[ch] || '';
+      const inherited = chanProfile === ALL_PROFILES ? null : channelPresetFor(state, ch, null);
+      const fallback = chanProfile === ALL_PROFILES ? 'Hoved-EQ’en' : `Som "Alle profiler" (${inherited === FLAT ? 'ingen EQ' : inherited || 'hoved-EQ’en'})`;
+      const known = !own || own === FLAT || presetEq(state, own);
+      const sel = h('select', { 'data-testid': `channel-eq-${ch}`, onchange: () => setChannel(ch, sel.value) },
+        h('option', { value: '' }, fallback),
+        h('option', { value: FLAT }, 'Ingen EQ'),
+        known ? null : h('option', { value: own }, `${own} (findes ikke – bruger hoved-EQ’en)`),
+        mine.length ? h('optgroup', { label: 'Mine' }, mine.map((n) => h('option', { value: n }, n))) : null,
+        h('optgroup', { label: 'Indbyggede' }, builtin.map((n) => h('option', { value: n }, n))));
+      sel.value = own;
+      // Does the EQ engine sit on this channel's Windows output?
+      const id = channelEndpoint(ch, renderDevs);
+      const effective = channelPresetFor(state, ch, chanProfile === ALL_PROFILES ? null : chanProfile);
+      let note = null;
+      if (!id) note = h('span', { class: 'badge', 'data-testid': 'channel-eq-state' }, 'ikke i Windows');
+      else if (effective && info.kind !== 'none' && !installed.has(id.toLowerCase())) {
+        note = h('span', { class: 'row', style: { gap: '6px' } },
+          h('span', { class: 'badge warn', 'data-testid': 'channel-eq-state' }, 'EQ-motoren mangler her'),
+          info.kind === 'builtin' && info.uses_our_config
+            ? h('button', { class: 'btn sm primary', 'data-testid': `channel-eq-install-${ch}`, onclick: () => run({ action: 'set-devices', devices: [...new Set([...installedIds(), id])] }, `Sætter EQ-motoren på ${CHANNEL_LABEL[ch] || ch} – lyden afbrydes et øjeblik…`) }, 'Sæt motoren på')
+            : null);
+      }
+      return h('div', { class: 'row' }, h('label', {}, CHANNEL_LABEL[ch] || ch), sel, note);
+    }));
+  };
+  const channelCard = h('div', { class: 'card', 'data-testid': 'channel-eq' }, h('h2', {}, 'EQ pr. kanal'),
+    h('div', { class: 'hint', style: { marginBottom: '8px' } }, 'Giv hver GoXLR-kanal sit eget preset. Apps følger deres kanal (Lyd pr. app), så fx Spotify på Musik får musik-EQ og spillet på Spil får fodtrins-EQ. Kanaler uden valg får hoved-EQ’en ovenfor.'),
+    h('div', { class: 'row' }, h('label', {}, 'Indstil for'), chanProfileSel),
+    chanRows,
+    h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Vælg en GoXLR-profil for at give den sit eget sæt, fx Headset og Speakers. Presets laver og retter du i editoren ovenfor (Gem som…). "EQ fra" slår også kanal-EQ’en fra. Kanalerne går også til stream-mixet, så seerne hører den samme EQ.'));
+  renderChannels();
 
   // "Uden EQ" in the Lyttetest plays at the EQ's loudness when "Udlign lydstyrke" is on.
   const bypassGainDb = () => (state.abMatch !== false && eq().enabled ? Math.min(0, Math.round(loudnessDb(chainResponse(eq(), state.extras, CHAIN_FREQS, offsetDb())) * 10) / 10) : 0);
@@ -755,7 +817,8 @@ export function outputEqView(ctx) {
     bar,
     h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar, abRow, blindBox, editorBody),
     h('div', { class: 'grid cols-3' }, presetsCard, engineCard, h('div', { class: 'grid' }, fixCard, previewCard)),
-    h('div', { class: 'grid cols-3' }, profileLinksCard(ctx), extrasCard(ctx, () => { apply(); redraw(); }), autoEqCard(ctx)));
+    h('div', { class: 'grid cols-3' }, channelCard, profileLinksCard(ctx), extrasCard(ctx, () => { apply(); redraw(); })),
+    h('div', { class: 'grid cols-3' }, autoEqCard(ctx)));
 }
 
 function makePreview(getEq, bypassGainDb = () => 0) {

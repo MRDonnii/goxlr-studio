@@ -23,6 +23,7 @@ import { obsFollowProfile } from './obs.js';
 import { setLanguage, resolveLanguage, t, language } from './i18n.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
+import { engineConfig, usesChannelEq, hasProfileSets } from './channeleq.js';
 
 const PAGES = [
   { id: 'mixer', title: 'Mixer', icon: 'mixer', view: mixerView },
@@ -157,13 +158,14 @@ const ctx = {
 async function applyOutputEq() {
   const st = ctx.outputEq;
   let target = st.target;
+  // EQ pr. kanal needs the GoXLR's Windows outputs (found by name, so driver updates don't matter).
+  const devs = target || usesChannelEq(st) ? await listAudioDevices().catch(() => []) : [];
   if (target) {
-    const devs = await listAudioDevices().catch(() => []);
     const r = resolveDevice(devs, target, st.target_name, 'render');
     if (r && r !== target) { st.target = target = r; storeSet('output-eq', st); }
     if (r && !st.target_name) { st.target_name = deviceName(devs, r); storeSet('output-eq', st); }
   }
-  return setOutputEqEngine(playbackEq(target));
+  return setOutputEqEngine(engineConfig(st, { devices: devs, profile: conn.mixer?.profile_name || null, target }));
 }
 
 // What the engine plays: the active slot with Loudness/Crossfeed and the preamp offset from the
@@ -487,6 +489,8 @@ function followProfile() {
   if (m.profile_name === lastProfile) return;
   const first = lastProfile === undefined;
   lastProfile = m.profile_name;
+  // EQ pr. kanal: a profile can have its own set of channel EQs.
+  if (hasProfileSets(ctx.outputEq)) applyOutputEq().catch(() => {});
   // Mindre fejl 5: this ran on the first status after every app start and replaced the preset the
   // user had chosen with the profile's linked one. At start, only follow the profile if it changed
   // while the app was closed.
