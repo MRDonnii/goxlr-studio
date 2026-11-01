@@ -223,16 +223,19 @@ function duckingCard(ctx) {
   }
   const state = h('span', { class: 'badge' });
   binder.add(() => {
-    state.textContent = !s.enabled ? 'Slået fra' : ducker.active ? 'Ducker nu' : 'Lytter';
-    state.className = `badge ${s.enabled ? (ducker.active ? 'warn' : 'ok') : ''}`;
+    state.textContent = !ducker.on ? 'Slået fra' : ducker.active ? 'Ducker nu' : 'Lytter';
+    state.className = `badge ${ducker.on ? (ducker.active ? 'warn' : 'ok') : ''}`;
   });
   return h('div', { class: 'card' },
     h('h2', {}, 'Auto-ducking', state),
     toggle(binder, { label: 'Sænk lyd når jeg taler', get: () => s.enabled, set: (v) => { s.enabled = v; save(); binder.run(); } }),
+    toggle(binder, { label: 'Sænk lyd når vennerne taler (Chat)', get: () => !!s.chat?.enabled, set: (v) => { s.chat = { threshold: -45, ...s.chat, enabled: v }; save(); binder.run(); } }),
     h('div', { class: 'row' }, h('label', {}, 'Kanaler'), targets),
     slider(binder, { label: 'Sænk med', min: 10, max: 90, get: () => s.amount, set: (v) => { s.amount = v; save(); }, fmt: (v) => `${v} %` }),
     slider(binder, { label: 'Tærskel', min: -60, max: -10, get: () => s.threshold, set: (v) => { s.threshold = v; save(); }, fmt: (v) => `${v} dB` }),
     slider(binder, { label: 'Hold', min: 200, max: 3000, step: 100, get: () => s.hold, set: (v) => { s.hold = v; save(); }, fmt: (v) => `${(v / 1000).toFixed(1)} s` }),
+    slider(binder, { label: 'Chat-tærskel', min: -70, max: -15, get: () => s.chat?.threshold ?? -45, set: (v) => { s.chat = { enabled: false, ...s.chat, threshold: v }; save(); }, fmt: (v) => `${v} dB` }),
+    h('div', { class: 'hint' }, 'Chat: når der kommer stemmer fra Discord på GoXLR’ens Chat-kanal, skrues spil og musik ned, så du hører vennerne.'),
   );
 }
 

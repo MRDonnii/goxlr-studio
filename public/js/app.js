@@ -13,11 +13,12 @@ import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
 import { playbackOffset } from './eqchain.js';
-import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
+import { channelEndpoint, enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { startDeviceTriggers } from './devicetriggers.js';
 import { startMqtt } from './mqtt.js';
+import { startHearing } from './hearing.js';
 import { setLanguage, resolveLanguage, t } from './i18n.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
@@ -45,22 +46,29 @@ const PAGES = [
 class Ducker {
   constructor(conn) {
     this.conn = conn;
-    this.settings = { enabled: false, targets: ['Music', 'Game'], amount: 50, threshold: -35, hold: 900 };
+    // chat: duck while the friends talk (the GoXLR's Chat output), not only while you talk.
+    this.settings = { enabled: false, targets: ['Music', 'Game'], amount: 50, threshold: -35, hold: 900, chat: { enabled: false, threshold: -45 } };
     this.active = false;
     this.base = null;
     this.lastVoice = 0;
   }
-  async load() { Object.assign(this.settings, await storeGet('ducking', {})); }
+  async load() {
+    const saved = await storeGet('ducking', {});
+    Object.assign(this.settings, saved, { chat: { ...this.settings.chat, ...(saved?.chat || {}) } });
+  }
+  get on() { return this.settings.enabled || !!this.settings.chat?.enabled; }
   save() {
     storeSet('ducking', this.settings);
-    if (!this.settings.enabled && this.active) this.release();
+    if (!this.on && this.active) this.release();
   }
-  tick(db) {
+  /** db = your mic (dB), chatDb = the Chat output's peak (dB) – either can start the ducking. */
+  tick(db, chatDb = null) {
     const s = this.settings;
     const m = this.conn.mixer;
-    if (!s.enabled || db == null || !m) return false;
+    if (!this.on || !m) return false;
     const now = performance.now();
-    if (db > s.threshold) {
+    const voice = (s.enabled && db != null && db > s.threshold) || (s.chat?.enabled && chatDb != null && chatDb > s.chat.threshold);
+    if (voice) {
       this.lastVoice = now;
       if (!this.active) {
         this.active = true;
@@ -645,6 +653,16 @@ conn.addEventListener('error', (e) => toast(e.detail));
 
 // ---------- mic meter + ducking ----------
 let demoPhase = 0;
+// The GoXLR's Chat output (where Discord plays), looked up every 10 s.
+let chatEp = { id: null, at: 0 };
+async function chatEndpointId() {
+  if (Date.now() - chatEp.at > 10000) {
+    const devs = await listAudioDevices().catch(() => []);
+    chatEp = { id: channelEndpoint('Chat', devs), at: Date.now() };
+  }
+  return chatEp.id;
+}
+
 async function meterLoop() {
   let db = null;
   if (conn.mode === 'live') db = await conn.micLevel().catch(() => null);
@@ -654,8 +672,14 @@ async function meterLoop() {
     db = talking ? -22 - Math.random() * 12 : -62 - Math.random() * 6;
   }
   ctx.onMicLevel?.(db);
-  if (ctx.onLevels) ctx.onLevels(await audioLevels().catch(() => null));
-  if (ctx.ducker.tick(db)) ctx.binder.run();
+  // Windows' peak meters: for the VU meters, chat-ducking and høreværn.
+  const wantLevels = ctx.onLevels || ctx.ducker.settings.chat?.enabled || ctx.wantLevels;
+  const levels = wantLevels ? await audioLevels().catch(() => null) : null;
+  ctx.levels = levels;
+  if (ctx.onLevels) ctx.onLevels(levels);
+  const chatId = ctx.ducker.settings.chat?.enabled ? await chatEndpointId() : null;
+  const chatPeak = chatId && levels ? levels[chatId] : null;
+  if (ctx.ducker.tick(db, chatPeak > 0 ? 20 * Math.log10(chatPeak) : null)) ctx.binder.run();
   setTimeout(meterLoop, conn.mode === 'live' ? 70 : 90);
 }
 
@@ -781,6 +805,7 @@ async function boot() {
   startAppRules(ctx);
   startDeviceTriggers(ctx);
   startMqtt(ctx);
+  startHearing(ctx);
   startDiscordSync(ctx);
   ctx.applyOutputEq().catch(() => {});
   if (ctx.prefs.api?.enabled) applyApi();
