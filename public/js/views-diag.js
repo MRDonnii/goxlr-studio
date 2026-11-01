@@ -1,5 +1,7 @@
 import { h, toast, errorLog, activityLog } from './ui.js';
-import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo, updateLog, driverInfo } from './native.js';
+import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo, updateLog, driverInfo, soundcheckReport, engineInfo, storeGet } from './native.js';
+import { soundcheckFindings } from './soundcheckmodel.js';
+import { engineTestSummary } from './views-outeq.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { describeAction } from './actions.js';
 
@@ -17,6 +19,15 @@ export async function collectDiagnostics(ctx) {
     updateLog().catch(() => []),
   ]);
   const driver = await driverInfo().catch((e) => ({ error: String(e) }));
+  // Lydtjek and the last EQ-motor test belong in the report too (no passwords, no tokens).
+  const [sc, engInfo, engTest] = await Promise.all([
+    soundcheckReport().catch((e) => ({ error: String(e) })),
+    engineInfo().catch(() => null),
+    storeGet('engine-test', null).catch(() => null),
+  ]);
+  const findings = sc.error ? [`✗ ${sc.error}`] : soundcheckFindings(sc, {
+    engine: engInfo && { kind: engInfo.kind, unregistered: engInfo.kind === 'builtin' && !!engInfo.registration && !engInfo.registration.ok, summary: engInfo.kind !== 'none' ? engineTestSummary(engTest?.tests, engTest?.sound) : null },
+  }).map((f) => `${{ warn: '⚠', info: 'ℹ', ok: '✓' }[f.level]} ${f.title}`);
   const hotkeys = await Promise.all(ctx.hotkeys.map(async (b) => ({
     key: prettyAccel(b.accel),
     action: b.action ? await describeAction(ctx, b.action) : '–',
@@ -50,6 +61,16 @@ export async function collectDiagnostics(ctx) {
     app_rules: ctx.appRules.length,
     app_triggers: ctx.appTriggers?.length || 0,
     api: ctx.prefs.api ? { enabled: ctx.prefs.api.enabled, port: ctx.prefs.api.port, lan: ctx.prefs.api.lan, error: ctx.apiError || null } : null,
+    soundcheck: { findings, ducking: sc.ducking ?? null, formats: (sc.endpoints || []).filter((e) => e.format).map((e) => `${e.name}: ${e.format.rate} Hz ${e.format.float ? 'float' : `${e.format.bits} bit`} · ${Math.round((e.volume ?? 1) * 100)} %${e.muted ? ' · muted' : ''}`) },
+    engine_test: engTest ? { at: engTest.at ? new Date(engTest.at).toISOString() : null, tests: (engTest.tests || []).map((x) => `${x.ok ? '✓' : x.error ? '✗' : '–'} ${x.name}${x.mode ? ` (${x.mode})` : ''}${x.error ? `: ${x.error}` : ''}`), sound: engTest.sound || [] } : null,
+    integrations: {
+      mqtt: ctx.prefs.mqtt?.enabled ? { host: ctx.prefs.mqtt.host || null, user: !!ctx.prefs.mqtt.user } : null,
+      obs: ctx.prefs.obs?.scenes?.length ? { host: ctx.prefs.obs.host, port: ctx.prefs.obs.port, scenes: ctx.prefs.obs.scenes.length, follow: Object.keys(ctx.prefs.obs.follow || {}).length } : null,
+      device_triggers: ctx.deviceTriggers?.length || 0,
+      language: ctx.prefs.lang || 'auto',
+      hearing: ctx.prefs.hearing || null,
+      ducking: ctx.ducker?.settings ? { mic: ctx.ducker.settings.enabled, chat: !!ctx.ducker.settings.chat?.enabled } : null,
+    },
     errors: errorLog.slice(-20),
     activity: activityLog.slice(-40),
     update: { latest: ctx.updateState?.latest || null, error: ctx.updateState?.error || null, log: updLog },
@@ -73,8 +94,12 @@ export function diagView(ctx) {
       h('div', { class: 'card' }, h('h2', {}, 'Rapport',
         h('span', { class: 'row' },
           h('button', { class: 'btn sm', onclick: load }, 'Opdatér'),
-          h('button', { class: 'btn sm primary', onclick: () => navigator.clipboard.writeText(JSON.stringify(r, null, 2)).then(() => toast('Rapport kopieret – indsæt den, hvor du beder om hjælp', 'info')).catch((err) => toast(String(err))) }, 'Kopiér rapport'))),
-        h('div', { class: 'hint' }, 'Alt her bliver på din pc. "Kopiér rapport" lægger en tekst på udklipsholderen, som du selv kan sende videre.')),
+          h('button', { class: 'btn sm primary', onclick: () => navigator.clipboard.writeText(JSON.stringify(r, null, 2)).then(() => toast('Rapport kopieret – indsæt den, hvor du beder om hjælp', 'info')).catch((err) => toast(String(err))) }, 'Kopiér rapport'),
+          h('button', { class: 'btn sm', 'data-testid': 'diag-save', onclick: () => {
+            const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' })), download: `GoXLR Studio rapport ${r.created.slice(0, 16).replace(/[T:]/g, '-')}.json` });
+            a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          } }, 'Gem som fil'))),
+        h('div', { class: 'hint' }, 'Alt her bliver på din pc. "Kopiér rapport" og "Gem som fil" giver én samlet rapport – med lydtjek, EQ-motor-test og log, men uden adgangskoder og tokens – som du selv kan sende videre.')),
       h('div', { class: 'grid cols-3' },
         section('App', [row('Version', r.app.version || '–'), row('Installation', r.app.browser ? 'Browser' : r.app.installed ? 'Installeret' : 'Portable'),
           row('API', r.api?.enabled ? (r.api.error ? 'Fejl' : `Port ${r.api.port}`) : 'Fra', r.api?.error ? 'warn' : null)]),
@@ -87,6 +112,9 @@ export function diagView(ctx) {
           row('Type', { builtin: `Indbygget (${e.version || '?'})`, external: 'Separat Equalizer APO', none: 'Ingen' }[e.kind] || '–'),
           row('Læser GoXLR Studios EQ', e.taken_over ? 'Ja' : 'Nej', e.taken_over ? 'ok' : null), row('Preset', r.eq.preset || 'Tilpasset'),
           ...r.eq.apo_devices.map((d) => h('div', { class: 'item hint' }, d))])),
+      h('div', { class: 'grid cols-2' },
+        section('Lydtjek', (r.soundcheck?.findings || []).map((x) => h('div', { class: 'item' }, x))),
+        section('Sidste EQ-motor-test', r.engine_test ? [h('div', { class: 'item hint' }, r.engine_test.at ? new Date(r.engine_test.at).toLocaleString('da-DK') : '–'), ...r.engine_test.tests.map((x) => h('div', { class: 'item' }, x)), ...r.engine_test.sound.map((x) => h('div', { class: 'item' }, x))] : [])),
       h('div', { class: 'grid cols-2' },
         section(`Genveje${bad.length ? ` – ${bad.length} virker ikke` : ''}`, r.hotkeys.map((x) => row(`${x.key} → ${x.action}`, x.status === 'aktiv' ? 'Aktiv' : x.status, x.status === 'aktiv' ? 'ok' : 'warn'))),
         section('Seneste fejl', r.errors.slice().reverse().map((x) => h('div', { class: 'item' }, h('span', { class: 'hint' }, new Date(x.at).toLocaleTimeString('da-DK')), x.msg)))),
