@@ -4,8 +4,9 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
+import { deckView } from './views-deck.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
@@ -27,6 +28,7 @@ const PAGES = [
   { id: 'lighting', title: 'Lys', icon: 'light', view: lightingView },
   { id: 'profiles', title: 'Profiler', icon: 'profile', view: profilesView },
   { id: 'hotkeys', title: 'Genveje', icon: 'key', view: hotkeysView },
+  { id: 'deck', title: 'Stream Deck', icon: 'deck', view: deckView },
   { id: 'migrate', title: 'Overflytning', icon: 'move', view: migrateView },
   { id: 'diag', title: 'Diagnose', icon: 'diag', view: diagView },
   { id: 'settings', title: 'Indstillinger', icon: 'settings', view: settingsView },
@@ -161,6 +163,23 @@ async function doInstallUpdate(background = false) {
   logActivity(`Opdatering til ${u.latest} startet (${background ? 'automatisk' : 'manuelt'})`);
   toast(`Henter ${u.latest}… GoXLR Studio lukker, installerer og starter igen af sig selv`, 'info');
   try { await installUpdate(u.asset.url, u.asset.sha256, u.latest, background); } catch (e) { u.installing = false; toast(`Opdatering fejlede: ${e}`); renderBanners(); }
+}
+
+// GoXLR Studio was started by a Stream Deck button: run that action once the GoXLR is there
+// (most actions need it), or after 15 s anyway.
+async function runLaunchAction() {
+  const id = await takeLaunchAction().catch(() => null);
+  if (!id) return;
+  const start = Date.now();
+  while (conn.mode !== 'live' && Date.now() - start < 15000) await new Promise((r) => setTimeout(r, 300));
+  runDeckAction(id, 'Stream Deck (start)');
+}
+
+function runDeckAction(id, source) {
+  // "Test linket" on the Stream Deck page: the link went through Windows and reached the app.
+  if (id === 'deck-test') { toast('Linket virker: Windows sendte det til GoXLR Studio ✓', 'info'); return; }
+  logActivity(`${source}: ${id}`);
+  ctx.runAction(id, source);
 }
 
 // After an update: say whether it worked (the helper writes the outcome before it starts the app).
@@ -629,6 +648,8 @@ async function registerNativeHooks() {
   // Tray ids are action ids: profile:…, eq-preset:…, eq-toggle, scene:…, mute-mic.
   await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'bakke-menuen'); });
   await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'lokalt API'); });
+  // A Stream Deck button (goxlr-studio://action/… or --action …) while GoXLR Studio runs.
+  await listen('deck-action', (ev) => { if (typeof ev.payload === 'string') runDeckAction(ev.payload, 'Stream Deck'); });
 }
 
 async function boot() {
@@ -658,6 +679,7 @@ async function boot() {
   setTimeout(checkEngineRegistration, 3000);
   setInterval(daemonWatchdog, 15000);
   setTimeout(() => reportUpdateResult(), 2000);
+  runLaunchAction();
   setTimeout(() => checkUpdate(), 15000);
   setInterval(() => checkUpdate(), 6 * 3600 * 1000);
   current = localStorage.getItem('studio.page') || 'mixer';

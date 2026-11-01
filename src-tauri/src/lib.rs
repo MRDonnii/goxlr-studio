@@ -4,6 +4,7 @@ mod apps;
 mod audio;
 mod daemon;
 mod daemon_host;
+mod deck;
 mod engine;
 mod keys;
 mod meters;
@@ -60,6 +61,8 @@ struct AppState {
     tray: Mutex<TrayModel>,
     hotkeys: Mutex<HashMap<u32, String>>,
     api: Arc<api::Api>,
+    /// An action this process was started with (Stream Deck link or --action), for the UI.
+    launch_action: Mutex<Option<String>>,
 }
 
 #[tauri::command]
@@ -318,7 +321,9 @@ async fn discord_running() -> Result<bool, String> {
 /// Opens a web link in the default browser (the webview itself never navigates away).
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    if !url.starts_with("https://") || url.contains(['"', '\n', '\r']) {
+    // https, or our own Stream Deck links (to test that Windows hands them to GoXLR Studio).
+    let ours = url.starts_with(&format!("{}://action/", deck::SCHEME)) && !url.contains(' ');
+    if !(url.starts_with("https://") || ours) || url.contains(['"', '\n', '\r']) {
         return Err("Kun https-links".into());
     }
     #[cfg(windows)]
@@ -391,6 +396,22 @@ async fn install_update(app: AppHandle, url: String, sha256: Option<String>, ver
     blocking(move || update::prepare(&url, sha256.as_deref(), &to, background.unwrap_or(false))).await?;
     app.exit(0);
     Ok(())
+}
+
+/// The action this process was started with (once), e.g. by a Stream Deck button.
+#[tauri::command]
+fn take_launch_action(state: State<'_, AppState>) -> Option<String> {
+    state.launch_action.lock().unwrap().take()
+}
+
+/// For the Stream Deck page: the app's exe ("Åbn program") and whether goxlr-studio:// links
+/// reach it (the installer registers them; the portable exe cannot).
+#[tauri::command]
+fn deck_info() -> Value {
+    let exe = std::env::current_exe().ok().map(|p| p.display().to_string()).unwrap_or_default();
+    let command = deck::registered_command();
+    let here = command.as_deref().map(|c| deck::link_points_to(c, &exe)).unwrap_or(false);
+    serde_json::json!({ "exe": exe, "link_registered": command.is_some(), "link_here": here, "link_command": command })
 }
 
 /// The outcome of the last update (once) and the end of update.log.
@@ -504,7 +525,13 @@ pub fn run() {
         .build();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        // A second start hands its arguments over: a Stream Deck action, or just "show the window".
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| match deck::launch_action(&args) {
+            Some(id) => {
+                let _ = app.emit("deck-action", id);
+            }
+            None => show_main(app),
+        }))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(shortcuts)
         .manage(AppState {
@@ -513,6 +540,7 @@ pub fn run() {
             tray: Mutex::new(TrayModel::default()),
             hotkeys: Mutex::new(HashMap::new()),
             api: Arc::new(api::Api::default()),
+            launch_action: Mutex::new(deck::launch_action(&std::env::args().collect::<Vec<_>>())),
         })
         .setup(|app| {
             let handle = app.handle().clone();
@@ -580,7 +608,8 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            if std::env::args().any(|a| a == "--minimized") {
+            // Autostart, or started by a Stream Deck button: stay in the tray.
+            if std::env::args().any(|a| a == "--minimized") || state.launch_action.lock().unwrap().is_some() {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
@@ -640,6 +669,8 @@ pub fn run() {
             install_update,
             update_result,
             update_log,
+            take_launch_action,
+            deck_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building GoXLR Studio")

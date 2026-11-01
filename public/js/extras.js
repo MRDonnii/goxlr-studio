@@ -137,6 +137,14 @@ export function updateOutcome(result, current) {
   return { ok: false, text: `Opdateringen til ${result.to} blev ikke installeret: ${why}. Du kører stadig ${current}.` };
 }
 
+// ---------- Stream Deck ----------
+// Ways a Stream Deck (Streonor, Elgato, Ulanzi …) can start an action: a link (the installer
+// registers goxlr-studio://), the app with --action, or the local API's web address.
+export const deckLink = (id) => `goxlr-studio://action/${encodeURIComponent(id)}`;
+export const deckArgs = (id) => (/[\s"]/.test(id) ? `--action "${id.replace(/"/g, '\\"')}"` : `--action ${id}`);
+export const deckCommand = (exe, id) => `"${exe}" ${deckArgs(id)}`;
+export const deckApiUrl = (api, id) => `http://127.0.0.1:${api.port}/action/${encodeURIComponent(id)}?token=${encodeURIComponent(api.token || '')}`;
+
 // ---------- app triggers ----------
 // Given the exes running before and now, returns the actions to run.
 export function triggerActions(triggers, before, now) {

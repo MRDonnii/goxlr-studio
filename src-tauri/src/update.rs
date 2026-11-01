@@ -14,7 +14,9 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 const ALLOWED_PREFIX: &str = "https://github.com/MRDonnii/goxlr-studio/releases/download/";
+#[cfg(windows)]
 const LATEST_JSON: &str = "https://github.com/MRDonnii/goxlr-studio/releases/latest/download/latest.json";
+#[cfg(windows)]
 const LATEST_API: &str = "https://api.github.com/repos/MRDonnii/goxlr-studio/releases/latest";
 
 /// The NSIS installer leaves an uninstaller next to the exe; the portable build has none.

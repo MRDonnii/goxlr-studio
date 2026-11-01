@@ -71,6 +71,17 @@ Når en genvej bruges, viser en lille boks øverst på skærmen i et sekund, hva
 
 ![Besked over spil](docs/screenshots/osd.png)
 
+### Stream Deck
+
+Læg enhver handling på en tast på en Stream Deck, fx Streonor, Elgato eller Ulanzi. Siden **Stream Deck** viser alle handlinger, og du kopierer det, dit Stream Deck-program skal bruge:
+
+- et link (`goxlr-studio://action/…`) til handlingen "Website"
+- en kommando til "Åbn program"
+- en tast til "Hotkey"
+- en web-adresse til det lokale API
+
+Linket starter også GoXLR Studio, hvis appen ikke kører.
+
 ### Scener
 
 ![Scener](docs/screenshots/scener.png)

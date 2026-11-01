@@ -367,6 +367,19 @@ export async function installUpdate(url, sha256, version, background = false) {
   return invoke('install_update', { url, sha256, version, background });
 }
 
+// The action GoXLR Studio was started with (a Stream Deck link or --action), once.
+export async function takeLaunchAction() {
+  if (isNative()) return invoke('take_launch_action');
+  return new URLSearchParams(location.search).get('action');
+}
+
+// { exe, link_registered, link_here, link_command } – for the Stream Deck page.
+export async function deckInfo() {
+  if (isNative()) return invoke('deck_info');
+  const exe = 'C:\\Users\\dig\\AppData\\Local\\GoXLR Studio\\goxlr-studio.exe';
+  return { exe, link_registered: true, link_here: true, link_command: `"${exe}" "%1"`, demo: true };
+}
+
 export async function updateLog() {
   if (isNative()) return invoke('update_log');
   return [];

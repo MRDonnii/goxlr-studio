@@ -223,3 +223,13 @@ test('discord: mute only, or mute and deafen (Toggle Deafen) when the GoXLR mute
   assert.equal(x.discordNotice('both', true), 'Discord: stum og døv');
   assert.equal(x.discordNotice('mute', false), 'Discord: mikrofon slået til');
 });
+
+test('stream deck: links, commands and web addresses for an action', () => {
+  assert.equal(x.deckLink('mute-mic'), 'goxlr-studio://action/mute-mic');
+  assert.equal(x.deckLink('eq-preset:Fodtrin (FPS)'), 'goxlr-studio://action/eq-preset%3AFodtrin%20(FPS)');
+  assert.equal(x.deckLink('profile-toggle:Headset|Speakers'), 'goxlr-studio://action/profile-toggle%3AHeadset%7CSpeakers');
+  assert.equal(x.deckArgs('vol-up:Music'), '--action vol-up:Music');
+  assert.equal(x.deckArgs('eq-preset:Fodtrin (FPS)'), '--action "eq-preset:Fodtrin (FPS)"');
+  assert.equal(x.deckCommand('C:\\GoXLR Studio\\goxlr-studio.exe', 'mute-mic'), '"C:\\GoXLR Studio\\goxlr-studio.exe" --action mute-mic');
+  assert.equal(x.deckApiUrl({ port: 14610, token: 'a+b' }, 'profile:Headset'), 'http://127.0.0.1:14610/action/profile%3AHeadset?token=a%2Bb');
+});

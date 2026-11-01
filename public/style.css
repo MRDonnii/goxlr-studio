@@ -261,3 +261,13 @@ a { color: var(--accent); }
 .start-levels .start-level-name { min-width: 96px; }
 .start-levels input[type=range] { flex: 1; min-width: 80px; }
 .start-levels input[type=range]:disabled { opacity: .35; }
+
+/* Stream Deck */
+.deck-guide p { margin: 8px 0; line-height: 1.45; }
+.deck-item { gap: 8px; flex-wrap: wrap; }
+.deck-label { flex: 1 1 220px; min-width: 0; }
+.deck-value, .deck-path { font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace; background: #0f1522; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; color: #c7d2e8; }
+.deck-value { flex: 1 1 260px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-path { overflow-wrap: anywhere; max-width: 100%; }
+.deck-list .keycap { min-width: 0; cursor: default; }
+input[data-testid="deck-search"] { flex: 1; min-width: 0; }
