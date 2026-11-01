@@ -290,6 +290,18 @@ export function micMutedForChat(mixer, opts = {}) {
   return cough || fader;
 }
 
+// Discord's keybinds: "Toggle Mute" and "Toggle Deafen". Mode 'both' presses Toggle Deafen: Discord
+// then shows the mic and the headphones crossed out, and undeafening gives the mic back as it was.
+export const DISCORD_MUTE_KEY = 'Ctrl+Shift+Alt+D';
+export const DISCORD_DEAF_KEY = 'Ctrl+Shift+Alt+F';
+export const discordMode = (d = {}) => (d.mode === 'both' ? 'both' : 'mute');
+export const discordKeyFor = (d = {}, mode = discordMode(d)) =>
+  (mode === 'both' ? d.deafAccel || DISCORD_DEAF_KEY : d.accel || DISCORD_MUTE_KEY);
+export function discordNotice(mode, muted) {
+  if (mode === 'both') return muted ? 'Discord: stum og døv' : 'Discord: mikrofon og lyd slået til';
+  return muted ? 'Discord: mikrofon slået fra' : 'Discord: mikrofon slået til';
+}
+
 // ---------- VU meters ----------
 // Peak (0–1, linear) or dB → 0–1 on a −60…0 dB scale.
 export function peakToMeter(peak) {

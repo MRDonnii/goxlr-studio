@@ -1,7 +1,7 @@
 import { h, toggle, toast, confirmDialog } from './ui.js';
 import { takeoverMessage } from './extras.js';
 import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo, daemonTakeover } from './native.js';
-import { DEFAULT_DISCORD_KEY } from './discord.js';
+import { DEFAULT_DISCORD_KEY, DEFAULT_DISCORD_DEAF_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
 
 export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'output-eq', 'ducking'];
@@ -143,34 +143,62 @@ export function systemSettings(ctx) {
   // ---- Discord ----
   p.discord ??= { enabled: false, accel: DEFAULT_DISCORD_KEY, cough: true, fader: true };
   const dc = p.discord;
-  const keyBtn = h('button', { class: 'btn keycap', style: { minWidth: '0' } }, prettyAccel(dc.accel));
-  keyBtn.addEventListener('click', () => {
-    keyBtn.textContent = 'Tryk tasterne… (Esc = annullér)';
-    ctx.capturingHotkey = true;
-    ctx.pauseHotkeys?.();
-    const onKey = (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (e.key === 'Escape') return done();
-      const a = accelFromEvent(e);
-      if (!a) return;
-      if (ctx.hotkeys.some((b) => b.accel === a)) { toast(`${prettyAccel(a)} bruges af en af dine genveje – vælg en anden`); return; }
-      dc.accel = a; ctx.savePrefs(); done();
-    };
-    const done = () => { window.removeEventListener('keydown', onKey, true); ctx.capturingHotkey = false; ctx.resumeHotkeys?.(); keyBtn.textContent = prettyAccel(dc.accel); };
-    window.addEventListener('keydown', onKey, true);
-  });
+  dc.deafAccel ??= DEFAULT_DISCORD_DEAF_KEY;
+  // A button that records a key combination (Esc cancels) for one of Discord's keybinds.
+  const keyButton = (key, testid) => {
+    const btn = h('button', { class: 'btn keycap', style: { minWidth: '0' }, 'data-testid': testid }, prettyAccel(dc[key]));
+    btn.addEventListener('click', () => {
+      btn.textContent = 'Tryk tasterne… (Esc = annullér)';
+      ctx.capturingHotkey = true;
+      ctx.pauseHotkeys?.();
+      const onKey = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (e.key === 'Escape') return done();
+        const a = accelFromEvent(e);
+        if (!a) return;
+        if (ctx.hotkeys.some((b) => b.accel === a)) { toast(`${prettyAccel(a)} bruges af en af dine genveje – vælg en anden`); return; }
+        const other = key === 'accel' ? 'deafAccel' : 'accel';
+        if (dc[other] === a) { toast('Mikrofon og døv skal have hver sin genvej'); return; }
+        dc[key] = a; ctx.savePrefs(); done();
+      };
+      const done = () => { window.removeEventListener('keydown', onKey, true); ctx.capturingHotkey = false; ctx.resumeHotkeys?.(); btn.textContent = prettyAccel(dc[key]); renderSteps(); };
+      window.addEventListener('keydown', onKey, true);
+    });
+    return btn;
+  };
+  const steps = h('ol', { class: 'hint steps' });
+  const renderSteps = () => {
+    const both = dc.mode === 'both';
+    steps.replaceChildren(
+      h('li', {}, 'Åbn Discord → Brugerindstillinger → Tastaturgenveje → "Tilføj en tastaturgenvej".'),
+      both
+        ? h('li', {}, `Vælg handlingen for døv ("Toggle Deafen" på engelsk), klik i genvejsfeltet og tryk ${prettyAccel(dc.deafAccel)}.`)
+        : h('li', {}, `Vælg handlingen "Slå mikrofonen fra/til" ("Toggle Mute"), klik i genvejsfeltet og tryk ${prettyAccel(dc.accel)}.`),
+      h('li', {}, 'Slå "Vis GoXLR-mute i Discord" til.'),
+      h('li', {}, both
+        ? 'Når du muter på GoXLR’en, bliver du stum og døv i Discord – både mikrofonen og hovedtelefonerne er streget over, så de andre kan se det. Slår du mute fra igen, kommer lyd og mikrofon tilbage.'
+        : 'Når du muter på GoXLR’en, muter Discord også – med det røde ikon.'));
+  };
+  renderSteps();
+  const modeSel = h('select', { 'data-testid': 'discord-mode', onchange: async () => {
+    const from = dc.mode === 'both' ? 'both' : 'mute';
+    dc.mode = modeSel.value; ctx.savePrefs(); renderSteps();
+    await ctx.discordModeChanged?.(from, dc.mode);
+  } },
+  h('option', { value: 'mute' }, 'Stum (mikrofonen fra)'),
+  h('option', { value: 'both' }, 'Stum og døv (mikrofon og lyd fra)'));
+  modeSel.value = dc.mode === 'both' ? 'both' : 'mute';
   const discordCard = h('div', { class: 'card' }, h('h2', {}, 'Discord'),
     toggle(binder, { label: 'Vis GoXLR-mute i Discord', get: () => dc.enabled, set: (v) => { dc.enabled = v; ctx.savePrefs(); if (v) ctx.discordAlign?.(); } }),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Når GoXLR’en muter, bliver du i Discord'), modeSel),
     toggle(binder, { label: 'Cough-/mute-knappen', get: () => dc.cough !== false, set: (v) => { dc.cough = v; ctx.savePrefs(); } }),
     toggle(binder, { label: 'Mute-knappen under Mic-faderen', get: () => dc.fader !== false, set: (v) => { dc.fader = v; ctx.savePrefs(); } }),
-    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Discord-genvej'), keyBtn,
-      h('button', { class: 'btn sm', onclick: () => ctx.discordToggle?.() }, 'Test / ret')),
-    h('ol', { class: 'hint steps' },
-      h('li', {}, 'Åbn Discord → Brugerindstillinger → Tastaturgenveje → "Tilføj en tastaturgenvej".'),
-      h('li', {}, 'Vælg handlingen "Slå mikrofonen fra/til" (Toggle Mute).'),
-      h('li', {}, `Klik i genvejsfeltet og tryk ${prettyAccel(dc.accel)} – samme taster som her.`),
-      h('li', {}, 'Slå "Vis GoXLR-mute i Discord" til. Når du muter på GoXLR’en, muter Discord også – med det røde ikon.')),
-    h('div', { class: 'hint' }, 'Mutes kun "til stream" påvirker ikke Discord. Muter du direkte i Discord, kommer de ud af trit – tryk så "Test / ret" én gang.'));
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Discord-genvej: mikrofon fra/til'), keyButton('accel', 'discord-key-mute'),
+      h('button', { class: 'btn sm', 'data-testid': 'discord-test-mute', onclick: () => ctx.discordToggle?.() }, 'Test / ret')),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Discord-genvej: døv (lyd fra/til)'), keyButton('deafAccel', 'discord-key-deaf'),
+      h('button', { class: 'btn sm', 'data-testid': 'discord-test-deaf', onclick: () => ctx.discordDeafen?.() }, 'Test / ret')),
+    steps,
+    h('div', { class: 'hint' }, 'Mutes kun "til stream" påvirker ikke Discord. Muter du direkte i Discord, kommer de ud af trit – tryk så "Test / ret" én gang. Genvejene kan også ligge på en Stream Deck.'));
 
   // ---- about ----
   const repo = 'https://github.com/MRDonnii/goxlr-studio';

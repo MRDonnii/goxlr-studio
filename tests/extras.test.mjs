@@ -212,3 +212,14 @@ test('update: GitHub limits and the last update are explained', () => {
   assert.match(x.updateOutcome({ to: '0.4.4', code: null }, '0.4.3').text, /nåede ikke at starte/);
   assert.match(x.updateOutcome({ to: '0.4.4', code: 7 }, '0.4.3').text, /kode 7/);
 });
+
+test('discord: mute only, or mute and deafen (Toggle Deafen) when the GoXLR mutes', () => {
+  assert.equal(x.discordMode({}), 'mute');
+  assert.equal(x.discordMode({ mode: 'both' }), 'both');
+  assert.equal(x.discordKeyFor({}), 'Ctrl+Shift+Alt+D');
+  assert.equal(x.discordKeyFor({ mode: 'both' }), 'Ctrl+Shift+Alt+F');
+  assert.equal(x.discordKeyFor({ mode: 'both', accel: 'F13', deafAccel: 'F14' }), 'F14');
+  assert.equal(x.discordKeyFor({ mode: 'both', accel: 'F13', deafAccel: 'F14' }, 'mute'), 'F13');
+  assert.equal(x.discordNotice('both', true), 'Discord: stum og døv');
+  assert.equal(x.discordNotice('mute', false), 'Discord: mikrofon slået til');
+});
