@@ -519,6 +519,12 @@ fn prefs_close_to_tray(app: &AppHandle) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Work from the app's own folder. Started by an installer, the app can inherit a temporary
+    // folder that is deleted afterwards – then Windows cannot start anything as administrator
+    // ("Den angivne sti findes ikke") and other programs the app starts can fail too.
+    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(std::path::Path::to_path_buf)) {
+        let _ = std::env::set_current_dir(dir);
+    }
     let shortcuts = tauri_plugin_global_shortcut::Builder::new()
         .with_handler(|app, shortcut, event| {
             if event.state() != ShortcutState::Pressed {

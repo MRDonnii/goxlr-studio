@@ -1398,6 +1398,11 @@ pub enum Task {
         tasks: Vec<String>,
         #[serde(default)]
         links: Vec<String>,
+        /// The user's own Startup folder, filled in by the app before elevating: the elevated
+        /// helper can run as another account (a standard user approving with an administrator's
+        /// password, or Windows 11's administrator protection), whose %APPDATA% is not the user's.
+        #[serde(default)]
+        user_startup: Option<String>,
     },
     /// Remove the built-in engine completely.
     Uninstall,
@@ -1564,7 +1569,12 @@ fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>,
     Ok(verify(devices, mode.is_none(), log, tests, sound))
 }
 
-fn disable_autostarts(tasks: &[String], links: &[String], log: &mut Vec<String>) -> Result<bool, String> {
+/// A user's Startup folder (…\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup).
+pub fn is_startup_dir(p: &str) -> bool {
+    p.trim_end_matches('\\').to_lowercase().ends_with(r"\microsoft\windows\start menu\programs\startup")
+}
+
+fn disable_autostarts(tasks: &[String], links: &[String], user_startup: Option<&str>, log: &mut Vec<String>) -> Result<bool, String> {
     let goxlr = |s: &str| {
         let l = s.to_lowercase();
         l.contains("goxlr") && !l.contains("goxlr studio")
@@ -1581,10 +1591,14 @@ fn disable_autostarts(tasks: &[String], links: &[String], log: &mut Vec<String>)
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let backup = crate::apo::studio_dir().join("backup").join(format!("autostart-{stamp}"));
         std::fs::create_dir_all(&backup).map_err(|e| format!("{}: {e}", backup.display()))?;
-        let startups: Vec<PathBuf> = [crate::migrate::common_startup_dir(), std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join(r"Microsoft\Windows\Start Menu\Programs\Startup"))]
-            .into_iter()
-            .flatten()
-            .collect();
+        let startups: Vec<PathBuf> = [
+            crate::migrate::common_startup_dir(),
+            std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join(r"Microsoft\Windows\Start Menu\Programs\Startup")),
+            user_startup.filter(|p| is_startup_dir(p)).map(PathBuf::from),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         for l in links {
             let path = PathBuf::from(l);
             let in_startup = path.parent().is_some_and(|p| startups.iter().any(|s| same_path(&p.display().to_string(), s)));
@@ -1669,7 +1683,7 @@ pub fn run_task(task: &Task) -> TaskResult {
                 Ok(verify(&guids, true, &mut log, &mut tests, &mut sound))
             }
         }),
-        Task::DisableAutostart { tasks, links } => disable_autostarts(tasks, links, &mut log),
+        Task::DisableAutostart { tasks, links, user_startup } => disable_autostarts(tasks, links, user_startup.as_deref(), &mut log),
         Task::Uninstall => uninstall_engine(&mut log),
         Task::UseExternal => use_external(true, &mut log),
         Task::RestoreExternal => use_external(false, &mut log),
@@ -1692,39 +1706,87 @@ pub fn task_main(args: &[String]) -> i32 {
     if ok { 0 } else { 1 }
 }
 
+/// Windows errors after which the helper is started again from a copy every account can see:
+/// file/path not found (2, 3), access denied (5), network path (53, 67), invalid directory (267).
+pub fn retry_from_copy(code: u32) -> bool {
+    matches!(code, 2 | 3 | 5 | 53 | 67 | 267)
+}
+
 /// Runs a task in an elevated copy of this exe (one UAC prompt) and waits for it.
+///
+/// First from where the app is installed (working directory: its own folder, never one inherited
+/// from an installer that may be gone). If Windows cannot start it there – a friend's pc said
+/// "Den angivne sti findes ikke" – the administrator side probably runs as another account that
+/// cannot see the user's AppData; then it is started once more from a fresh copy in
+/// %ProgramData%\GoXLR Studio\helper, which every account can see.
 #[cfg(windows)]
 pub fn run_elevated(task: &Task) -> Result<TaskResult, String> {
+    let mut task = task.clone();
+    if let Task::DisableAutostart { user_startup, .. } = &mut task {
+        if user_startup.is_none() {
+            *user_startup = std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join(r"Microsoft\Windows\Start Menu\Programs\Startup").display().to_string());
+        }
+    }
+    let json = serde_json::to_string(&task).map_err(|e| e.to_string())?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    match start_elevated(&exe, &std::env::temp_dir().join("goxlr-studio-engine"), &json) {
+        Err(Elevate::Failed(code, first)) if retry_from_copy(code) => {
+            let copy = helper_copy(&exe).map_err(|e| format!("Windows kunne ikke starte opgaven med administrator-adgang ({first}), og en kopi kunne ikke laves: {e}"))?;
+            match start_elevated(&copy, copy.parent().unwrap_or(Path::new(".")), &json) {
+                Ok(r) => r,
+                Err(Elevate::Cancelled) => Err("Administrator-adgang blev afvist – intet er ændret".into()),
+                Err(Elevate::Failed(code, msg)) => Err(format!("Windows kunne ikke starte opgaven med administrator-adgang: {msg} (kode {code}; første forsøg: {first})")),
+            }
+        }
+        Err(Elevate::Cancelled) => Err("Administrator-adgang blev afvist – intet er ændret".into()),
+        Err(Elevate::Failed(code, msg)) => Err(format!("Windows kunne ikke starte opgaven med administrator-adgang: {msg} (kode {code})")),
+        Ok(r) => r,
+    }
+}
+
+#[cfg(windows)]
+enum Elevate {
+    /// The user answered no in Windows' administrator prompt.
+    Cancelled,
+    /// Windows could not start it: Win32 code and Windows' own text.
+    Failed(u32, String),
+}
+
+/// One elevated start of `exe --engine-task`, task and result files in `dir`. Windows shows no
+/// error box of its own (SEE_MASK_FLAG_NO_UI); after such a box it would only report "cancelled".
+#[cfg(windows)]
+fn start_elevated(exe: &Path, dir: &Path, task_json: &str) -> Result<Result<TaskResult, String>, Elevate> {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{CloseHandle, ERROR_CANCELLED};
     use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
-    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
     use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-    let dir = std::env::temp_dir().join("goxlr-studio-engine");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let fail = |e: String| Elevate::Failed(0, e);
+    std::fs::create_dir_all(dir).map_err(|e| fail(format!("{}: {e}", dir.display())))?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let task_path = dir.join(format!("task-{stamp}.json"));
     let result_path = dir.join(format!("result-{stamp}.json"));
-    std::fs::write(&task_path, serde_json::to_string(task).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::fs::write(&task_path, task_json).map_err(|e| fail(format!("{}: {e}", task_path.display())))?;
+    let workdir = exe.parent().unwrap_or(dir);
     let file = reg::wide(&exe.display().to_string());
     let params = reg::wide(&format!("--engine-task \"{}\" \"{}\"", task_path.display(), result_path.display()));
+    let directory = reg::wide(&workdir.display().to_string());
     let verb = reg::wide("runas");
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
-    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
     info.lpVerb = PCWSTR(verb.as_ptr());
     info.lpFile = PCWSTR(file.as_ptr());
     info.lpParameters = PCWSTR(params.as_ptr());
+    info.lpDirectory = PCWSTR(directory.as_ptr());
     info.nShow = SW_HIDE.0;
-    let started = unsafe { ShellExecuteExW(&mut info) };
-    if let Err(e) = started {
+    if let Err(e) = unsafe { ShellExecuteExW(&mut info) } {
         let _ = std::fs::remove_file(&task_path);
         if e.code() == ERROR_CANCELLED.to_hresult() {
-            return Err("Administrator-adgang blev afvist – intet er ændret".into());
+            return Err(Elevate::Cancelled);
         }
-        return Err(format!("Kunne ikke starte med administrator-adgang: {}", e.message()));
+        return Err(Elevate::Failed(win32_code(e.code().0), e.message().trim().to_string()));
     }
     let mut code = 0u32;
     unsafe {
@@ -1733,9 +1795,38 @@ pub fn run_elevated(task: &Task) -> Result<TaskResult, String> {
         let _ = CloseHandle(info.hProcess);
     }
     let _ = std::fs::remove_file(&task_path);
-    let text = std::fs::read_to_string(&result_path).map_err(|_| format!("Opgaven gav intet svar (kode {code})"))?;
+    let text = match std::fs::read_to_string(&result_path) {
+        Ok(t) => t,
+        Err(_) => return Ok(Err(format!("Opgaven gav intet svar (kode {code})"))),
+    };
     let _ = std::fs::remove_file(&result_path);
-    serde_json::from_str(&text).map_err(|e| e.to_string())
+    Ok(serde_json::from_str(&text).map_err(|e| e.to_string()))
+}
+
+/// HRESULT_FROM_WIN32 back to the Win32 code (other HRESULTs as they are).
+pub fn win32_code(hr: i32) -> u32 {
+    let hr = hr as u32;
+    if hr & 0xFFFF_0000 == 0x8007_0000 {
+        hr & 0xFFFF
+    } else {
+        hr
+    }
+}
+
+/// A fresh copy of this exe in %ProgramData%\GoXLR Studio\helper – always a file this process
+/// creates itself (never one that was already lying there), so nobody else can have put it there.
+#[cfg(windows)]
+fn helper_copy(exe: &Path) -> Result<PathBuf, String> {
+    let dir = crate::apo::studio_dir().join("helper");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let dest = dir.join("goxlr-studio-helper.exe");
+    if dest.exists() {
+        std::fs::remove_file(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    }
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    let mut src = std::fs::File::open(exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+    std::io::copy(&mut src, &mut out).map_err(|e| format!("{}: {e}", dest.display()))?;
+    Ok(dest)
 }
 
 #[cfg(not(windows))]
@@ -1769,6 +1860,22 @@ mod tests {
         let d = dev([NOVALUE, NOVALUE, "{S}", "{M}", NOVALUE], Mode::LfxGfx);
         assert_eq!(original_pre_mix(&d), "{S}");
         assert_eq!(original_post_mix(&d), "{M}");
+    }
+
+    #[test]
+    fn elevation_errors_are_understood() {
+        // HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) → 3; others stay as they are.
+        assert_eq!(win32_code(0x8007_0003u32 as i32), 3);
+        assert_eq!(win32_code(0x8007_04C7u32 as i32), 1223);
+        assert_eq!(win32_code(0x8000_4005u32 as i32), 0x8000_4005);
+        for c in [2, 3, 5, 53, 67, 267] {
+            assert!(retry_from_copy(c), "{c}");
+        }
+        assert!(!retry_from_copy(1223), "cancelled by the user is not retried");
+        assert!(is_startup_dir(r"C:\Users\x\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\"));
+        assert!(!is_startup_dir(r"C:\Windows\System32"));
+        let t: Task = serde_json::from_str(r#"{"action":"disable-autostart","links":["a.lnk"]}"#).unwrap();
+        assert!(matches!(t, Task::DisableAutostart { user_startup: None, .. }));
     }
 
     #[test]

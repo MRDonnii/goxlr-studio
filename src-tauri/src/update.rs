@@ -234,17 +234,18 @@ pub fn helper_script(h: &Helper) -> String {
     let name = ps_quote(base.strip_suffix(".exe").or_else(|| base.strip_suffix(".EXE")).unwrap_or(base));
     // Passive shows the installer's progress bar (and its error, if any); silent shows nothing.
     let installer_args = if h.background { "'/S','/UPDATE'" } else { "'/P','/UPDATE'" };
+    // Started from its own folder (never a working directory that may disappear).
     let start = if h.background {
-        format!("Start-Process -FilePath {exe} -ArgumentList '--minimized' -ErrorAction Stop")
+        format!("Start-Process -FilePath {exe} -ArgumentList '--minimized' -WorkingDirectory (Split-Path -Parent {exe}) -ErrorAction Stop")
     } else {
-        format!("Start-Process -FilePath {exe} -ErrorAction Stop")
+        format!("Start-Process -FilePath {exe} -WorkingDirectory (Split-Path -Parent {exe}) -ErrorAction Stop")
     };
     let install = if h.installed {
         format!(
             r#"$code = -1
 for ($try = 1; $try -le 2; $try++) {{
   try {{
-    $p = Start-Process -FilePath {file} -ArgumentList {installer_args} -PassThru -ErrorAction Stop
+    $p = Start-Process -FilePath {file} -ArgumentList {installer_args} -WorkingDirectory (Split-Path -Parent {file}) -PassThru -ErrorAction Stop
     $null = $p.Handle
     if ($p.WaitForExit(600000)) {{ $code = $p.ExitCode }} else {{ $code = -2; Log 'Installeren blev ikke færdig inden for 10 minutter' }}
   }} catch {{ $code = -3; Log ('Kunne ikke starte installeren: ' + $_.Exception.Message) }}
@@ -321,6 +322,7 @@ fn spawn_helper(script: &str) -> Result<(), String> {
     let spawn = |flags: u32| {
         Command::new(&ps)
             .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-EncodedCommand", &encoded])
+            .current_dir(std::env::temp_dir())
             .creation_flags(flags)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
