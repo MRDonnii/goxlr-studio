@@ -28,15 +28,23 @@ const OUT = process.argv[2];
       for (const n of d.childNodes) if (n.nodeType === 3 && n.textContent === 'Demo (ingen GoXLR-motor)') n.textContent = 'Live';
     }
   });
+  // Questions are asked in the app's own dialogs (not window.confirm): answer OK.
+  const okDialogs = async () => {
+    for (let i = 0; i < 4; i++) {
+      const b = p.locator('[data-testid=dialog-ok]');
+      if (!(await b.count())) return;
+      await b.first().click(); await p.waitForTimeout(700);
+    }
+  };
   const shot = async (name, opts = {}) => { await live(); await p.waitForTimeout(150); await p.screenshot({ path: `${OUT}/${name}.png`, ...opts }); console.log('shot', name); };
 
   // Set the scene: import the AutoHotkey shortcuts, move the EQ to the built-in engine, pick a preset.
   await nav('Overflytning');
-  await p.click('button:has-text("Tag fuld backup nu")').catch(() => {}); await p.waitForTimeout(500);
+  await p.click('button:has-text("Tag fuld backup nu")').catch(() => {}); await p.waitForTimeout(500); await okDialogs();
   await p.locator('button:has-text("Importér")').filter({ hasText: 'genveje' }).first().click().catch((e) => console.log('no import', e.message)); await p.waitForTimeout(600);
   await p.click('button:has-text("Husk nuværende lyd pr. app")').catch(() => {}); await p.waitForTimeout(500);
   await nav('Indstillinger');
-  await p.click('button:has-text("Brug den indbyggede motor nu")').catch((e) => console.log('no takeover', e.message)); await p.waitForTimeout(800);
+  await p.click('button:has-text("Brug den indbyggede motor nu")').catch((e) => console.log('no takeover', e.message)); await p.waitForTimeout(800); await okDialogs();
   await nav('Mikrofon');
   // A typical voice EQ instead of a flat line.
   const gains = ['-3', '-1', '0', '1', '3', '2'];
@@ -48,7 +56,7 @@ const OUT = process.argv[2];
     await input.fill(gains[i]); await input.press('Enter'); await p.waitForTimeout(120);
   }
   await nav('Afspilnings-EQ');
-  await p.locator('.card:has(h2:has-text("EQ-motor")) button:has-text("Erstat med indbygget motor")').click(); await p.waitForTimeout(2200);
+  await p.locator('.card:has(h2:has-text("EQ-motor")) button:has-text("Erstat med indbygget motor")').click(); await p.waitForTimeout(1000); await okDialogs(); await p.waitForTimeout(1500);
   await p.click('button:has-text("Fodtrin (FPS)")').catch((e) => console.log('no preset', e.message)); await p.waitForTimeout(800);
 
   // A few scenes.
@@ -72,6 +80,7 @@ const OUT = process.argv[2];
   await nav('Lys'); await shot('lys');
   await nav('Profiler'); await shot('profiler');
   await nav('Genveje'); await shot('genveje');
+  await nav('Stream Deck'); await shot('stream-deck');
   await nav('Overflytning'); await shot('overflytning');
   await nav('Diagnose'); await p.waitForTimeout(800); await shot('diagnose');
   await nav('Indstillinger'); await shot('indstillinger');

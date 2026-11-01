@@ -73,6 +73,8 @@ Når en genvej bruges, viser en lille boks øverst på skærmen i et sekund, hva
 
 ### Stream Deck
 
+![Stream Deck](docs/screenshots/stream-deck.png)
+
 Læg enhver handling på en tast på en Stream Deck, fx Streonor, Elgato eller Ulanzi. Siden **Stream Deck** viser alle handlinger, og du kopierer det, dit Stream Deck-program skal bruge:
 
 - et link (`goxlr-studio://action/…`) til handlingen "Website"
