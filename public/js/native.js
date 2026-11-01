@@ -65,7 +65,10 @@ export async function setOutputEqEngine(eq) {
 }
 
 // Browser demo of the EQ engine: starts as a separately installed Equalizer APO.
-const demoEngine = { kind: 'external', mode: 'lfx-gfx', uses_our_config: false, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) };
+const brokenDemo = typeof location !== 'undefined' && /[?&]brokenengine\b/.test(location.search);
+const demoEngine = brokenDemo
+  ? { kind: 'builtin', mode: 'sfx-efx', uses_our_config: true, unregistered: true, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) }
+  : { kind: 'external', mode: 'lfx-gfx', uses_our_config: false, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) };
 
 export async function engineInfo() {
   if (isNative()) return invoke('engine_info');
@@ -81,6 +84,11 @@ export async function engineInfo() {
       const installed = demoEngine.kind !== 'none' && demoEngine.installed.has(d.id);
       return { id: d.id, guid: d.id, name: d.name, installed, mode: installed ? demoEngine.mode : null };
     }),
+    registration: demoEngine.kind === 'builtin' && demoEngine.unregistered
+      ? { ok: false, problems: [{ code: 'missing-clsid-pre-mix', text: 'Motorens pre-mix-del er ikke registreret i Windows' }, { code: 'protected-audiodg', text: 'DisableProtectedAudioDG er ikke sat til 1' }] }
+      : { ok: true, problems: [] },
+    schema: demoEngine.unregistered ? 0 : 2,
+    schema_required: 2,
   };
 }
 
@@ -116,6 +124,10 @@ export async function engineTask(task) {
     if (task.mode) demoEngine.mode = task.mode;
     tests = demoTest(log, !task.mode);
   } else if (task.action === 'test') {
+    if (demoEngine.unregistered) {
+      log.push('Rettet: Motorens pre-mix-del er ikke registreret i Windows; DisableProtectedAudioDG er ikke sat til 1 – motoren er registreret i Windows igen');
+      demoEngine.unregistered = false;
+    }
     tests = demoTest(log);
   } else if (task.action === 'uninstall') {
     demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); log.push('EQ-motoren er fjernet');
@@ -278,7 +290,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.4.0', installed: false, browser: true };
+  return { version: '0.4.1', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {

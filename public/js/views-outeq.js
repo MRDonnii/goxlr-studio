@@ -399,7 +399,7 @@ export function outputEqView(ctx) {
     try { const { names } = await importPeacePresets(ctx); if (names.length) toast(`Importeret ${names.length} Peace-presets`, 'info'); } catch { /* no presets */ }
     await run({ action: 'install', devices: [...chosen] }, 'Erstatter Equalizer APO med den indbyggede motor…');
   };
-  const btn = (text, cls, fn) => h('button', { class: `btn sm ${cls}`, onclick: fn }, text);
+  const btn = (text, cls, fn, testid) => h('button', { class: `btn sm ${cls}`, onclick: fn, 'data-testid': testid || `engine-${text.toLowerCase().replace(/[^a-zæøå0-9]+/g, '-').replace(/^-|-$/g, '')}` }, text);
   const renderActions = () => {
     const list = [];
     if (info.kind === 'none') {
@@ -412,6 +412,8 @@ export function outputEqView(ctx) {
       if (!info.uses_our_config) list.push(btn('Brug den eksisterende motor', '', () => run({ action: 'use-external' }, 'Kobler Equalizer APO til GoXLR Studio…')));
     }
     if (info.kind === 'builtin') {
+      // Fejl 1: installed, but Windows cannot create the engine (registration missing).
+      if (info.registration && !info.registration.ok) list.push(btn('Reparér EQ-motoren', 'primary', () => run({ action: 'test' }, 'Reparerer og tester EQ-motoren – lyden afbrydes et øjeblik…'), 'engine-repair'));
       if (!info.uses_our_config) list.push(btn('Reparér', 'primary', needDevices(() => run({ action: 'install', devices: [...chosen] }, 'Reparerer EQ-motoren…'))));
       else if (selectionChanged()) list.push(btn('Gem udgange', 'primary', () => run({ action: 'set-devices', devices: [...chosen] }, 'Opdaterer udgange…')));
       // The test checks that Windows' audio engine really loads the engine on each output, and
@@ -463,10 +465,14 @@ export function outputEqView(ctx) {
       external: 'Equalizer APO er installeret som et separat program.',
       none: 'EQ-motoren er ikke installeret endnu.',
     }[info.kind] || '';
+    const unregistered = info.kind === 'builtin' && info.registration && !info.registration.ok;
     const sum = running && info.kind === 'builtin' ? engineTestSummary(lastTest?.tests) : null;
-    const state = !running ? '' : sum ? sum.text : 'Tryk "Test EQ-motoren" for at tjekke at den kører på udgangene.';
+    const state = unregistered
+      ? `Motoren er installeret, men ikke registreret korrekt i Windows, så EQ’en høres ikke: ${info.registration.problems.map((x) => x.text).join('; ')}. Tryk "Reparér EQ-motoren".`
+      : !running ? '' : sum ? sum.text : 'Tryk "Test EQ-motoren" for at tjekke at den kører på udgangene.';
     engineText.textContent = `${kind} ${state}${info.error ? ` (${info.error})` : ''}`;
-    if (sum && !sum.ok) { engineBadge.textContent = 'Ikke indlæst'; engineBadge.className = 'badge warn'; }
+    if (unregistered) { engineBadge.textContent = 'Skal repareres'; engineBadge.className = 'badge warn'; }
+    else if (sum && !sum.ok) { engineBadge.textContent = 'Ikke indlæst'; engineBadge.className = 'badge warn'; }
   }
   listAudioDevices().then((devs) => {
     targetSel.replaceChildren(h('option', { value: '' }, 'Alle markerede udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id, 'data-name': d.name }, shortName(d.name))));

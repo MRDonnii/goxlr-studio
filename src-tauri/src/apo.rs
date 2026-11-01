@@ -107,8 +107,13 @@ pub fn status() -> EngineStatus {
     let info = engine::info();
     let devices: Vec<DeviceApo> = info.devices.iter().map(|d| DeviceApo { id: d.id.clone(), name: d.name.clone(), apo: d.installed }).collect();
     let on_any = devices.iter().any(|d| d.apo);
-    let running = info.kind != "none" && info.uses_our_config && on_any;
+    let registered = info.registration.ok;
+    let running = info.kind != "none" && info.uses_our_config && on_any && registered;
     let reason = match info.kind.as_str() {
+        "builtin" if !registered => Some(format!(
+            "Motoren er ikke registreret korrekt i Windows, så EQ'en høres ikke ({}). Tryk \"Reparér EQ-motoren\".",
+            info.registration.problems.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("; ")
+        )),
         "none" if info.bundled => Some("EQ-motoren er ikke installeret endnu. Vælg udgange og tryk \"Installér EQ-motor\" – det kræver administrator-adgang én gang.".to_string()),
         "none" => Some("Denne version indeholder ikke EQ-motoren.".to_string()),
         "external" if info.bundled => Some("Equalizer APO er installeret separat. GoXLR Studio kan erstatte den med sin indbyggede motor – dine Peace-presets gemmes først.".to_string()),

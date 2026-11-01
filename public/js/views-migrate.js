@@ -107,12 +107,22 @@ export function migrateView(ctx) {
       } catch (e) { toast(String(e)); }
       render();
     } }, done.presets ? `Importér igen (${done.presets} sidst)` : `Importér ${scan.apo.preset_files || 'alle'} Peace-presets`);
-    const kindText = { builtin: 'GoXLR Studios indbyggede EQ-motor kører.', external: 'Equalizer APO er stadig installeret separat.', none: 'Ingen EQ-motor installeret endnu.' }[engine.kind];
+    // Fejl 1: "installed" is not enough – Windows must be able to create the engine.
+    const unregistered = engine.kind === 'builtin' && engine.registration?.ok === false;
+    const kindText = unregistered
+      ? `Installeret, men ikke registreret korrekt i Windows, så EQ’en høres ikke: ${engine.registration.problems.map((x) => x.text).join('; ')}.`
+      : { builtin: 'GoXLR Studios indbyggede EQ-motor er installeret og registreret.', external: 'Equalizer APO er stadig installeret separat.', none: 'Ingen EQ-motor installeret endnu.' }[engine.kind];
+    const repairBtn = unregistered ? h('button', { class: 'btn sm primary', 'data-testid': 'migrate-engine-repair', onclick: async () => {
+      repairBtn.disabled = true;
+      await ctx.repairEngine?.(true);
+      reload();
+    } }, 'Reparér EQ-motoren') : null;
     return h('div', { class: 'card' }, h('h2', {}, '3 · EQ, Peace og Equalizer APO'),
       check(!!done.presets || !scan.apo.config_dir, 'Peace-presets', scan.apo.config_dir ? `${scan.apo.preset_files} filer fundet i ${scan.apo.config_dir}` : 'Ingen Equalizer APO-mappe fundet.'),
-      check(engine.kind === 'builtin', 'EQ-motor', kindText),
+      check(engine.kind === 'builtin' && !unregistered, 'EQ-motor', kindText),
       h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap' } },
         scan.apo.config_dir ? presetsBtn : null,
+        repairBtn,
         engine.kind !== 'builtin' ? h('button', { class: 'btn sm', onclick: () => ctx.navigate('outeq') }, engine.kind === 'external' ? 'Erstat Equalizer APO…' : 'Installér EQ-motor…') : null),
       h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Når den indbyggede motor kører, har du ikke brug for Equalizer APO og Peace. GoXLR Studio afinstallerer selv Equalizer APO, når du trykker "Erstat" på EQ-siden – efter at have gemt presets.'));
   };
@@ -201,7 +211,7 @@ export function migrateView(ctx) {
         check(!!done.backup, 'Backup taget'),
         check(!!done.hotkeys || !scan.ahk.length, 'Genveje flyttet'),
         check(!!done.presets || !scan.apo.config_dir, 'Peace-presets importeret'),
-        check(engine.kind === 'builtin', 'Indbygget EQ-motor'),
+        check(engine.kind === 'builtin' && engine.registration?.ok !== false, engine.kind === 'builtin' && engine.registration?.ok === false ? 'Indbygget EQ-motor skal repareres' : 'Indbygget EQ-motor'),
         check(!daemon.foreign?.length && (daemon.started_by_us || daemon.bundled), 'Indbygget GoXLR-motor'),
         check(!leftovers.length, leftovers.length ? `${leftovers.length} gamle programmer tilbage` : 'Gamle programmer fjernet')));
   };

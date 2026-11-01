@@ -4,7 +4,7 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
@@ -208,6 +208,13 @@ function renderBanners() {
     items.push(h('div', { class: 'banner warn' }, 'GoXLR-motoren kører ikke, eller mixeren er ikke tilsluttet – du ser demo-data.',
       h('button', { class: 'btn sm primary', onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR-motoren')));
   }
+  const rep = ctx.engineRepair;
+  if (rep?.needed) {
+    items.push(h('div', { class: 'banner warn', 'data-testid': 'banner-engine-repair' },
+      `EQ-motoren er ikke registreret korrekt i Windows, så EQ’en høres ikke: ${rep.problems.join('; ')}.`,
+      h('button', { class: 'btn sm primary', 'data-testid': 'engine-repair', disabled: rep.running, onclick: () => repairEngine(true) }, rep.running ? 'Reparerer…' : 'Reparér nu'),
+      h('button', { class: 'btn sm', onclick: () => navigate('outeq') }, 'Gå til EQ-motor')));
+  }
   if (ctx.apoLost) {
     items.push(h('div', { class: 'banner warn' }, 'EQ-motoren læser ikke længere GoXLR Studios EQ (fx efter en geninstallation af Equalizer APO).',
       h('button', { class: 'btn sm primary', onclick: () => navigate('outeq') }, 'Gå til EQ-motor'),
@@ -233,6 +240,45 @@ async function apoWatchdog() {
     if (lost !== !!ctx.apoLost) { ctx.apoLost = lost; renderBanners(); }
   }
 }
+
+// Fejl 1: an engine installed by an older version (or unregistered by Equalizer APO's uninstaller)
+// is installed but cannot be created by Windows. Checked at startup without admin; repaired once
+// automatically per app version (it needs admin), otherwise from the banner.
+async function checkEngineRegistration() {
+  if (!isNative()) return;
+  const info = await engineInfo().catch(() => null);
+  if (!info || info.kind !== 'builtin') { ctx.engineRepair = null; renderBanners(); return; }
+  const problems = (info.registration?.problems || []).map((p) => p.text);
+  const outdated = (info.schema || 0) < (info.schema_required || 0);
+  ctx.engineRepair = { needed: problems.length > 0, outdated, problems, running: false };
+  renderBanners();
+  const version = (await appInfo().catch(() => ({}))).version || '?';
+  if ((problems.length || outdated) && ctx.prefs.engineRepairTried !== version) {
+    ctx.prefs.engineRepairTried = version; ctx.savePrefs();
+    repairEngine(false);
+  }
+}
+
+async function repairEngine(manual) {
+  const rep = ctx.engineRepair || (ctx.engineRepair = { problems: [] });
+  if (rep.running) return;
+  rep.running = true; renderBanners();
+  toast('EQ-motoren repareres og testes – Windows beder om administrator-adgang, og lyden afbrydes et øjeblik', 'info');
+  try {
+    const r = await engineTask({ action: 'test' });
+    if (!r.ok) throw new Error(r.error || 'Ukendt fejl');
+    const fixed = (r.log || []).find((l) => l.startsWith('Rettet:'));
+    const failed = (r.tests || []).filter((t) => !t.ok && !t.error);
+    if (r.tests?.length) storeSet('engine-test', { at: Date.now(), tests: r.tests }).catch(() => {});
+    toast(failed.length ? (r.log || []).slice(-1)[0] : `${fixed ? 'EQ-motoren er repareret' : 'EQ-motoren er i orden'}${r.tests?.length ? ` og kører på ${r.tests.filter((t) => t.ok).length} udgange` : ''}`, failed.length ? undefined : 'info');
+  } catch (e) {
+    if (manual) toast(`Reparation af EQ-motoren: ${e.message || e}`);
+  }
+  rep.running = false;
+  await checkEngineRegistration();
+  if (current === 'outeq') mount();
+}
+ctx.repairEngine = (manual = true) => repairEngine(manual);
 
 // The built-in GoXLR engine is started by the app at launch; restart it if it stops while we run.
 let daemonRetry = 0;
@@ -537,6 +583,7 @@ async function boot() {
   // Background chores: APO watchdog, daemon autostart, update check.
   setInterval(apoWatchdog, 20000);
   setTimeout(apoWatchdog, 4000);
+  setTimeout(checkEngineRegistration, 3000);
   setInterval(daemonWatchdog, 15000);
   setTimeout(() => checkUpdate(), 15000);
   setInterval(() => checkUpdate(), 6 * 3600 * 1000);

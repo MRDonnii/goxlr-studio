@@ -377,6 +377,12 @@ pub struct EngineInfo {
     /// Config folder of a separate Equalizer APO (where Peace keeps its presets).
     pub external_config: Option<String>,
     pub devices: Vec<EngineDevice>,
+    /// Whether Windows can create GoXLR Studio's engine (only checked for the built-in engine).
+    pub registration: Registration,
+    /// Engine layout version written by the last successful install/repair (see ENGINE_SCHEMA).
+    pub schema: u32,
+    /// The version this app needs; when `schema` is older the engine is repaired once.
+    pub schema_required: u32,
 }
 
 fn fx_key(guid: &str) -> String {
@@ -439,7 +445,142 @@ pub fn info() -> EngineInfo {
         uses_our_config,
         external_config,
         devices: if kind == "none" { devices().into_iter().map(|d| EngineDevice { installed: false, ..d }).collect() } else { devices() },
+        registration: if kind == "builtin" { registration() } else { Registration { ok: true, problems: vec![] } },
+        schema: reg::read_dword(APP_KEY, SCHEMA_VALUE).unwrap_or(0),
+        schema_required: ENGINE_SCHEMA,
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Registration of the engine in Windows (fejl 1): both COM classes must point to our DLL and be
+// registered as audio effects, and protected audiodg must be off. Equalizer APO's uninstaller
+// removes all of this (regsvr32 /u + DisableProtectedAudioDG), whichever DLL registered it.
+// ---------------------------------------------------------------------------------------------
+
+/// Bumped when an update needs the engine repaired once (registration, layout).
+pub const ENGINE_SCHEMA: u32 = 2;
+const SCHEMA_VALUE: &str = "GoXLRStudioEngineSchema";
+const CLSID_KEY: &str = r"SOFTWARE\Classes\CLSID";
+const APO_REG_KEY: &str = r"SOFTWARE\Classes\AudioEngine\AudioProcessingObjects";
+
+/// What the registry says about the engine's registration (read without admin).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RegFacts {
+    pub dll_exists: bool,
+    /// InprocServer32 of the pre-mix and post-mix classes (None = not registered).
+    pub pre_mix_path: Option<String>,
+    pub post_mix_path: Option<String>,
+    /// Registered as audio processing objects (AudioEngine\AudioProcessingObjects).
+    pub pre_mix_apo: bool,
+    pub post_mix_apo: bool,
+    pub disable_protected_audiodg: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct RegIssue {
+    /// missing-dll, missing-clsid-pre-mix, wrong-path-post-mix, missing-apo-pre-mix, protected-audiodg …
+    pub code: String,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Registration {
+    pub ok: bool,
+    pub problems: Vec<RegIssue>,
+}
+
+/// Classifies the registration (pure, see tests): empty = everything is in place.
+pub fn classify_registration(f: &RegFacts, dll: &Path) -> Vec<RegIssue> {
+    let issue = |code: &str, text: String| RegIssue { code: code.into(), text };
+    let mut out = Vec::new();
+    if !f.dll_exists {
+        out.push(issue("missing-dll", format!("Motorfilen mangler ({})", dll.display())));
+    }
+    for (part, path, apo) in [("pre-mix", &f.pre_mix_path, f.pre_mix_apo), ("post-mix", &f.post_mix_path, f.post_mix_apo)] {
+        match path {
+            None => out.push(issue(&format!("missing-clsid-{part}"), format!("Motorens {part}-del er ikke registreret i Windows"))),
+            Some(p) if !same_path(p.trim_matches('"'), dll) => out.push(issue(&format!("wrong-path-{part}"), format!("Motorens {part}-del peger på en anden fil ({p})"))),
+            Some(_) => {}
+        }
+        if !apo {
+            out.push(issue(&format!("missing-apo-{part}"), format!("Motorens {part}-del er ikke registreret som lydeffekt")));
+        }
+    }
+    if f.disable_protected_audiodg != Some(1) {
+        out.push(issue("protected-audiodg", "DisableProtectedAudioDG er ikke sat til 1".into()));
+    }
+    out
+}
+
+fn reg_facts() -> RegFacts {
+    let dll = install_dir().join("EqualizerAPO.dll");
+    let clsid_path = |g: &str| reg::read_str(&format!(r"{CLSID_KEY}\{g}\InprocServer32"), "");
+    RegFacts {
+        dll_exists: dll.is_file(),
+        pre_mix_path: clsid_path(PRE_MIX),
+        post_mix_path: clsid_path(POST_MIX),
+        pre_mix_apo: reg::exists(&format!(r"{APO_REG_KEY}\{PRE_MIX}")),
+        post_mix_apo: reg::exists(&format!(r"{APO_REG_KEY}\{POST_MIX}")),
+        disable_protected_audiodg: reg::read_dword(AUDIO_KEY, "DisableProtectedAudioDG"),
+    }
+}
+
+/// Read-only check (works without admin): used at startup, on the EQ page and in Overflytning.
+pub fn registration() -> Registration {
+    let problems = classify_registration(&reg_facts(), &install_dir().join("EqualizerAPO.dll"));
+    Registration { ok: problems.is_empty(), problems }
+}
+
+fn write_engine_files(log: &mut Vec<String>) -> Result<(), String> {
+    let dir = install_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for (name, bytes) in ENGINE_FILES {
+        let target = dir.join(name);
+        if std::fs::read(&target).map(|b| b == *bytes).unwrap_or(false) {
+            continue;
+        }
+        if std::fs::write(&target, bytes).is_err() {
+            // Still locked: move it aside, Windows deletes it on the next restart.
+            let aside = dir.join(format!("{name}.old-{}", std::process::id()));
+            std::fs::rename(&target, &aside).map_err(|e| format!("{name}: {e}"))?;
+            std::fs::write(&target, bytes).map_err(|e| format!("{name}: {e}"))?;
+        }
+    }
+    log.push(format!("Motorfiler lagt i {}", dir.display()));
+    Ok(())
+}
+
+/// Makes sure Windows can create the engine (elevated): registers the DLL and turns protected
+/// audiodg off when something is missing, and says what was fixed. Returns true if it fixed anything.
+fn ensure_engine_registered(log: &mut Vec<String>) -> Result<bool, String> {
+    if !reg::read_str(APP_KEY, "InstallPath").is_some_and(|p| same_path(&p, &install_dir())) {
+        return Ok(false); // not GoXLR Studio's engine
+    }
+    let before = registration();
+    if before.ok {
+        let _ = reg::write_dword(APP_KEY, SCHEMA_VALUE, ENGINE_SCHEMA);
+        return Ok(false);
+    }
+    if before.problems.iter().any(|p| p.code == "missing-dll") {
+        if !bundled() {
+            return Err("Motorfilen mangler, og denne version indeholder den ikke".into());
+        }
+        write_engine_files(log)?;
+    }
+    let dll = install_dir().join("EqualizerAPO.dll");
+    let st = hidden("regsvr32").arg("/s").arg(&dll).status().map_err(|e| e.to_string())?;
+    if !st.success() {
+        return Err(format!("Registrering af motoren fejlede (regsvr32 kode {:?})", st.code()));
+    }
+    reg::create(AUDIO_KEY)?;
+    reg::write_dword(AUDIO_KEY, "DisableProtectedAudioDG", 1)?;
+    let after = registration();
+    if !after.ok {
+        return Err(format!("Motoren kunne ikke registreres: {}", after.problems.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("; ")));
+    }
+    reg::write_dword(APP_KEY, SCHEMA_VALUE, ENGINE_SCHEMA)?;
+    log.push(format!("Rettet: {} – motoren er registreret i Windows igen", before.problems.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("; ")));
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1023,10 +1164,19 @@ fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &m
         log.push(match (&t.error, t.ok) {
             (_, true) => format!("✓ {}: EQ-motoren kører ({})", t.name, mode_label(&t.mode)),
             (Some(e), _) => format!("– {}: kunne ikke testes ({e})", t.name),
-            (None, false) => format!("✗ {}: EQ-motoren blev ikke indlæst – genstart pc'en og tryk \"Test EQ-motoren\"", t.name),
+            (None, false) => format!("✗ {}: ikke indlæst", t.name),
         });
     }
-    tests.iter().any(|t| !t.ok && t.error.is_none())
+    let failed: Vec<&str> = tests.iter().filter(|t| !t.ok && t.error.is_none()).map(|t| t.name.as_str()).collect();
+    if !failed.is_empty() {
+        let reg = registration();
+        log.push(if reg.ok {
+            format!("Motoren er registreret korrekt i Windows, men bliver ikke indlæst på: {}. Genstart pc'en, og tryk så \"Test EQ-motoren\" igen.", failed.join(", "))
+        } else {
+            format!("Motoren er ikke registreret korrekt i Windows ({}).", reg.problems.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("; "))
+        });
+    }
+    !failed.is_empty()
 }
 
 fn installed_guids() -> Vec<String> {
@@ -1160,13 +1310,24 @@ fn remove_external(log: &mut Vec<String>) -> Result<(), String> {
         let _ = std::fs::copy(&old, backup.join("config").join("config.txt"));
     }
     log.push(format!("Equalizer APO's config (inkl. Peace-presets) gemt i {}", backup.display()));
-    let st = std::process::Command::new(&uninstaller)
-        .arg("/S")
-        .arg(format!("_?={}", install.display()))
-        .status()
-        .map_err(|e| format!("Equalizer APO's afinstallation: {e}"))?;
+    // NSIS only recognises "_?=" unquoted and as the last parameter. Quoted (std quotes paths with
+    // spaces) the uninstaller copies itself to %TEMP% and keeps running after this returns – and
+    // its "regsvr32 /u" then unregistered the engine installed right after (fejl 1).
+    let mut cmd = std::process::Command::new(&uninstaller);
+    cmd.arg("/S");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.raw_arg(format!("_?={}", install.display()));
+    }
+    let st = cmd.status().map_err(|e| format!("Equalizer APO's afinstallation: {e}"))?;
     if !st.success() {
         return Err(format!("Equalizer APO's afinstallation fejlede (kode {:?})", st.code()));
+    }
+    // Belt and braces: wait until the uninstaller has really finished (its uninstall entry goes last).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while reg::exists(UNINSTALL_KEY) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(250));
     }
     // With _?= the uninstaller cannot delete itself; tidy up what is left.
     let _ = std::fs::remove_file(&uninstaller);
@@ -1187,20 +1348,7 @@ fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>,
         // The audio service keeps the DLL loaded; stop it so the files can be replaced.
         let _ = powershell("Stop-Service -Name Audiosrv -Force -ErrorAction Stop");
     }
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for (name, bytes) in ENGINE_FILES {
-        let target = dir.join(name);
-        if std::fs::read(&target).map(|b| b == *bytes).unwrap_or(false) {
-            continue;
-        }
-        if std::fs::write(&target, bytes).is_err() {
-            // Still locked: move it aside, Windows deletes it on the next restart.
-            let aside = dir.join(format!("{name}.old-{}", std::process::id()));
-            std::fs::rename(&target, &aside).map_err(|e| format!("{name}: {e}"))?;
-            std::fs::write(&target, bytes).map_err(|e| format!("{name}: {e}"))?;
-        }
-    }
-    log.push(format!("Motorfiler lagt i {}", dir.display()));
+    write_engine_files(log)?;
     let dll = dir.join("EqualizerAPO.dll");
     let st = hidden("regsvr32").arg("/s").arg(&dll).status().map_err(|e| e.to_string())?;
     if !st.success() {
@@ -1214,6 +1362,7 @@ fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>,
     reg::write_str(APP_KEY, "EnableTrace", "false")?;
     reg::create(AUDIO_KEY)?;
     reg::write_dword(AUDIO_KEY, "DisableProtectedAudioDG", 1)?;
+    ensure_engine_registered(log)?;
     apply_devices(devices, mode, log)?;
     Ok(verify(devices, mode.is_none(), log, tests))
 }
@@ -1273,15 +1422,19 @@ pub fn run_task(task: &Task) -> TaskResult {
     let res = match task {
         Task::Install { devices, mode } => install_engine(devices, mode.as_deref(), &mut log, &mut tests),
         // A way chosen by hand is only tested; otherwise the way that works is found automatically.
-        Task::SetDevices { devices, mode } => apply_devices(devices, mode.as_deref(), &mut log).map(|_| verify(devices, mode.is_none(), &mut log, &mut tests)),
-        Task::Test => {
+        Task::SetDevices { devices, mode } => ensure_engine_registered(&mut log)
+            .and_then(|_| apply_devices(devices, mode.as_deref(), &mut log))
+            .map(|_| verify(devices, mode.is_none(), &mut log, &mut tests)),
+        // Repairs what an older version or Equalizer APO's uninstaller left behind, then tests.
+        Task::Test => ensure_engine_registered(&mut log).and_then(|_| {
             let guids = installed_guids();
             if guids.is_empty() {
-                Err("EQ-motoren er ikke sat på nogen udgang".into())
+                log.push("EQ-motoren er ikke sat på nogen udgang endnu".into());
+                Ok(false)
             } else {
                 Ok(verify(&guids, true, &mut log, &mut tests))
             }
-        }
+        }),
         Task::Uninstall => uninstall_engine(&mut log),
         Task::UseExternal => use_external(true, &mut log),
         Task::RestoreExternal => use_external(false, &mut log),
@@ -1393,6 +1546,45 @@ mod tests {
         assert!(matches!(t, Task::SetDevices { mode: Some(ref m), .. } if m == "sfx-efx"));
         let t: Task = serde_json::from_str(r#"{"action":"install","devices":[]}"#).unwrap();
         assert!(matches!(t, Task::Install { mode: None, .. }));
+    }
+
+    fn facts_ok() -> RegFacts {
+        let dll = r"C:\Program Files\GoXLR Studio Engine\EqualizerAPO.dll".to_string();
+        RegFacts { dll_exists: true, pre_mix_path: Some(dll.clone()), post_mix_path: Some(dll), pre_mix_apo: true, post_mix_apo: true, disable_protected_audiodg: Some(1) }
+    }
+
+    fn codes(f: &RegFacts) -> Vec<String> {
+        classify_registration(f, Path::new(r"C:\Program Files\GoXLR Studio Engine\EqualizerAPO.dll")).into_iter().map(|i| i.code).collect()
+    }
+
+    #[test]
+    fn registration_ok() {
+        assert!(codes(&facts_ok()).is_empty());
+        // Paths compare case-insensitively and may be quoted.
+        let mut f = facts_ok();
+        f.pre_mix_path = Some(r#""c:\program files\goxlr studio engine\EQUALIZERAPO.DLL""#.into());
+        assert!(codes(&f).is_empty());
+    }
+
+    #[test]
+    fn registration_after_equalizer_apo_uninstaller() {
+        // What the report found after upgrading from 0.3.3: DLL in place, but no CLSIDs, no APO
+        // registration and DisableProtectedAudioDG empty.
+        let f = RegFacts { dll_exists: true, ..Default::default() };
+        assert_eq!(
+            codes(&f),
+            ["missing-clsid-pre-mix", "missing-apo-pre-mix", "missing-clsid-post-mix", "missing-apo-post-mix", "protected-audiodg"]
+        );
+    }
+
+    #[test]
+    fn registration_wrong_path_and_flags() {
+        let mut f = facts_ok();
+        f.post_mix_path = Some(r"C:\Program Files\EqualizerAPO\EqualizerAPO.dll".into());
+        f.disable_protected_audiodg = Some(0);
+        assert_eq!(codes(&f), ["wrong-path-post-mix", "protected-audiodg"]);
+        let f = RegFacts { dll_exists: false, ..facts_ok() };
+        assert_eq!(codes(&f), ["missing-dll"]);
     }
 
     #[test]
