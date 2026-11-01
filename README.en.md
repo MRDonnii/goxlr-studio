@@ -59,7 +59,7 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 
 The mic EQ runs in the GoXLR's own chip, so it uses no CPU and adds no delay. Here you also find gain, noise gate, compressor and mic profiles.
 
-**Pick your microphone** from 51 models, e.g. Røde NT1, Shure SM7B, Fifine K688 and Audio-Technica AT2020. GoXLR Studio then suggests EQ, noise gate, compressor and de-esser from the mic's frequency response: a clear speaking voice minus the mic's own coloration, fitted to the GoXLR's bands. The **mic assistant** listens to your room and your voice and sets gain and noise gate, and **Record and listen** lets you hear the result.
+**Pick your microphone** from 51 models, e.g. Røde NT1, Shure SM7B, Fifine K688 and Audio-Technica AT2020. GoXLR Studio then suggests EQ, noise gate, compressor and de-esser from the mic's frequency response: a clear speaking voice minus the mic's own coloration, fitted to the GoXLR's bands. The **mic assistant** listens to your room and your voice and sets gain and noise gate, and **Record and listen** lets you hear the result. Happy with it? **Share your settings** as a file with a friend.
 
 ### Per-app audio
 
@@ -136,9 +136,11 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 - Start with Windows and close to the tray icon
 - Automatic updates
 - **Home Assistant** via MQTT: GoXLR Studio shows up as a device with mic mute, "Mic open" (e.g. for an ON AIR lamp), GoXLR profile, EQ preset, scene and volumes
+- **OBS:** switch OBS scenes with hotkeys, Stream Deck or automation, let the scene follow the GoXLR profile, and "Stream-safe music" takes the music out of your stream
+- **Remote on your phone:** mute, profiles, scenes, EQ and volume from your phone on the same Wi-Fi
 - Local API, e.g. for Stream Deck
 - **Sound check** that finds Windows settings that change the sound (e.g. Windows turning the game down during calls) and fixes them with one click
-- Backup and a **Diagnostics** page where you can copy a report if something acts up
+- Backup and a **Diagnostics** page where you can copy or save a report (without passwords) if something acts up
 - Effects on the full-size GoXLR: reverb, echo, pitch, gender, megaphone, robot and hardtune
 
 *The screenshots are taken with the app's demo data in the GoXLR Mini layout, with the Danish UI.*

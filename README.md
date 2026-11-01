@@ -57,7 +57,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 
 Mikrofon-EQ'en kører i GoXLR'ens egen chip, så den bruger hverken CPU eller giver forsinkelse. Her finder du også gain, noise gate, kompressor og mikrofonprofiler.
 
-**Vælg din mikrofon** blandt 51 modeller, fx Røde NT1, Shure SM7B, Fifine K688 og Audio-Technica AT2020. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. EQ'en er en klar talestemme minus mikrofonens egen klang, tilpasset GoXLR'ens bånd.
+**Vælg din mikrofon** blandt 51 modeller, fx Røde NT1, Shure SM7B, Fifine K688 og Audio-Technica AT2020. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. EQ'en er en klar talestemme minus mikrofonens egen klang, tilpasset GoXLR'ens bånd. **Mikrofon-assistenten** lytter til dit rum og din stemme og sætter gain og noise gate, og med **Optag og lyt** hører du resultatet. Er du tilfreds, kan du **dele dine indstillinger** som en fil med en ven.
 
 ### Lyd pr. app
 
@@ -129,10 +129,12 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - Start med Windows og luk til bakke-ikonet
 - Automatiske opdateringer
 - **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
+- **OBS:** skift OBS-scene med genveje, Stream Deck eller automatik, lad scenen følge GoXLR-profilen, og "Stream-sikker musik" tager musikken ud af streamen
+- **Fjernbetjening på mobilen:** mute, profiler, scener, EQ og lydstyrke fra telefonen på samme wifi
 - Lokalt API til fx Stream Deck
 - **Lydtjek**, der finder Windows-indstillinger, som ændrer lyden (fx at Windows skruer ned for spillet under opkald), og retter dem med ét klik
 - Dansk og engelsk: appen følger Windows' sprog og kan skiftes under Indstillinger
-- Backup og en side med **Diagnose**, hvor du kan kopiere en rapport, hvis noget driller
+- Backup og en side med **Diagnose**, hvor du kan kopiere eller gemme en rapport (uden adgangskoder), hvis noget driller
 - Effekter på den store GoXLR: reverb, echo, pitch, gender, megafon, robot og hardtune
 
 *Billederne er taget med appens demo-data i GoXLR Mini-layout.*
