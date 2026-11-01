@@ -230,3 +230,35 @@ export function parseAhk(text) {
   }
   return { bindings, unknown };
 }
+
+// ---------- fader LEDs ----------
+// Same rule as the GoXLR hardware / GoXLR Utility UI: 15 LEDs; those at or below the fader position
+// show the bottom colour (colour_two), those above the top colour (colour_one). Gradient styles
+// blend bottom→top below the fader and leave the LEDs above it dark.
+export const FADER_LEDS = 15;
+const hexRgb = (hex) => { const n = parseInt(String(hex).slice(0, 6), 16) || 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const rgbHex = (c) => c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+
+export function faderLeds(style, top, bottom, value) {
+  const lit = Math.ceil((FADER_LEDS / 255) * value + 0.25);
+  const t = hexRgb(top), b = hexRgb(bottom);
+  return Array.from({ length: FADER_LEDS }, (_, i) => {
+    if (style === 'Gradient' || style === 'GradientMeter') {
+      if (i >= lit) return null;
+      const k = i / FADER_LEDS;
+      return rgbHex(b.map((v, j) => v + (t[j] - v) * k));
+    }
+    return i >= lit ? rgbHex(t) : rgbHex(b);
+  });
+}
+
+// ---------- Discord mute sync ----------
+const mutedFor = (state, fn) => state === 'MutedToAll' || (state === 'MutedToX' && (fn === 'All' || fn === 'ToVoiceChat'));
+
+// Is the mic muted towards voice chat on the GoXLR (cough button and/or the Mic fader's mute)?
+export function micMutedForChat(mixer, opts = {}) {
+  if (!mixer) return false;
+  const cough = opts.cough !== false && mutedFor(mixer.cough_button?.state, mixer.cough_button?.mute_type);
+  const fader = opts.fader !== false && Object.values(mixer.fader_status || {}).some((f) => f.channel === 'Mic' && mutedFor(f.mute_state, f.mute_type));
+  return cough || fader;
+}

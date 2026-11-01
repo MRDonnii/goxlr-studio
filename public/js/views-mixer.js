@@ -1,3 +1,4 @@
+import { FADER_LEDS, faderLeds } from './extras.js';
 import { h, slider, segmented, selectBox, toggle, throttle, toast } from './ui.js';
 import { CHANNELS, INPUTS, OUTPUTS } from './demo.js';
 import { listAudioDevices, setDefaultDevice } from './native.js';
@@ -12,17 +13,27 @@ const MUTE_FN_LABEL = { All: 'Alt', ToStream: 'Stream', ToVoiceChat: 'Voice chat
 
 export const pct = (v) => `${Math.round((v / 255) * 100)} %`;
 
-function verticalFader(binder, { get, set, colours }) {
-  const fill = h('div', { class: 'fill' });
+function verticalFader(binder, { get, set, colours, style }) {
+  // 15 LEDs on each side of the slot, coloured exactly like the hardware (see faderLeds).
+  const leds = Array.from({ length: FADER_LEDS }, () => [h('span', { class: 'led' }), h('span', { class: 'led' })]);
+  const ledBox = h('div', { class: 'leds' }, leds.map((pair) => h('div', { class: 'led-row' }, pair[0], h('span', { class: 'slot' }), pair[1])));
   const knob = h('div', { class: 'knob' });
-  const el = h('div', { class: 'vfader', tabindex: 0, role: 'slider', 'aria-valuemin': 0, 'aria-valuemax': 255 }, fill, knob);
+  const el = h('div', { class: 'vfader', tabindex: 0, role: 'slider', 'aria-valuemin': 0, 'aria-valuemax': 255 }, ledBox, knob);
   let active = false;
   const send = throttle(set, 40);
   const paint = (v) => {
     const p = (v / 255) * 100;
-    fill.style.height = `${p}%`;
     knob.style.bottom = `calc(${p}% - ${(p / 100) * 18}px)`;
     el.setAttribute('aria-valuenow', v);
+    const c = colours();
+    if (!c) return;
+    faderLeds(style?.() || 'TwoColour', c.colour_one, c.colour_two, v).forEach((col, i) => {
+      for (const led of leds[i]) {
+        led.style.background = col ? `#${col}` : '';
+        led.style.boxShadow = col ? `0 0 6px #${col}99` : '';
+        led.classList.toggle('off', !col);
+      }
+    });
   };
   const fromY = (y) => {
     const r = el.getBoundingClientRect();
@@ -83,6 +94,7 @@ export function mixerView(ctx) {
         get: () => m().levels.volumes[fs().channel],
         set: (v) => conn.command('SetVolume', fs().channel, v),
         colours: () => m().lighting?.faders?.[f]?.colours,
+        style: () => m().lighting?.faders?.[f]?.style,
       }),
       pctEl,
       muteBtn,

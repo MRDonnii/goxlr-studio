@@ -22,7 +22,7 @@ export function createDemoStatus() {
   EQ_BANDS.forEach((b, i) => { gain[b] = [2, 1, 0, -1, -2, 0, 1, 3, 2, 1][i]; freq[b] = EQ_DEFAULT_FREQ[i]; });
   const mgain = {}; const mfreq = {};
   MINI_EQ_BANDS.forEach((b, i) => { mgain[b] = 0; mfreq[b] = MINI_EQ_DEFAULT_FREQ[i]; });
-  const volumes = { Mic: 255, LineIn: 140, Console: 160, System: 190, Game: 178, Chat: 204, Sample: 150, Music: 120, Headphones: 210, MicMonitor: 0, LineOut: 255 };
+  const volumes = { Mic: 220, LineIn: 140, Console: 160, System: 170, Game: 178, Chat: 100, Sample: 150, Music: 85, Headphones: 210, MicMonitor: 0, LineOut: 255 };
   const fader = (channel, text) => ({ channel, mute_type: 'All', mute_state: 'Unmuted', scribble: { file_name: null, bottom_text: text, left_text: null, inverted: false } });
   const presetNames = { Preset1: 'Studie', Preset2: 'Radio', Preset3: 'Robot', Preset4: 'Hal', Preset5: 'Telefon', Preset6: 'Dyb' };
   return {
@@ -33,7 +33,7 @@ export function createDemoStatus() {
     mixers: {
       DEMO0001: {
         hardware: { serial_number: 'DEMO0001', device_type: (typeof location !== 'undefined' && /[?&]mini\b/.test(location.search)) ? 'Mini' : 'Full', colour_way: 'Black', versions: { firmware: [1, 5, 0, 0] }, manufactured_date: '', usb_device: {} },
-        fader_status: { A: fader('Mic', 'Mikrofon'), B: fader('Music', 'Musik'), C: fader('Chat', 'Discord'), D: fader('System', 'System') },
+        fader_status: { A: fader('Mic', 'Mic'), B: fader('Chat', 'Chat'), C: fader('Music', 'Music'), D: fader('System', 'System') },
         mic_status: {
           mic_type: 'Dynamic',
           mic_gains: { Dynamic: 52, Condenser: 30, Jack: 20 },
@@ -48,10 +48,10 @@ export function createDemoStatus() {
         lighting: {
           animation: { supported: true, mode: 'None', mod1: 0, mod2: 0, waterfall_direction: 'Down' },
           faders: {
-            A: { style: 'Gradient', colours: { colour_one: '00FFFF', colour_two: '0040FF' } },
-            B: { style: 'Gradient', colours: { colour_one: 'FF00C8', colour_two: '7A00FF' } },
-            C: { style: 'Gradient', colours: { colour_one: '00FF7F', colour_two: '00A0FF' } },
-            D: { style: 'Gradient', colours: { colour_one: 'FFB000', colour_two: 'FF3D00' } },
+            A: { style: 'TwoColour', colours: { colour_one: 'E8E8FF', colour_two: 'FF2A7A' } },
+            B: { style: 'TwoColour', colours: { colour_one: 'E8E8FF', colour_two: 'E8E8FF' } },
+            C: { style: 'TwoColour', colours: { colour_one: 'FF2A7A', colour_two: '1E3CFF' } },
+            D: { style: 'TwoColour', colours: { colour_one: '3CFF8C', colour_two: 'FF2A7A' } },
           },
           buttons: Object.fromEntries(['Fader1Mute', 'Fader2Mute', 'Fader3Mute', 'Fader4Mute', 'Bleep', 'Cough', 'EffectSelect1', 'EffectSelect2', 'EffectSelect3', 'EffectSelect4', 'EffectSelect5', 'EffectSelect6', 'EffectFx', 'EffectMegaphone', 'EffectRobot', 'EffectHardTune', 'SamplerTopLeft', 'SamplerTopRight', 'SamplerBottomLeft', 'SamplerBottomRight', 'SamplerClear'].map((b, i) => [b, { off_style: 'Dimmed', colours: { colour_one: ['00FFFF', 'A855F7', 'FF3D7F', 'FFB000'][i % 4], colour_two: '000000' } }])),
           simple: { Global: { colour_one: '00FFFF' }, Accent: { colour_one: 'A855F7' }, Scribble1: { colour_one: 'FFFFFF' }, Scribble2: { colour_one: 'FFFFFF' }, Scribble3: { colour_one: 'FFFFFF' }, Scribble4: { colour_one: 'FFFFFF' } },

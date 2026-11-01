@@ -244,7 +244,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.3.0', installed: false, browser: true };
+  return { version: '0.3.1', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {
@@ -255,4 +255,13 @@ export async function installUpdate(url, sha256) {
 export async function openUrl(url) {
   if (isNative()) return invoke('open_url', { url });
   window.open(url, '_blank', 'noopener');
+}
+
+export async function sendKeys(accel) {
+  if (isNative()) return invoke('send_keys', { accel });
+}
+
+export async function discordRunning() {
+  if (isNative()) return invoke('discord_running');
+  return true;
 }

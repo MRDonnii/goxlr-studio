@@ -7,6 +7,7 @@ import { effectsView, scenesView, lightingView, profilesView, settingsView, appl
 import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, listAudioDevices, openUrl } from './native.js';
 import { diagView } from './views-diag.js';
 import { migrateView } from './views-migrate.js';
+import { startDiscordSync } from './discord.js';
 import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
@@ -517,6 +518,7 @@ async function boot() {
   registerHotkeys();
   syncTray();
   startAppRules(ctx);
+  startDiscordSync(ctx);
   ctx.applyOutputEq().catch(() => {});
   if (ctx.prefs.api?.enabled) applyApi();
   renderBanners();

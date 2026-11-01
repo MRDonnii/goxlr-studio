@@ -14,7 +14,8 @@ Selvstændig Windows-app (Tauri 2: Rust + vanilla JS) der erstatter GoXLR Utilit
 - `src-tauri/src/osd.rs` – OSD-vindue (`public/osd.html`), vises uden at tage fokus; springes over når hovedvinduet har fokus.
 - `src-tauri/src/api.rs` – lokalt HTTP-API (token påkrævet): `/state`, `/actions`, `/action/<id>` → event `api-action`.
 - `src-tauri/src/update.rs` – auto-opdatering fra GitHub-releases (kun URL'er under repoets releases/download, SHA-256 fra GitHubs `digest`), installer `/S` eller udskift portable exe.
-- `public/js/extras.js` – rene hjælpere (enhed-navne-fallback, crossfeed/loudness, AutoEQ, versioner, app-triggers, AutoHotkey-parser `parseAhk`) med tests i `tests/extras.test.mjs`.
+- `src-tauri/src/keys.rs` – `send_keys` (SendInput af en genvej) og `discord_running`.
+- `public/js/extras.js` – rene hjælpere (enhed-navne-fallback, crossfeed/loudness, AutoEQ, versioner, app-triggers, AutoHotkey-parser `parseAhk`, `faderLeds`, `micMutedForChat`) med tests i `tests/extras.test.mjs`.
 - `THIRD-PARTY-NOTICES.md` + `licenses/` – licenser for de indlejrede motorer; release vedlægger `EqualizerAPO-src-1.4.2.zip`.
 - Kommando-/statusformater kommer fra GoXLR Utility: `ipc/src/lib.rs` og `ipc/src/device.rs` i github.com/GoXLR-on-Linux/goxlr-utility.
 
@@ -29,8 +30,9 @@ Selvstændig Windows-app (Tauri 2: Rust + vanilla JS) der erstatter GoXLR Utilit
 - Firmware til GoXLR'en røres ikke (lukket, risiko for brick).
 
 ## Status og næste skridt
-Version 0.3.0 – selvstændig. Færdigt:
+Version 0.3.1 – selvstændig. Færdigt:
 - Indbygget GoXLR-motor og EQ-motor (se Arkitektur), siden **Overflytning** (backup, AHK→genveje, Peace-presets, TC-Helicon-profiler, "husk lyd pr. app", afinstallér gamle programmer; driveren markeres BEHOLD), EQ-motor-kort med valg af udgange.
+- 0.3.1: mixerens faders tegnes som hardwarens 15 LED'er (`faderLeds`: `colour_one` = over knappen, `colour_two` = under; Gradient blender under knappen), demo matcher Mini-layoutet; Discord-mute-synk (`discord.js`: når GoXLR-mic-mute mod voice chat skifter, trykkes Discords "Toggle Mute"-genvej via `send_keys`/SendInput, standard Ctrl+Shift+Alt+D, kun hvis Discord kører); dansk README med download-link.
 - Fra 0.2: genveje, lyd pr. app, bakkemenu, hurtig-skift, preset-chips, AutoEQ, EQ følger profil, crossfeed/loudness, OSD, API, backup, Diagnose, auto-opdatering.
 - Release: hæv `version` i `src-tauri/tauri.conf.json` (+ Cargo.toml/package.json) og push til main → bygget opretter selv tag `v<version>` og GitHub-release (tag-push er blokeret fra cloud-sessioner) med `*-setup.exe`, `.msi`, `GoXLR-Studio-portable.exe`, `THIRD-PARTY-NOTICES.md` og APO-kildekoden.
 

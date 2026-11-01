@@ -121,3 +121,33 @@ test('A hotkey that alternates between two profiles becomes a toggle', () => {
   const r = x.parseAhk(s);
   assert.deepEqual(r.bindings.map((b) => [b.accel, b.action]), [['F16', 'profile-toggle:Headset|Speakers']]);
 });
+
+test('fader LEDs follow the hardware: bottom colour below the knob, top colour above', () => {
+  // System fader on the GoXLR Mini in the user's photo: green above, pink below, knob around 2/3 up.
+  const leds = x.faderLeds('TwoColour', '00FF80', 'FF0080', 170);
+  assert.equal(leds.length, 15);
+  assert.equal(leds[0], 'FF0080');
+  assert.equal(leds[10], 'FF0080'); // ceil(15/255*170 + .25) = 11 LEDs lit with the bottom colour
+  assert.equal(leds[11], '00FF80');
+  assert.equal(leds[14], '00FF80');
+  // Fader at the bottom: everything shows the top colour except the lowest LED.
+  assert.deepEqual(x.faderLeds('TwoColour', 'FFFFFF', '000000', 0).filter((c) => c === '000000').length, 1);
+  // Gradient: dark above the knob, blend below.
+  const g = x.faderLeds('Gradient', 'FFFFFF', '000000', 128);
+  assert.equal(g[0], '000000');
+  assert.equal(g[14], null);
+  assert.ok(g.slice(0, 8).every((c) => c !== null));
+});
+
+test('mic mute for Discord: cough button and Mic fader, only when chat is affected', () => {
+  const m = (cough, coughFn, fader, faderFn) => ({
+    cough_button: { state: cough, mute_type: coughFn },
+    fader_status: { A: { channel: 'Mic', mute_state: fader, mute_type: faderFn }, B: { channel: 'Chat', mute_state: 'MutedToAll', mute_type: 'All' } },
+  });
+  assert.equal(x.micMutedForChat(m('Unmuted', 'All', 'Unmuted', 'All')), false);
+  assert.equal(x.micMutedForChat(m('MutedToX', 'All', 'Unmuted', 'All')), true);
+  assert.equal(x.micMutedForChat(m('MutedToX', 'ToStream', 'Unmuted', 'All')), false, 'muted to stream only – Discord still hears you');
+  assert.equal(x.micMutedForChat(m('MutedToAll', 'ToStream', 'Unmuted', 'All')), true);
+  assert.equal(x.micMutedForChat(m('Unmuted', 'All', 'MutedToX', 'ToVoiceChat')), true);
+  assert.equal(x.micMutedForChat(m('Unmuted', 'All', 'MutedToX', 'All'), { fader: false }), false);
+});

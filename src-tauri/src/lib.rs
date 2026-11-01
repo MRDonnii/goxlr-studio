@@ -5,6 +5,7 @@ mod audio;
 mod daemon;
 mod daemon_host;
 mod engine;
+mod keys;
 mod migrate;
 mod osd;
 mod store;
@@ -277,6 +278,17 @@ fn open_path(path: String) -> Result<(), String> {
     migrate::open_path(path)
 }
 
+/// Presses a key combination (Discord's "Toggle Mute" keybind).
+#[tauri::command]
+async fn send_keys(accel: String) -> Result<(), String> {
+    blocking(move || keys::send(&accel)).await
+}
+
+#[tauri::command]
+async fn discord_running() -> Result<bool, String> {
+    blocking(|| Ok(keys::any_running(&["Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe"]))).await
+}
+
 /// Opens a web link in the default browser (the webview itself never navigates away).
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
@@ -542,6 +554,8 @@ pub fn run() {
             run_uninstaller,
             open_path,
             open_url,
+            send_keys,
+            discord_running,
             show_osd,
             start_daemon,
             set_api,

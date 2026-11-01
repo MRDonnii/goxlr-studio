@@ -83,6 +83,7 @@ export async function runAction(ctx, id) {
       ctx.conn.command('SetFaderMuteState', arg, mute ? 'MutedToX' : 'Unmuted');
       return notify(ctx, `${m.fader_status[arg].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[arg].channel] || `Fader ${arg}`} ${mute ? 'muted' : 'tændt'}`, mute ? 'mute' : 'ok');
     }
+    case 'discord-toggle': return ctx.discordToggle?.();
     case 'eq-toggle': return toggleEq(ctx);
     case 'crossfeed-toggle':
     case 'loudness-toggle': {
@@ -159,6 +160,7 @@ export async function actionCatalog(ctx) {
   g('Andet', [
     m?.effects ? { id: 'fx-toggle', label: 'Effekter til/fra' } : null,
     { id: 'ducking-toggle', label: 'Auto-ducking til/fra' },
+    { id: 'discord-toggle', label: 'Skift Discord-mute (uden at røre GoXLR’en)' },
   ].filter(Boolean));
   return groups;
 }
@@ -194,6 +196,7 @@ export function actionLabel(ctx, id) {
     case 'output-next': return 'Næste udgang';
     case 'fx-toggle': return 'Effekter til/fra';
     case 'ducking-toggle': return 'Auto-ducking til/fra';
+    case 'discord-toggle': return 'Skift Discord-mute';
     default: return id;
   }
 }
