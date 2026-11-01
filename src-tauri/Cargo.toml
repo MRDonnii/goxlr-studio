@@ -55,6 +55,7 @@ windows = { version = "0.58", features = [
   "Win32_System_Pipes",
   "Win32_System_IO",
   "Win32_Storage_FileSystem",
+  "Win32_System_RemoteDesktop",
 ] }
 windows-core = "0.58"
 

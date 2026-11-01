@@ -310,6 +310,20 @@ export function discordNotice(mode, muted) {
   return muted ? 'Discord: mikrofon slået fra' : 'Discord: mikrofon slået til';
 }
 
+// Is the mic muted at all (cough button or the Mic fader's mute, to anything)?
+export function micIsMuted(mixer) {
+  if (!mixer) return false;
+  if (mixer.cough_button && mixer.cough_button.state !== 'Unmuted') return true;
+  return Object.values(mixer.fader_status || {}).some((f) => f.channel === 'Mic' && f.mute_state && f.mute_state !== 'Unmuted');
+}
+
+// "Du er muted": a level (GoXLR meter, dB) counts as speech above the gate's threshold (or −40 dB
+// without gate), never below −50 dB.
+export function mutedSpeechThreshold(mixer) {
+  const g = mixer?.mic_status?.noise_gate;
+  return Math.max(-50, g?.enabled && Number.isFinite(g.threshold) ? g.threshold : -40);
+}
+
 // ---------- VU meters ----------
 // Peak (0–1, linear) or dB → 0–1 on a −60…0 dB scale.
 export function peakToMeter(peak) {

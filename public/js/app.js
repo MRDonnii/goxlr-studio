@@ -11,7 +11,7 @@ import { soundsView } from './views-sounds.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
-import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome } from './extras.js';
+import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames } from './actions.js';
@@ -165,6 +165,39 @@ async function doInstallUpdate(background = false) {
   logActivity(`Opdatering til ${u.latest} startet (${background ? 'automatisk' : 'manuelt'})`);
   toast(`Henter ${u.latest}… GoXLR Studio lukker, installerer og starter igen af sig selv`, 'info');
   try { await installUpdate(u.asset.url, u.asset.sha256, u.latest, background); } catch (e) { u.installing = false; toast(`Opdatering fejlede: ${e}`); renderBanners(); }
+}
+
+// "Du er muted!": while the mic is muted, listen to the GoXLR's meter; speech for about a second
+// shows a notice over the game (at most every 20 s). Nothing is polled while the mic is open.
+function startMutedReminder() {
+  let talk = 0;
+  let last = 0;
+  setInterval(async () => {
+    const m = conn.mixer;
+    if (ctx.prefs.mutedReminder === false || conn.mode !== 'live' || !m || ctx.lockMuted || !micIsMuted(m)) { talk = 0; return; }
+    const db = await conn.micLevel().catch(() => null);
+    talk = Number.isFinite(db) && db > mutedSpeechThreshold(m) ? talk + 1 : Math.max(0, talk - 1);
+    if (talk >= 3 && Date.now() - last > 20000) {
+      last = Date.now(); talk = 0;
+      ctx.notify('Du er muted – mikrofonen er slået fra', 'mute');
+    }
+  }, 300);
+}
+
+// Win+L: mute the mic (to everything) while the pc is locked, and open it again on unlock – only
+// if GoXLR Studio muted it. With Discord "stum og døv", Discord follows.
+function onSessionLock(locked) {
+  const m = conn.mixer;
+  if (ctx.prefs.lockMute === false || !m) return;
+  if (locked && m.cough_button?.state === 'Unmuted') {
+    ctx.lockMuted = true;
+    conn.command('SetCoughMuteState', 'MutedToAll');
+    logActivity('Pc’en blev låst – mikrofonen er muted');
+  } else if (!locked && ctx.lockMuted) {
+    ctx.lockMuted = false;
+    conn.command('SetCoughMuteState', 'Unmuted');
+    logActivity('Pc’en blev låst op – mikrofonen er åben igen');
+  }
 }
 
 // TC-Helicon's driver makes the GoXLR a sound card and carries the engine's USB talk; GoXLR Studio
@@ -683,6 +716,7 @@ async function registerNativeHooks() {
   await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'bakke-menuen'); });
   await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'lokalt API'); });
   // A Stream Deck button (goxlr-studio://action/… or --action …) while GoXLR Studio runs.
+  await listen('session-lock', (ev) => onSessionLock(!!ev.payload));
   await listen('deck-action', (ev) => { if (typeof ev.payload === 'string') runDeckAction(ev.payload, 'Stream Deck'); });
 }
 
@@ -714,6 +748,7 @@ async function boot() {
   setInterval(daemonWatchdog, 15000);
   setTimeout(() => reportUpdateResult(), 2000);
   setTimeout(() => checkDriver(), 2500);
+  startMutedReminder();
   runLaunchAction();
   setTimeout(() => checkUpdate(), 15000);
   setInterval(() => checkUpdate(), 6 * 3600 * 1000);

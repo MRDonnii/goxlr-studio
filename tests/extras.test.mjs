@@ -233,3 +233,14 @@ test('stream deck: links, commands and web addresses for an action', () => {
   assert.equal(x.deckCommand('C:\\GoXLR Studio\\goxlr-studio.exe', 'mute-mic'), '"C:\\GoXLR Studio\\goxlr-studio.exe" --action mute-mic');
   assert.equal(x.deckApiUrl({ port: 14610, token: 'a+b' }, 'profile:Headset'), 'http://127.0.0.1:14610/action/profile%3AHeadset?token=a%2Bb');
 });
+
+test('muted reminder: muted by the cough button or the Mic fader; speech threshold from the gate', () => {
+  const fader = (channel, mute_state) => ({ channel, mute_state });
+  assert.equal(x.micIsMuted({ cough_button: { state: 'Unmuted' }, fader_status: { A: fader('Mic', 'Unmuted') } }), false);
+  assert.equal(x.micIsMuted({ cough_button: { state: 'MutedToX' }, fader_status: {} }), true);
+  assert.equal(x.micIsMuted({ cough_button: { state: 'Unmuted' }, fader_status: { B: fader('Mic', 'MutedToAll') } }), true);
+  assert.equal(x.micIsMuted({ cough_button: { state: 'Unmuted' }, fader_status: { B: fader('Music', 'MutedToAll') } }), false);
+  assert.equal(x.mutedSpeechThreshold({ mic_status: { noise_gate: { enabled: true, threshold: -38 } } }), -38);
+  assert.equal(x.mutedSpeechThreshold({ mic_status: { noise_gate: { enabled: true, threshold: -59 } } }), -50);
+  assert.equal(x.mutedSpeechThreshold({ mic_status: { noise_gate: { enabled: false, threshold: -20 } } }), -40);
+});

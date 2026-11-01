@@ -200,6 +200,12 @@ export function systemSettings(ctx) {
     steps,
     h('div', { class: 'hint' }, 'Mutes kun "til stream" påvirker ikke Discord. Muter du direkte i Discord, kommer de ud af trit – tryk så "Test / ret" én gang. Genvejene kan også ligge på en Stream Deck.'));
 
+  // ---- mic safety ----
+  const micSafetyCard = h('div', { class: 'card' }, h('h2', {}, 'Mikrofon-sikkerhed'),
+    toggle(binder, { label: 'Sig til, når jeg taler, mens mikrofonen er muted', get: () => p.mutedReminder !== false, set: (v) => { p.mutedReminder = v; ctx.savePrefs(); } }),
+    toggle(binder, { label: 'Mute mikrofonen, når pc’en låses (Win+L)', get: () => p.lockMute !== false, set: (v) => { p.lockMute = v; ctx.savePrefs(); } }),
+    h('div', { class: 'hint' }, 'Påmindelsen vises ovenpå spil. Når du låser pc’en op, åbnes mikrofonen igen – men kun hvis det var GoXLR Studio, der mutede den. Med Discord "stum og døv" følger Discord med.'));
+
   // ---- about ----
   const repo = 'https://github.com/MRDonnii/goxlr-studio';
   const aboutCard = h('div', { class: 'card' }, h('h2', {}, 'Om GoXLR Studio'),
@@ -213,5 +219,5 @@ export function systemSettings(ctx) {
       h('a', { href: `${repo}/releases`, target: '_blank', rel: 'noopener' }, 'Udgivelser')),
     h('div', { class: 'hint' }, 'Motorerne er open source og indgår uændrede. Kildekoden til EQ-motoren ligger ved hver udgivelse.'));
 
-  return h('div', { class: 'grid cols-2' }, discordCard, osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
+  return h('div', { class: 'grid cols-2' }, discordCard, micSafetyCard, osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
 }

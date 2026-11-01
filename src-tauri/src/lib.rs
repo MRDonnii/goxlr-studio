@@ -11,6 +11,7 @@ mod keys;
 mod meters;
 mod migrate;
 mod osd;
+mod session;
 mod sounds;
 mod store;
 mod update;
@@ -607,6 +608,7 @@ pub fn run() {
             state.close_to_tray.store(prefs_close_to_tray(&handle), Ordering::SeqCst);
             state.daemon.clone().spawn(handle.clone(), DAEMON_URL.to_string());
             update::cleanup();
+            session::watch(handle.clone());
             // The GoXLR engine runs inside GoXLR Studio: requests to show "its" UI show ours, and
             // the UI hears when it stops by itself (e.g. TC-Helicon's app took the GoXLR).
             let h = handle.clone();
