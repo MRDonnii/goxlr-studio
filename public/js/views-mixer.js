@@ -21,7 +21,7 @@ function verticalFader(binder, { get, set, colours }) {
   const paint = (v) => {
     const p = (v / 255) * 100;
     fill.style.height = `${p}%`;
-    knob.style.bottom = `${p}%`;
+    knob.style.bottom = `calc(${p}% - ${(p / 100) * 18}px)`;
     el.setAttribute('aria-valuenow', v);
   };
   const fromY = (y) => {
@@ -52,7 +52,7 @@ function verticalFader(binder, { get, set, colours }) {
   });
   binder.add(() => {
     const c = colours();
-    if (c) { el.closest('.strip')?.style.setProperty('--c1', `#${c.colour_one}`); el.closest('.strip')?.style.setProperty('--c2', `#${c.colour_two}`); }
+    if (c) { el.style.setProperty('--c1', `#${c.colour_one.slice(0, 6)}`); el.style.setProperty('--c2', `#${c.colour_two.slice(0, 6)}`); }
     if (!active) paint(get());
   });
   return el;
@@ -90,6 +90,8 @@ export function mixerView(ctx) {
     );
     binder.add(() => {
       const st = fs();
+      const c = m().lighting?.faders?.[f]?.colours;
+      if (c) { strip.style.setProperty('--c1', `#${c.colour_one.slice(0, 6)}`); strip.style.setProperty('--c2', `#${c.colour_two.slice(0, 6)}`); }
       pctEl.textContent = pct(m().levels.volumes[st.channel]);
       const muted = st.mute_state !== 'Unmuted';
       strip.classList.toggle('muted', muted);

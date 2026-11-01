@@ -250,7 +250,7 @@ export function lightingView(ctx) {
       return sel;
     })()));
 
-  const faders = h('div', { class: 'grid cols-2' }, ['A', 'B', 'C', 'D'].map((f, i) => {
+  const faders = h('div', { class: 'grid', style: { gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))' } }, ['A', 'B', 'C', 'D'].map((f, i) => {
     const fl = () => L().faders[f];
     return h('div', { class: 'card' }, h('h2', {}, `Fader ${f}`),
       h('div', { class: 'row color-row' }, h('label', {}, 'Top / bund'),
