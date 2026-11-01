@@ -460,6 +460,54 @@ export async function discordRunning() {
   return true;
 }
 
+// Home Assistant via MQTT (mqtt.rs). The browser demo pretends to be connected and keeps what
+// would have been sent in window.studioDemo.mqtt (and .mqttCommand() acts as Home Assistant).
+const demoMqtt = { status: { enabled: false, connected: false, broker: '', error: null }, sent: [] };
+const demoMqttEvent = (detail) => window.dispatchEvent(new CustomEvent('studio-mqtt', { detail }));
+if (typeof window !== 'undefined' && !isNative()) {
+  window.studioDemo = { ...(window.studioDemo || {}), mqtt: demoMqtt, mqttCommand: (topic, payload) => demoMqttEvent({ type: 'command', topic, payload }) };
+}
+
+export async function mqttStart(config) {
+  if (isNative()) return invoke('mqtt_start', { config });
+  demoMqtt.status = { enabled: true, connected: true, broker: `${config.host.replace(/^mqtt:\/\//, '')}${/:\d+$/.test(config.host) ? '' : ':1883'}`, error: null };
+  demoMqtt.sent = [];
+  setTimeout(() => demoMqttEvent({ type: 'connected' }), 300);
+  return null;
+}
+
+export async function mqttStop() {
+  if (isNative()) return invoke('mqtt_stop');
+  demoMqtt.status = { ...demoMqtt.status, enabled: false, connected: false, error: null };
+  return null;
+}
+
+export async function mqttPublish(messages) {
+  if (isNative()) return invoke('mqtt_publish', { messages });
+  demoMqtt.sent.push(...messages);
+  return messages.length;
+}
+
+export async function mqttStatus() {
+  if (isNative()) return invoke('mqtt_status');
+  return { ...demoMqtt.status };
+}
+
+/** connected(): (re)connected – announce everything; command({topic, payload}); status(s). */
+export async function onMqttEvents({ connected, command, status }) {
+  if (isNative()) {
+    const { listen } = window.__TAURI__.event;
+    await listen('mqtt-connected', () => connected());
+    await listen('mqtt-command', (ev) => command(ev.payload));
+    await listen('mqtt-status', (ev) => status(ev.payload));
+    return;
+  }
+  window.addEventListener('studio-mqtt', (e) => {
+    if (e.detail.type === 'connected') { status({ ...demoMqtt.status }); connected(); }
+    if (e.detail.type === 'command') command({ topic: e.detail.topic, payload: e.detail.payload });
+  });
+}
+
 // Live spectrum of an output (null = Windows' default output) for the EQ graph – spectrum.rs.
 // The browser demo plays "music" on the Music output.
 export async function spectrumRead(device) {

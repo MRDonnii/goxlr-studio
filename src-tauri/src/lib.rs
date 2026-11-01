@@ -10,6 +10,7 @@ mod engine;
 mod keys;
 mod meters;
 mod migrate;
+mod mqtt;
 mod osd;
 mod session;
 mod sounds;
@@ -309,6 +310,27 @@ fn open_path(path: String) -> Result<(), String> {
 #[tauri::command]
 fn audio_levels() -> HashMap<String, f32> {
     meters::levels()
+}
+
+/// Home Assistant via MQTT (mqtt.rs): connect, publish (discovery + state from the UI), stop.
+#[tauri::command]
+fn mqtt_start(app: AppHandle, config: mqtt::Config) -> Result<(), String> {
+    mqtt::start(app, config)
+}
+
+#[tauri::command]
+fn mqtt_publish(messages: Vec<mqtt::Message>) -> Result<usize, String> {
+    mqtt::publish(messages)
+}
+
+#[tauri::command]
+fn mqtt_stop() {
+    mqtt::stop()
+}
+
+#[tauri::command]
+fn mqtt_status() -> mqtt::Status {
+    mqtt::status()
 }
 
 /// Live spectrum of an output (None = Windows' default output) for the EQ graph.
@@ -733,6 +755,10 @@ pub fn run() {
             send_keys,
             audio_levels,
             spectrum_read,
+            mqtt_start,
+            mqtt_publish,
+            mqtt_stop,
+            mqtt_status,
             discord_running,
             show_osd,
             start_daemon,

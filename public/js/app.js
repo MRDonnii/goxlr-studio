@@ -16,6 +16,7 @@ import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAs
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { startDeviceTriggers } from './devicetriggers.js';
+import { startMqtt } from './mqtt.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 
@@ -756,6 +757,7 @@ async function boot() {
   syncTray();
   startAppRules(ctx);
   startDeviceTriggers(ctx);
+  startMqtt(ctx);
   startDiscordSync(ctx);
   ctx.applyOutputEq().catch(() => {});
   if (ctx.prefs.api?.enabled) applyApi();

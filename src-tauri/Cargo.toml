@@ -26,6 +26,8 @@ anyhow = "1"
 log = "0.4"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Home Assistant via MQTT – plain TCP on the home network (no TLS features).
+rumqttc = { version = "0.25.1", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # GoXLR Utility's engine, run inside GoXLR Studio (see goxlr-engine/README.md).

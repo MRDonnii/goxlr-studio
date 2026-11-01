@@ -61,7 +61,7 @@ main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; }
 .seg button { all: unset; cursor: pointer; padding: 5px 11px; border-radius: 7px; color: var(--muted); font-size: 13px; }
 .seg button.on { background: #26324d; color: var(--text); }
-select, input[type=text], input[type=number], textarea { background: var(--panel-2); color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; outline: none; }
+select, input[type=text], input[type=password], input[type=number], textarea { background: var(--panel-2); color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; outline: none; }
 select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 input[type=number] { width: 84px; }
 
@@ -323,3 +323,8 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .spectrum-row { margin-top: 8px; gap: 10px; flex-wrap: wrap; }
 .spectrum-row select { max-width: 280px; }
 .spectrum-status { font-size: 12px; color: var(--muted); }
+
+/* Home Assistant (MQTT) */
+.mqtt-state { margin-top: 8px; }
+.mqtt-state.ok { color: var(--ok); }
+.mqtt-state.bad { color: var(--warn); }
