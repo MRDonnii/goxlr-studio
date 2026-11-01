@@ -310,12 +310,14 @@ export function devicesView(ctx) {
           h('div', {}, h('div', {}, d.name),
             h('div', { class: 'hint' }, [d.default && 'Standard', d.default_comm && 'Kommunikation'].filter(Boolean).join(' · ') || ' ')),
           h('div', { class: 'spacer' }),
-          h('button', { class: `btn sm ${pinned ? 'on' : ''}`, title: 'Vis som hurtigknap', onclick: () => {
+          // Mindre fejl 7: clear feedback – the button shows a pin and a message says where it shows up.
+          h('button', { class: `btn sm ${pinned ? 'on' : ''}`, 'data-testid': 'device-pin', title: pinned ? 'Fjern fra hurtigskift på Mixer-siden' : 'Vis som hurtigknap øverst på Mixer-siden', onclick: () => {
             ctx.prefs.pinnedDevices = pinned ? ctx.prefs.pinnedDevices.filter((x) => x !== d.id) : [...ctx.prefs.pinnedDevices, d.id];
             ctx.savePrefs(); render();
-          } }, pinned ? 'Fastgjort' : 'Fastgør'),
-          h('button', { class: 'btn sm', onclick: async () => { await setDefaultDevice(d.id, 'console'); render(); } }, 'Standard'),
-          h('button', { class: 'btn sm', onclick: async () => { await setDefaultDevice(d.id, 'comm'); render(); } }, 'Kommunikation'),
+            toast(pinned ? `${shortName(d.name)} er fjernet fra hurtigskift` : `${shortName(d.name)} vises nu som hurtigknap øverst på Mixer-siden`, 'info');
+          } }, pinned ? '📌 Fastgjort' : 'Fastgør'),
+          h('button', { class: 'btn sm', 'data-testid': 'device-default', onclick: async () => { await setDefaultDevice(d.id, 'console'); render(); toast(`${shortName(d.name)} er nu Windows-standard`, 'info'); } }, 'Standard'),
+          h('button', { class: 'btn sm', 'data-testid': 'device-comm', onclick: async () => { await setDefaultDevice(d.id, 'comm'); render(); toast(`${shortName(d.name)} bruges nu til kommunikation`, 'info'); } }, 'Kommunikation'),
         ));
       }
       card.append(l);

@@ -119,22 +119,28 @@ export function appsView(ctx) {
     list.replaceChildren(...groups.map((g) => {
       const rule = ctx.appRules.find((r) => sameExe(r.exe, g.exe));
       const stale = staleApps.includes(g);
-      const pin = h('button', { class: `btn sm ${rule ? 'on' : ''}`, title: rule ? 'Glem reglen' : 'Husk valget – håndhæves automatisk hvert 5. sekund', onclick: () => {
-        if (rule) ctx.appRules.splice(ctx.appRules.indexOf(rule), 1);
+      const outSel = deviceSelect(g, 'render');
+      const inSel = deviceSelect(g, 'capture');
+      const pin = h('button', { class: `btn sm ${rule ? 'on' : ''}`, 'data-testid': 'app-remember', title: rule ? 'Glem reglen' : 'Husk valget – håndhæves automatisk hvert 5. sekund', onclick: () => {
+        if (rule) { ctx.appRules.splice(ctx.appRules.indexOf(rule), 1); toast(`${g.exe}: reglen er glemt`, 'info'); }
         else {
-          // Apps like Discord run several processes; use the one that actually has a device set.
+          // Mindre fejl 7: remember what the row shows (the user may just have changed it – the
+          // session scan is a moment behind). Apps like Discord run several processes; without a
+          // clear choice in the row, use the process that actually has a device set.
           const pick = (key, flow) => g.sessions.map((x) => x[key]).find((id) => id != null && !isStale(id, devs, flow)) ?? null;
-          const output = pick('output', 'render');
-          const input = pick('input', 'capture');
+          const shown = (sel, key, flow) => (sel.value === '__mixed' ? pick(key, flow) : sel.value === '' ? null : sel.value);
+          const output = shown(outSel, 'output', 'render');
+          const input = shown(inSel, 'input', 'capture');
           ctx.appRules.push({ exe: g.exe, output, output_name: deviceName(devs, output), input, input_name: deviceName(devs, input) });
+          toast(`${g.exe} huskes: udgang ${devName(output)}, mikrofon ${devName(input)}`, 'info');
         }
         ctx.saveAppRules(); render();
       } }, rule ? '📌 Husket' : 'Husk');
       return h('div', { class: `item app-row ${stale ? 'stale' : ''}` },
         h('div', { class: 'app-name' }, h('b', {}, g.exe.replace(/\.exe$/i, '')), h('span', { class: 'hint' }, g.pids.length > 1 ? `${g.pids.length} processer` : g.path)),
         h('div', { class: 'spacer' }),
-        h('span', { class: 'lbl app-lbl' }, 'Udgang'), deviceSelect(g, 'render'),
-        h('span', { class: 'lbl app-lbl' }, 'Mikrofon'), deviceSelect(g, 'capture'),
+        h('span', { class: 'lbl app-lbl' }, 'Udgang'), outSel,
+        h('span', { class: 'lbl app-lbl' }, 'Mikrofon'), inSel,
         pin);
     }));
     if (!groups.length) list.append(h('div', { class: 'hint' }, 'Ingen apps afspiller eller optager lyd lige nu.'));
