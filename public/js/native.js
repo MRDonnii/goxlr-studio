@@ -346,7 +346,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.4.2', installed: false, browser: true };
+  return { version: '0.4.3', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {
