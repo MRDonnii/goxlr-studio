@@ -270,10 +270,13 @@ try {{
 $ProgressPreference = 'SilentlyContinue'
 function Log([string]$m) {{ try {{ Add-Content -LiteralPath {log} -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m) -Encoding UTF8 }} catch {{ }} }}
 Log 'Hjælperen kører: venter på at GoXLR Studio {from} lukker'
-try {{ Wait-Process -Id {pid} -Timeout 60 -ErrorAction Stop }} catch {{ }}
-if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{
+function Old {{ Get-Process -Id {pid} -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq {exe} }} }}
+$old = Old
+if ($old) {{ try {{ $old | Wait-Process -Timeout 60 -ErrorAction Stop }} catch {{ }} }}
+$old = Old
+if ($old) {{
   Log 'GoXLR Studio lukkede ikke af sig selv inden for 60 sekunder – stopper den'
-  Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue
+  $old | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 1
 }}
 Start-Sleep -Milliseconds 800
@@ -357,7 +360,10 @@ pub fn prepare(url: &str, sha256: Option<&str>, to: &str, background: bool) -> R
     });
     // Overwritten by the helper; if it never gets that far, the next start says so.
     write_result(&json!({ "from": from, "to": to, "code": null }));
-    spawn_helper(&script).inspect_err(|e| log(&format!("Fejl: {e}")))?;
+    spawn_helper(&script).inspect_err(|e| {
+        log(&format!("Fejl: {e}"));
+        let _ = std::fs::remove_file(result_path());
+    })?;
     log("Hjælperen er startet – GoXLR Studio lukker nu");
     Ok(())
 }
@@ -395,7 +401,10 @@ mod tests {
         assert!(s.contains("-PassThru"));
         assert!(s.contains("WaitForExit(600000)"));
         assert!(s.contains("'/P','/UPDATE'"));
-        assert!(s.contains("Wait-Process -Id 4242"));
+        // Only GoXLR Studio itself is waited for or stopped (Windows can reuse a process id).
+        assert!(s.contains("Get-Process -Id 4242 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq 'C:\\Users\\Søren O''Hara\\AppData\\Local\\GoXLR Studio\\goxlr-studio.exe' }"));
+        assert!(s.contains("$old | Stop-Process -Force"));
+        assert!(!s.contains("Stop-Process -Id"));
         // Quotes in paths are doubled, so the script stays valid.
         assert!(s.contains("'C:\\Users\\Søren O''Hara\\AppData\\Local\\GoXLR Studio\\goxlr-studio.exe'"));
         assert!(s.contains("Get-Process -Name 'goxlr-studio'"));
