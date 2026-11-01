@@ -11,7 +11,7 @@ const OUT = process.argv[2];
 (async () => {
   const b = await chromium.launch();
   const errors = [];
-  const p = await b.newPage({ viewport: { width: 1360, height: 880 } });
+  const p = await b.newPage({ viewport: { width: 1360, height: 880 }, locale: 'da-DK' });
   p.on('pageerror', (e) => errors.push(e.message));
   p.on('dialog', (d) => d.accept());
   await p.goto('http://127.0.0.1:14600/?mini'); await p.waitForTimeout(3500);

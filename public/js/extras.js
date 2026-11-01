@@ -66,6 +66,38 @@ export function enginePayload(eq, extras = {}, target = null, offset = 0) {
   };
 }
 
+// ---------- presets: export / import all ----------
+export const PRESET_FILE_TYPE = 'goxlr-studio-eq-presets';
+
+/** All your EQ presets as one file (to keep, or to give to a friend). */
+export function exportPresets(presets, version = '') {
+  const clean = Object.fromEntries(Object.entries(presets || {}).map(([n, eq]) => [n, {
+    enabled: eq.enabled !== false, preamp: Number(eq.preamp) || 0,
+    bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q }) => ({ enabled, type, freq, gain, q })),
+  }]));
+  return JSON.stringify({ type: PRESET_FILE_TYPE, version: 1, app: version, presets: clean }, null, 1);
+}
+
+const BAND_TYPES = ['PK', 'LSC', 'HSC', 'HP', 'LP', 'NO'];
+const validBand = (b) => b && BAND_TYPES.includes(b.type) && Number.isFinite(+b.freq) && +b.freq >= 10 && +b.freq <= 24000 && Number.isFinite(+b.q) && +b.q > 0;
+
+/** Presets from such a file, added to the ones you have: a name that exists gets " (2)". */
+export function importPresets(existing, text) {
+  let data;
+  try { data = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { throw new Error('Filen er ikke en GoXLR Studio-presetfil'); }
+  if (data?.type !== PRESET_FILE_TYPE || typeof data.presets !== 'object') throw new Error('Filen er ikke en GoXLR Studio-presetfil');
+  const out = { ...(existing || {}) };
+  const added = [];
+  for (const [name, eq] of Object.entries(data.presets)) {
+    const bands = (eq?.bands || []).filter(validBand).slice(0, 30).map((b) => ({ enabled: b.enabled !== false, type: b.type, freq: +b.freq, gain: Math.max(-30, Math.min(30, +b.gain || 0)), q: +b.q }));
+    let n = String(name).trim().slice(0, 80) || 'Preset';
+    for (let i = 2; n in out; i++) n = `${String(name).trim().slice(0, 74)} (${i})`;
+    out[n] = { enabled: eq?.enabled !== false, preamp: Math.max(-30, Math.min(12, Number(eq?.preamp) || 0)), bands };
+    added.push(n);
+  }
+  return { presets: out, added };
+}
+
 // ---------- presets ----------
 const bandKey = (b) => [b.enabled !== false, b.type, +b.freq, +(b.gain || 0), +b.q].join('|');
 // True when the active slot no longer matches the preset it was loaded from.

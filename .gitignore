@@ -4,3 +4,4 @@ src-tauri/gen/
 data/
 dist/
 *.log
+__pycache__/

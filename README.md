@@ -1,5 +1,7 @@
 # GoXLR Studio
 
+*Dansk · [English](README.en.md)*
+
 **Ét program til din GoXLR eller GoXLR Mini på Windows.** GoXLR Studio styrer mixeren, mikrofonen, lyset og profilerne. Det giver hele Windows en EQ (fx til dine hovedtelefoner), sender hver app til den rigtige kanal og giver dig genvejstaster til det hele. Dermed erstatter det GoXLR Utility, Equalizer APO, Peace og AutoHotkey.
 
 ![Mixeren i GoXLR Studio](docs/screenshots/mixer.png)
@@ -126,6 +128,7 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
 - Lokalt API til fx Stream Deck
 - **Lydtjek**, der finder Windows-indstillinger, som ændrer lyden (fx at Windows skruer ned for spillet under opkald), og retter dem med ét klik
+- Dansk og engelsk: appen følger Windows' sprog og kan skiftes under Indstillinger
 - Backup og en side med **Diagnose**, hvor du kan kopiere en rapport, hvis noget driller
 - Effekter på den store GoXLR: reverb, echo, pitch, gender, megafon, robot og hardtune
 

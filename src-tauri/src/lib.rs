@@ -59,6 +59,15 @@ struct TrayModel {
     eq_presets: Vec<String>,
     active_eq: Option<String>,
     eq_enabled: bool,
+    /// The menu texts in the UI's language (Danish when missing).
+    #[serde(default)]
+    labels: HashMap<String, String>,
+}
+
+impl TrayModel {
+    fn label<'a>(&'a self, key: &str, danish: &'a str) -> &'a str {
+        self.labels.get(key).map(String::as_str).filter(|s| !s.is_empty()).unwrap_or(danish)
+    }
 }
 
 struct AppState {
@@ -538,10 +547,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     use tauri::menu::CheckMenuItem;
     let model = app.state::<AppState>().tray.lock().unwrap().clone();
     let menu = Menu::new(app)?;
-    menu.append(&MenuItem::with_id(app, "show", "Åbn GoXLR Studio", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "show", model.label("show", "Åbn GoXLR Studio"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     if !model.profiles.is_empty() {
-        let sub = Submenu::with_id(app, "profiles", "GoXLR-profil", true)?;
+        let sub = Submenu::with_id(app, "profiles", model.label("profiles", "GoXLR-profil"), true)?;
         for p in &model.profiles {
             let on = model.active_profile.as_deref() == Some(p.as_str());
             sub.append(&CheckMenuItem::with_id(app, format!("profile:{p}"), p, true, on, None::<&str>)?)?;
@@ -549,8 +558,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         menu.append(&sub)?;
     }
     if !model.eq_presets.is_empty() {
-        let sub = Submenu::with_id(app, "eq", "EQ-preset", true)?;
-        sub.append(&CheckMenuItem::with_id(app, "eq-toggle", "EQ aktiv", true, model.eq_enabled, None::<&str>)?)?;
+        let sub = Submenu::with_id(app, "eq", model.label("eq", "EQ-preset"), true)?;
+        sub.append(&CheckMenuItem::with_id(app, "eq-toggle", model.label("eq_toggle", "EQ aktiv"), true, model.eq_enabled, None::<&str>)?)?;
         sub.append(&PredefinedMenuItem::separator(app)?)?;
         for p in &model.eq_presets {
             let on = model.active_eq.as_deref() == Some(p.as_str());
@@ -559,17 +568,17 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         menu.append(&sub)?;
     }
     if !model.scenes.is_empty() {
-        let sub = Submenu::with_id(app, "scenes", "Scener", true)?;
+        let sub = Submenu::with_id(app, "scenes", model.label("scenes", "Scener"), true)?;
         for s in &model.scenes {
             sub.append(&MenuItem::with_id(app, format!("scene:{}", s.id), &s.name, true, None::<&str>)?)?;
         }
         menu.append(&sub)?;
     }
-    menu.append(&MenuItem::with_id(app, "mute-mic", "Mute / unmute mikrofon", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "mute-mic", model.label("mute", "Mute / unmute mikrofon"), true, None::<&str>)?)?;
     // Nødknap: the EQ off at once, and the window shows what to do next.
-    menu.append(&MenuItem::with_id(app, "restore-sound", "Gendan lyd (slå EQ fra)", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "restore-sound", model.label("restore", "Gendan lyd (slå EQ fra)"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "quit", "Afslut", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "quit", model.label("quit", "Afslut"), true, None::<&str>)?)?;
     Ok(menu)
 }
 

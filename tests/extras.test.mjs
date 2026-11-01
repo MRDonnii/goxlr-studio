@@ -292,3 +292,20 @@ test('mono and balance only lower, as Equalizer APO lines', () => {
   const p = x.enginePayload({ enabled: true, preamp: 0, bands: [] }, { channels: { mono: true, balance: 2 } });
   assert.equal(p.extra.length, 5);
 });
+
+test('EQ presets: export all, import adds and never overwrites', () => {
+  const mine = { Headset: { enabled: true, preamp: -3, bands: [{ id: 'x', enabled: true, type: 'PK', freq: 1000, gain: 3, q: 1 }] } };
+  const file = x.exportPresets(mine, '0.5.4');
+  assert.ok(!file.includes('"id"'));
+  const r = x.importPresets(mine, file);
+  assert.deepEqual(r.added, ['Headset (2)']);
+  assert.equal(r.presets.Headset.preamp, -3);
+  assert.equal(r.presets['Headset (2)'].bands[0].freq, 1000);
+  // Bad bands are dropped, values kept in range; other files are refused.
+  const odd = JSON.stringify({ type: 'goxlr-studio-eq-presets', presets: { Ny: { preamp: -99, bands: [{ type: 'XX', freq: 1, q: 1 }, { type: 'LSC', freq: 100, gain: 99, q: 0.7 }] } } });
+  const o = x.importPresets({}, odd).presets.Ny;
+  assert.equal(o.preamp, -30);
+  assert.deepEqual(o.bands, [{ enabled: true, type: 'LSC', freq: 100, gain: 30, q: 0.7 }]);
+  assert.throws(() => x.importPresets({}, '{"hej":1}'), /presetfil/);
+  assert.throws(() => x.importPresets({}, 'Preamp: -3 dB'), /presetfil/);
+});

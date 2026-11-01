@@ -3,10 +3,11 @@ import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
 import { chainResponse, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
+import { t } from './i18n.js';
 import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
 import { shortName } from './views-mixer.js';
 import { applyEqPreset, toggleEq } from './actions.js';
-import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl } from './extras.js';
+import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
 
 // Reads every Peace/APO preset file and stores the non-empty ones as presets. Returns the imported names.
 export async function importPeacePresets(ctx) {
@@ -384,7 +385,7 @@ export function outputEqView(ctx) {
       }
       specLevels = smoothSpectrum(specLevels, bands || new Array(SPECTRUM_BANDS).fill(SPECTRUM_FLOOR), now - specAt);
       specAt = now;
-      graph.drawSpectrum(specCanvas, { freqs: SPECTRUM_FREQS, db: specLevels, label });
+      graph.drawSpectrum(specCanvas, { freqs: SPECTRUM_FREQS, db: specLevels, label: t(label) });
     } catch { /* next tick */ } finally { specBusy = false; }
   };
   const specTimer = setInterval(specTick, 50);
@@ -471,11 +472,23 @@ export function outputEqView(ctx) {
     changed(); renderBands();
     ctx.onStateChanged?.('eq-local');
   };
-  const fileIn = h('input', { type: 'file', accept: '.txt,.cfg,text/plain', style: { display: 'none' } });
+  const fileIn = h('input', { type: 'file', accept: '.txt,.cfg,.json,text/plain,application/json', style: { display: 'none' }, 'data-testid': 'preset-file' });
   fileIn.addEventListener('change', async () => {
     const f = fileIn.files[0];
     if (!f) return;
-    const parsed = parseApoConfig(await f.text());
+    const text = await f.text();
+    // A GoXLR Studio preset file (all presets) – added next to yours, nothing is overwritten.
+    if (/^\s*\{/.test(text)) {
+      try {
+        const r = importPresets(state.presets, text);
+        state.presets = r.presets;
+        persist(); renderPresets(); ctx.onStateChanged?.('eq');
+        toast(`Importeret ${r.added.length} preset${r.added.length === 1 ? '' : 's'}: ${r.added.join(', ')}`, 'info');
+      } catch (e) { toast(String(e.message || e)); }
+      fileIn.value = '';
+      return;
+    }
+    const parsed = parseApoConfig(text);
     if (!parsed.bands.length) { toast('Fandt ingen filtre i filen.'); return; }
     const name = f.name.replace(/\.(txt|cfg)$/i, '').replace(/ ParametricEQ$/i, '');
     state.presets[name] = parsed;
@@ -498,7 +511,7 @@ export function outputEqView(ctx) {
         delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); ctx.onStateChanged?.('eq');
       } }, 'Slet')),
     h('div', { class: 'row wrap' },
-      h('button', { class: 'btn sm', 'data-testid': 'preset-import-file', onclick: () => fileIn.click() }, 'Importér APO / AutoEQ…'),
+      h('button', { class: 'btn sm', 'data-testid': 'preset-import-file', onclick: () => fileIn.click() }, 'Importér (APO, AutoEQ, presetfil)…'),
       h('button', { class: 'btn sm', onclick: async () => {
         const txt = await promptDialog('Indsæt Equalizer APO-konfiguration (Preamp/Filter-linjer):', '', { ok: 'Indsæt', input: { multiline: true, placeholder: 'Preamp: -6 dB\nFilter 1: ON PK Fc 100 Hz Gain 3 dB Q 1.41' } });
         if (!txt) return;
@@ -506,6 +519,12 @@ export function outputEqView(ctx) {
         if (!parsed.bands.length) { toast('Fandt ingen filtre.'); return; }
         loadEq(parsed, null);
       } }, 'Indsæt tekst'),
+      h('button', { class: 'btn sm', 'data-testid': 'preset-export-all', title: 'Alle dine presets i én fil – til backup eller til en ven. Importeres med "Importér".', onclick: () => {
+        if (!Object.keys(state.presets).length) { toast('Du har ingen egne presets endnu'); return; }
+        const blob = new Blob([exportPresets(state.presets, ctx.updateState?.current || '')], { type: 'application/json' });
+        const a = h('a', { href: URL.createObjectURL(blob), download: 'GoXLR Studio EQ-presets.json' });
+        a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } }, 'Eksportér alle presets'),
       h('button', { class: 'btn sm', onclick: () => {
         const blob = new Blob([toApoConfig(eq())], { type: 'text/plain' });
         const a = h('a', { href: URL.createObjectURL(blob), download: `${state.presetName || 'GoXLR Studio'} ParametricEQ.txt` });

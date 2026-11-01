@@ -18,6 +18,7 @@ import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { startDeviceTriggers } from './devicetriggers.js';
 import { startMqtt } from './mqtt.js';
+import { setLanguage, resolveLanguage, t } from './i18n.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 
@@ -107,7 +108,23 @@ const ctx = {
   saveAppTriggers: () => storeSet('app-triggers', ctx.appTriggers),
   notify: (text, kind = 'info') => {
     toast(text, 'info');
-    if (ctx.prefs.osd !== false) showOsd(text, kind);
+    if (ctx.prefs.osd !== false) showOsd(t(text), kind);
+  },
+  // Sprog / language: switches at once (the page is drawn again in the new language).
+  setLanguage: (pref) => {
+    ctx.prefs.lang = pref;
+    ctx.savePrefs();
+    setLanguage(resolveLanguage(pref));
+    trayKey = '';
+    trayStatusKey = '';
+    navKey = '';
+    topKey = '';
+    syncTray();
+    syncTrayStatus();
+    buildNav();
+    renderTopActions();
+    renderBanners();
+    navigate(current);
   },
   checkUpdate: (manual) => checkUpdate(manual),
   installUpdate: () => doInstallUpdate(),
@@ -451,7 +468,7 @@ function syncTrayStatus() {
   const key = `${muted}|${tip}`;
   if (key === trayStatusKey) return;
   trayStatusKey = key;
-  setTrayStatus(muted, tip);
+  setTrayStatus(muted, t(tip));
 }
 
 // ---------- hotkeys ----------
@@ -481,6 +498,8 @@ function hotkeyFor(action) {
 ctx.hotkeyFor = hotkeyFor;
 
 // ---------- tray ----------
+// The menu texts (Danish here, translated with t() – the Rust side has the same Danish defaults).
+const TRAY_LABELS = { show: 'Åbn GoXLR Studio', profiles: 'GoXLR-profil', eq: 'EQ-preset', eq_toggle: 'EQ aktiv', scenes: 'Scener', mute: 'Mute / unmute mikrofon', restore: 'Gendan lyd (slå EQ fra)', quit: 'Afslut' };
 let trayKey = '';
 function syncTray() {
   const m = conn.mixer;
@@ -492,6 +511,7 @@ function syncTray() {
     eq_presets: ctx.outputEq ? eqPresetNames(ctx) : [],
     active_eq: ctx.outputEq?.presetName || null,
     eq_enabled: !!eq?.enabled,
+    labels: Object.fromEntries(Object.entries(TRAY_LABELS).map(([k, v]) => [k, t(v)])),
   };
   const key = JSON.stringify(model);
   if (key === trayKey) return;
@@ -746,6 +766,7 @@ async function boot() {
   ctx.appTriggers = appTriggers;
   ctx.deviceTriggers = deviceTriggers || [];
   Object.assign(ctx.prefs, prefs);
+  setLanguage(resolveLanguage(ctx.prefs.lang));
   ctx.scenes = scenes;
   ctx.outputEq = outputEq;
   // Fejl 2: versions before 0.4.2 kept a single "EQ gælder for" output silently – ask once.

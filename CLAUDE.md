@@ -28,6 +28,9 @@ Selvstændig Windows-app (Tauri 2: Rust + vanilla JS) der erstatter GoXLR Utilit
 - Skærmbilleder til README: `node scripts/screenshots.cjs docs/screenshots` mens serveren kører (Playwright; reducér PNG'erne til 256 farver bagefter). README beskriver hvad appen er og kan, med billederne.
 - Rust: `cd src-tauri && cargo check --target x86_64-pc-windows-msvc` (tjekker også GoXLR-motoren). Med indlejret EQ-motor: sæt `ENGINE_DIR` (mappe med de 8 motorfiler) og `ENGINE_VERSION`. Fuldt byg sker i GitHub Actions (`.github/workflows/build.yml`).
 
+## Sprog
+- UI'et skrives på dansk; engelsk vises af `public/js/i18n.js` (MutationObserver oversætter tekst, title/placeholder/aria-label; mønstre med `{0}`; `t()` til OSD, bakke-menu (`TrayModel.labels`) og tooltip; `prefs.lang` = auto/da/en, auto = dansk Windows → dansk, ellers engelsk). Ordbog: `public/js/i18n-en.js` (`EN` + `KEEP`), genereres af `scripts/i18n-merge.py`. **Nye tekster:** `python3 scripts/i18n-extract.py --missing` → oversæt til `{dansk: engelsk}` JSON → `python3 scripts/i18n-merge.py fil.json` (`--prune` fjerner forældede); `tests/i18n.test.mjs` fejler, hvis noget mangler. `data-no-i18n` springer et element over. README findes også som `README.en.md`; udgivelsesnoter har et engelsk afsnit efter dansk.
+
 ## Regler
 - Ingen personlige data i repoet; commits med noreply-identitet.
 - Firmware til GoXLR'en røres ikke (lukket, risiko for brick).

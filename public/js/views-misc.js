@@ -434,7 +434,11 @@ export function settingsView(ctx) {
     toggle(binder, { label: 'Chat-mute muter også mic', get: () => m().settings.vc_mute_also_mute_cm, set: (v) => conn.command('SetVCMuteAlsoMuteCM', v) }),
     toggle(binder, { label: 'Lås faders', get: () => m().settings.lock_faders, set: (v) => conn.command('SetLockFaders', v) }),
   );
+  // Sprog / language – in both languages, so it can be found whichever is shown.
+  const langSel = h('select', { 'data-testid': 'language', 'data-no-i18n': '', onchange: () => ctx.setLanguage?.(langSel.value) },
+    [['auto', 'Automatisk (som Windows) / Automatic'], ['da', 'Dansk'], ['en', 'English']].map(([v, label]) => h('option', { value: v, selected: (ctx.prefs.lang || 'auto') === v }, label)));
   const app = h('div', { class: 'card' }, h('h2', {}, 'App'),
+    h('div', { class: 'row' }, h('label', { 'data-no-i18n': '' }, 'Sprog / Language'), langSel),
     toggle(binder, { label: 'Auto-ducking', get: () => ctx.ducker.settings.enabled, set: (v) => { ctx.ducker.settings.enabled = v; ctx.ducker.save(); } }),
     isNative() ? toggle(binder, { label: 'Start med Windows', get: () => ctx.prefs.autostart, set: (v) => { ctx.prefs.autostart = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_autostart', { enabled: v }).catch((e) => toast(String(e))); } }) : null,
     isNative() ? toggle(binder, { label: 'Luk til bakke-ikon', get: () => ctx.prefs.closeToTray, set: (v) => { ctx.prefs.closeToTray = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_close_to_tray', { enabled: v }).catch(() => {}); } }) : null,

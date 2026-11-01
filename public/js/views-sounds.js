@@ -78,7 +78,8 @@ export function soundsView(ctx) {
       if (f.size > 20 * 1024 * 1024) { toast(`${f.name} er større end 20 MB`); continue; }
       try { await soundsSave(f.name, await readBase64(f)); n++; } catch (e) { toast(`${f.name}: ${e.message || e}`); }
     }
-    if (n) { logActivity(`Lydbank: ${n} lyd${n === 1 ? '' : 'e'} tilføjet`); toast(`${n} lyd${n === 1 ? '' : 'e'} tilføjet`, 'info'); }
+    const what = `${n} ${n === 1 ? 'lyd' : 'lyde'}`;
+    if (n) { logActivity(`Lydbank: ${what} tilføjet`); toast(`${what} tilføjet`, 'info'); }
     reload();
   } });
 
