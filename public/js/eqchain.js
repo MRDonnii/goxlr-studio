@@ -63,9 +63,74 @@ export function bandWarnings(b) {
   return out;
 }
 
-/** The preamp offset the engine adds for the active slot (see app.js applyOutputEq). */
+// K-weighting from ITU-R BS.1770 (the loudness standard behind LUFS): roughly a high-pass at 38 Hz
+// and +4 dB above 1,7 kHz – how loud the ear finds each part of the spectrum.
+const K_FILTERS = [coefficients({ type: 'HP', freq: 38, gain: 0, q: 0.5 }), coefficients({ type: 'HSC', freq: 1681, gain: 4, q: 0.71 })];
+const kWeight = (f) => Math.pow(10, K_FILTERS.reduce((s, k) => s + magnitudeDb(k, f), 0) / 10);
+const K_CHAIN = CHAIN_FREQS.map(kWeight);
+
+/** How loud a chain sounds, in dB (0 = as without EQ): pink noise through it, K-weighted. */
+export function loudnessDb(resp, freqs = CHAIN_FREQS) {
+  const w = freqs === CHAIN_FREQS ? K_CHAIN : freqs.map(kWeight);
+  let num = 0, den = 0;
+  for (let i = 0; i < freqs.length; i++) { num += w[i] * Math.pow(10, resp[i] / 10); den += w[i]; }
+  return 10 * Math.log10(num / den);
+}
+
+/** Loudness-matched A/B: how much louder B is than A (dB), and the preamp offsets that lower the
+ *  louder slot to the quieter one – never the other way, that could clip. Both slots must have
+ *  the EQ on (a switched-off EQ has no preamp to lower). */
+export function abMatch(state) {
+  const extras = state.extras || {};
+  const guard = state.clipGuard !== false;
+  const { A, B } = state.slots || {};
+  if (!A || !B) return { diff: 0, match: { A: 0, B: 0 }, unmatched: true };
+  const level = (eq) => {
+    const g = guard ? clipGuard(eq, extras) : 0;
+    return loudnessDb(chainResponse(eq, extras, CHAIN_FREQS, g));
+  };
+  const diff = Math.round((level(B) - level(A)) * 10) / 10 || 0;
+  const unmatched = !A.enabled || !B.enabled;
+  return { diff, unmatched, match: unmatched ? { A: 0, B: 0 } : { A: Math.min(0, diff), B: Math.min(0, -diff) } };
+}
+
+/** The line next to the A/B buttons. */
+export function abText(m, matchOn = true) {
+  const d = Math.abs(m.diff);
+  if (d < 0.1) return 'A og B spiller lige højt';
+  const louder = m.diff > 0 ? 'B' : 'A';
+  if (matchOn && m.unmatched) return `${louder} er ${fmtDb(d)} dB højere – kan kun udlignes, når EQ er slået til i både A og B`;
+  return matchOn ? `${louder} er ${fmtDb(d)} dB højere – udlignet` : `${louder} er ${fmtDb(d)} dB højere (den højeste lyder tit bedst)`;
+}
+
+/** The preamp offset the engine adds for the active slot (see app.js applyOutputEq): the clip
+ *  guard, and the loudness match when "Udlign lydstyrke" is on. */
 export function playbackOffset(state) {
   const eq = state?.slots?.[state.active];
   if (!eq) return 0;
-  return state.clipGuard !== false ? clipGuard(eq, state.extras) : 0;
+  let off = state.clipGuard !== false ? clipGuard(eq, state.extras) : 0;
+  if (state.abMatch !== false) off += abMatch(state).match[state.active] || 0;
+  return Math.round(off * 10) / 10 || 0;
+}
+
+/** Blind test result: picks are the real slots ('A'/'B') chosen in each round. */
+export function blindVerdict(picks) {
+  const n = picks.length;
+  const a = picks.filter((p) => p === 'A').length;
+  const b = n - a;
+  if (!n) return { n, a, b, winner: null, clear: false, text: 'Ingen runder.' };
+  const winner = a === b ? null : a > b ? 'A' : 'B';
+  const top = Math.max(a, b);
+  const clear = !!winner && top / n >= 0.8;
+  const text = !winner ? `Du valgte A og B lige mange gange – ingen tydelig forskel.`
+    : top === n ? `Du valgte ${winner} hver gang – ${winner} lyder klart bedst for dig.`
+      : clear ? `Du valgte ${winner} ${top} af ${n} gange – ${winner} lyder bedst for dig.`
+        : `Du valgte ${winner} ${top} af ${n} gange – ingen tydelig forskel. Vælg den, du bedst kan lide, eller tag testen igen.`;
+  return { n, a, b, winner, clear, text };
+}
+
+/** True when the two slots would sound the same (nothing to compare). */
+export function slotsEqual(a, b) {
+  const key = (eq) => JSON.stringify([!!eq?.enabled, +(eq?.preamp || 0), (eq?.bands || []).filter((x) => x.enabled !== false).map((x) => [x.type, +x.freq, +(x.gain || 0), +x.q])]);
+  return key(a) === key(b);
 }

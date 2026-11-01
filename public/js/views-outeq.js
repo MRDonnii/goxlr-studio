@@ -1,7 +1,7 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
-import { chainResponse, clipGuard, safePreamp, headroomInfo, bandWarnings } from './eqchain.js';
+import { chainResponse, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative } from './native.js';
 import { shortName } from './views-mixer.js';
 import { applyEqPreset, toggleEq } from './actions.js';
@@ -205,7 +205,7 @@ export function outputEqView(ctx) {
 
   const bar = presetBar(ctx);
   const fmt1 = (v) => String(Math.round(Math.abs(v) * 10) / 10).replace('.', ',');
-  const chainLegend = h('div', { class: 'hint chain-legend' }, h('span', { class: 'chain-dash' }), 'Stiplet: det der faktisk spilles – med Loudness, Crossfeed og klip-beskyttelse.');
+  const chainLegend = h('div', { class: 'hint chain-legend' }, h('span', { class: 'chain-dash' }), 'Stiplet: det der faktisk spilles – med Loudness, Crossfeed, klip-beskyttelse og udligning af A/B.');
   const canvas = h('canvas', { class: 'eq-canvas', style: { height: '360px' } });
   const graph = new EqGraph(canvas, {
     minDb: -18, maxDb: 18,
@@ -215,7 +215,7 @@ export function outputEqView(ctx) {
     })),
     curve: (freqs) => (eq().enabled ? totalResponse(eq(), freqs) : freqs.map(() => 0)),
     // What is really played (Loudness, Crossfeed, klip-beskyttelse) – only when it differs.
-    chainCurve: (freqs) => (chainDiffers() ? chainResponse(eq(), state.extras, freqs, guardDb()) : null),
+    chainCurve: (freqs) => (chainDiffers() ? chainResponse(eq(), state.extras, freqs, offsetDb()) : null),
     bandCurve: (i, freqs) => (eq().bands[i] ? bandResponse(eq().bands[i], freqs) : null),
     onSelect: (i) => { selected = i; renderBands(); },
     onDrag: (i, { freq, gain }, e) => {
@@ -270,15 +270,22 @@ export function outputEqView(ctx) {
   // in the engine when the chain would go above 0 dB, without changing the preset.
   const headBadge = h('span', { class: 'badge', 'data-testid': 'eq-headroom' });
   const guardOn = () => state.clipGuard !== false;
-  const guardDb = () => (guardOn() ? clipGuard(eq(), state.extras) : 0);
-  const chainDiffers = () => eq().enabled && (!!state.extras?.loudness?.enabled || !!state.extras?.crossfeed?.enabled || guardDb() !== 0);
+  // Klip-beskyttelse + the A/B loudness match, as the engine adds them (eqchain.js playbackOffset).
+  const offsetDb = () => playbackOffset(state);
+  const chainDiffers = () => eq().enabled && (!!state.extras?.loudness?.enabled || !!state.extras?.crossfeed?.enabled || offsetDb() !== 0);
   const guardBox = h('input', { type: 'checkbox', 'data-testid': 'eq-clip-guard', onchange: () => { state.clipGuard = guardBox.checked; persist(); apply(); redraw(); } });
-  const abSeg = h('div', { class: 'seg' });
+  const selectSlot = (k) => { state.active = k; history = [JSON.stringify(eq())]; future = []; selected = 0; persist(); apply(); renderBands(); redraw(); };
+  const abSeg = h('div', { class: 'seg', 'data-testid': 'eq-ab' });
   const abBtns = ['A', 'B'].map((k) => {
-    const b = h('button', { onclick: () => { state.active = k; history = [JSON.stringify(eq())]; future = []; selected = 0; persist(); apply(); renderBands(); redraw(); } }, k);
+    const b = h('button', { onclick: () => selectSlot(k) }, k);
     abSeg.append(b);
     return [k, b];
   });
+  // Tillæg 2: A/B at the same loudness – the louder one sounds "better" without being better.
+  const matchBox = h('input', { type: 'checkbox', 'data-testid': 'eq-ab-match', onchange: () => { state.abMatch = matchBox.checked; persist(); apply(); redraw(); } });
+  const abInfo = h('span', { class: 'ab-info', 'data-testid': 'eq-ab-info' });
+  const other = () => (state.active === 'A' ? 'B' : 'A');
+  const setOther = (eqNew, msg) => { state.slots[other()] = eqNew; persist(); apply(); redraw(); toast(msg, 'info'); };
   const bypass = h('input', { type: 'checkbox', onchange: () => { eq().enabled = bypass.checked; changed(); ctx.onStateChanged?.('eq-local'); } });
   const syncTop = () => {
     if (document.activeElement !== preampIn) preampIn.value = eq().preamp;
@@ -301,6 +308,10 @@ export function outputEqView(ctx) {
       if (!mod && dot) dot.remove();
     }
     for (const [k, b] of abBtns) b.classList.toggle('on', k === state.active);
+    const m = abMatch(state);
+    abInfo.textContent = abText(m, state.abMatch !== false);
+    abInfo.className = `ab-info ${Math.abs(m.diff) >= 0.1 && state.abMatch !== false && !m.unmatched ? 'ok' : Math.abs(m.diff) >= 0.1 ? 'warn' : ''}`;
+    matchBox.checked = state.abMatch !== false;
   };
 
   const toolbar = h('div', { class: 'row', style: { flexWrap: 'wrap' } },
@@ -311,12 +322,80 @@ export function outputEqView(ctx) {
     headBadge,
     h('label', { class: 'check-inline', title: 'Sænker automatisk preamp, så EQ’en – også med Loudness og Crossfeed – aldrig klipper. Dit preset ændres ikke.' }, guardBox, h('span', {}, 'Klip-beskyttelse')),
     h('div', { class: 'spacer' }),
-    h('span', { class: 'lbl', style: { minWidth: 0 } }, 'Sammenlign'), abSeg,
-    h('button', { class: 'btn sm', onclick: () => { state.slots[state.active === 'A' ? 'B' : 'A'] = structuredClone(eq()); persist(); toast(`Kopieret til ${state.active === 'A' ? 'B' : 'A'}`, 'info'); } }, 'Kopiér til den anden'),
     h('button', { class: 'btn sm', title: 'Fortryd (Ctrl+Z)', onclick: undo }, '↶'),
     h('button', { class: 'btn sm', title: 'Gentag (Ctrl+Y)', onclick: redo }, '↷'),
     h('button', { class: 'btn sm primary', onclick: () => { const b = newBand(1000); eq().bands.push(b); selected = eq().bands.length - 1; changed(); renderBands(); } }, '+ Bånd'),
   );
+  const abRow = h('div', { class: 'row ab-row', style: { flexWrap: 'wrap' } },
+    h('span', { class: 'lbl', style: { minWidth: 0 } }, 'Sammenlign'), abSeg,
+    h('button', { class: 'btn sm', onclick: () => setOther(structuredClone(eq()), `Kopieret til ${other()}`) }, 'Kopiér til den anden'),
+    h('button', { class: 'btn sm', 'data-testid': 'eq-ab-flat', title: 'Sammenlign med og uden EQ: den anden bliver flad (ingen filtre)', onclick: () => setOther({ enabled: true, preamp: 0, bands: [] }, `${other()} er nu flad – uden EQ`) }, 'Gør den anden flad'),
+    h('label', { class: 'check-inline', title: 'Den højeste af A og B sænkes, så de spiller lige højt (målt som LUFS). Ellers lyder den højeste næsten altid bedst – uden at være det.' }, matchBox, h('span', {}, 'Udlign lydstyrke')),
+    abInfo,
+    h('div', { class: 'spacer' }),
+    h('button', { class: 'btn sm', 'data-testid': 'eq-blind-start', title: 'Hør A og B som X og Y uden at vide hvilken er hvilken – 5 runder', onclick: () => startBlind() }, 'Blindtest'));
+
+  const editorBody = h('div', {},
+    h('div', { class: 'eq-wrap', style: { marginTop: '12px' } }, canvas),
+    h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
+    chainLegend,
+    h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody));
+
+  // Blind test: X and Y are A and B in random order each round, the curve is hidden, and both
+  // play at the same loudness. After 5 rounds: which one you chose.
+  let blind = null;
+  const blindBox = h('div', { class: 'blind-panel', 'data-testid': 'eq-blind', style: { display: 'none' } });
+  const shuffle = () => (Math.random() < 0.5 ? { X: 'A', Y: 'B' } : { X: 'B', Y: 'A' });
+  const startBlind = (prev) => {
+    if (slotsEqual(state.slots.A, state.slots.B)) { toast('A og B er ens – lav først en forskel (fx et andet preset i B)'); return; }
+    if (!state.slots.A.enabled || !state.slots.B.enabled) { toast('Slå EQ til i både A og B – ellers kan de ikke spille lige højt'); return; }
+    blind = { round: 1, rounds: 5, map: shuffle(), picks: [], on: 'X', prevMatch: prev ? prev.prevMatch : state.abMatch, prevActive: prev ? prev.prevActive : state.active };
+    state.abMatch = true;
+    blindListen('X');
+  };
+  const blindListen = (side) => { blind.on = side; selectSlot(blind.map[side]); renderBlind(); };
+  const blindPick = (side) => {
+    blind.picks.push(blind.map[side]);
+    if (blind.round >= blind.rounds) { blind.done = true; renderBlind(); return; }
+    blind.round++;
+    blind.map = shuffle();
+    blindListen('X');
+  };
+  const endBlind = (use) => {
+    if (!blind) return;
+    state.abMatch = blind.prevMatch;
+    const slot = use || blind.prevActive;
+    blind = null;
+    selectSlot(slot);
+    renderBlind();
+  };
+  const renderBlind = () => {
+    const on = !!blind;
+    for (const el of [toolbar, abRow, editorBody, bar]) el.style.display = on ? 'none' : '';
+    blindBox.style.display = on ? '' : 'none';
+    if (!on) return;
+    if (blind.done) {
+      const v = blindVerdict(blind.picks);
+      blindBox.replaceChildren(
+        h('h3', {}, 'Blindtest – resultat'),
+        h('div', { class: 'blind-result', 'data-testid': 'eq-blind-result' }, v.text),
+        h('div', { class: 'row', style: { flexWrap: 'wrap' } },
+          v.winner ? h('button', { class: 'btn sm primary', 'data-testid': 'eq-blind-use', onclick: () => endBlind(v.winner) }, `Brug ${v.winner}`) : null,
+          h('button', { class: 'btn sm', onclick: () => { const prev = blind; blind = null; startBlind(prev); } }, 'Tag testen igen'),
+          h('button', { class: 'btn sm', onclick: () => endBlind(null) }, 'Luk')));
+      return;
+    }
+    const side = (k) => h('button', { class: blind.on === k ? 'on' : '', 'data-testid': `eq-blind-${k}`, onclick: () => blindListen(k) }, k);
+    blindBox.replaceChildren(
+      h('h3', {}, `Blindtest · runde ${blind.round} af ${blind.rounds}`),
+      h('div', { class: 'hint' }, 'Lyt til X og Y – skift så tit du vil. De spiller lige højt, og kurven er skjult. Hvilken lyder bedst?'),
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } },
+        h('div', { class: 'seg blind-seg' }, side('X'), side('Y')),
+        h('button', { class: 'btn sm primary', 'data-testid': 'eq-blind-pick-X', onclick: () => blindPick('X') }, 'X er bedst'),
+        h('button', { class: 'btn sm primary', 'data-testid': 'eq-blind-pick-Y', onclick: () => blindPick('Y') }, 'Y er bedst'),
+        h('div', { class: 'spacer' }),
+        h('button', { class: 'btn sm', onclick: () => endBlind(null) }, 'Afbryd')));
+  };
 
   const presetSel = h('select');
   const renderPresets = () => {
@@ -543,21 +622,23 @@ export function outputEqView(ctx) {
     soundBox,
     h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'EQ gælder for'), targetSel), targetWarn, targetHint);
 
-  const preview = makePreview(() => (ctx.playbackEq ? ctx.playbackEq() : eq()));
+  // "Uden EQ" in the Lyttetest plays at the EQ's loudness when "Udlign lydstyrke" is on.
+  const bypassGainDb = () => (state.abMatch !== false && eq().enabled ? Math.min(0, Math.round(loudnessDb(chainResponse(eq(), state.extras, CHAIN_FREQS, offsetDb())) * 10) / 10) : 0);
+  const preview = makePreview(() => (ctx.playbackEq ? ctx.playbackEq() : eq()), bypassGainDb);
   const previewCard = h('div', { class: 'card' }, h('h2', {}, 'Lyttetest'),
     h('div', { class: 'hint' }, 'Afspil lyd gennem EQ’en her i appen og skift mellem med/uden for at høre forskellen.'),
     preview.controls);
 
   const onKey = (e) => {
     if (!document.body.contains(canvas)) { document.removeEventListener('keydown', onKey); return; }
-    if (e.target.matches('input, select, textarea')) return;
+    if (e.target.matches('input, select, textarea') || blind) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && eq().bands[selected]) { eq().bands.splice(selected, 1); selected = Math.max(0, selected - 1); changed(); renderBands(); }
     else if (e.key.toLowerCase() === 'b' && !e.ctrlKey && !e.altKey) { toggleEq(ctx); }
   };
   document.addEventListener('keydown', onKey);
-  ctx.cleanup.push(() => { graph.destroy(); preview.stop(); document.removeEventListener('keydown', onKey); });
+  ctx.cleanup.push(() => { endBlind(null); graph.destroy(); preview.stop(); document.removeEventListener('keydown', onKey); });
 
   renderBands();
   setTimeout(redraw);
@@ -565,16 +646,12 @@ export function outputEqView(ctx) {
 
   return h('div', { class: 'grid' },
     bar,
-    h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar,
-      h('div', { class: 'eq-wrap', style: { marginTop: '12px' } }, canvas),
-      h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
-      chainLegend,
-      h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody)),
+    h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar, abRow, blindBox, editorBody),
     h('div', { class: 'grid cols-3' }, presetsCard, engineCard, previewCard),
     h('div', { class: 'grid cols-3' }, profileLinksCard(ctx), extrasCard(ctx, () => { apply(); redraw(); }), autoEqCard(ctx)));
 }
 
-function makePreview(getEq) {
+function makePreview(getEq, bypassGainDb = () => 0) {
   let ac = null, src = null, chainIn = null, out = null, bypassed = false, kind = null, buffer = null;
   const status = h('span', { class: 'hint' });
   const playNoise = h('button', { class: 'btn sm', onclick: () => start('noise') }, 'Pink noise');
@@ -621,7 +698,8 @@ function makePreview(getEq) {
     rebuild();
   }
   function rebuild() {
-    if (!src) { ab.textContent = bypassed ? 'Uden EQ' : 'Med EQ'; return; }
+    const label = (g) => (bypassed ? (g ? `Uden EQ (udlignet −${String(Math.abs(g)).replace('.', ',')} dB)` : 'Uden EQ') : 'Med EQ');
+    if (!src) { ab.textContent = label(0); return; }
     src.disconnect();
     chainIn?.forEach((n) => n.disconnect());
     chainIn = [];
@@ -638,8 +716,15 @@ function makePreview(getEq) {
         node.connect(f); node = f; chainIn.push(f);
       }
     }
+    // Without EQ at the EQ's loudness, so the louder one doesn't win by being louder.
+    const g = bypassed ? bypassGainDb() : 0;
+    if (g < 0) {
+      const match = ac.createGain();
+      match.gain.value = Math.pow(10, g / 20);
+      node.connect(match); node = match; chainIn.push(match);
+    }
     node.connect(out);
-    ab.textContent = bypassed ? 'Uden EQ' : 'Med EQ';
+    ab.textContent = label(g);
     ab.classList.toggle('on', !bypassed);
   }
   function stopSource() { try { src?.stop(); } catch { /* already stopped */ } src?.disconnect(); src = null; }

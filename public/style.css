@@ -305,3 +305,13 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .band-warn { color: var(--warn); margin-left: 6px; cursor: help; }
 .chain-legend { display: flex; align-items: center; gap: 8px; }
 .chain-dash { display: inline-block; width: 22px; border-top: 2px dashed rgba(230,235,245,.7); }
+
+/* EQ: A/B comparison and blind test */
+.ab-row { margin-top: 10px; gap: 10px; }
+.ab-info { font-size: 12px; color: var(--muted); }
+.ab-info.ok { color: var(--ok); }
+.ab-info.warn { color: var(--warn); }
+.blind-panel { margin-top: 12px; padding: 16px; border: 1px dashed var(--line); border-radius: 12px; display: grid; gap: 10px; }
+.blind-panel h3 { margin: 0; font-size: 15px; }
+.blind-seg button { min-width: 56px; font-size: 15px; font-weight: 600; }
+.blind-result { font-size: 15px; }

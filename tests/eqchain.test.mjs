@@ -79,3 +79,58 @@ test('chain response equals the plain EQ without extras or offset', () => {
   const b = totalResponse(eq, c.CHAIN_FREQS);
   assert.ok(a.every((v, i) => Math.abs(v - b[i]) < 1e-9));
 });
+
+test('loudness: flat is 0 dB, a level change counts fully, the deep bass hardly counts', () => {
+  const flat = c.CHAIN_FREQS.map(() => 0);
+  assert.ok(Math.abs(c.loudnessDb(flat)) < 1e-9);
+  assert.ok(Math.abs(c.loudnessDb(flat.map(() => -6)) + 6) < 1e-9);
+  const sub = c.chainResponse(eqOf(0, [pk(30, 6, 2)]), {});
+  const presence = c.chainResponse(eqOf(0, [pk(3000, 6, 2)]), {});
+  assert.ok(c.loudnessDb(presence) > c.loudnessDb(sub) + 1, 'the ear hears 3 kHz louder than 30 Hz');
+});
+
+test('A/B match lowers the louder slot, never raises the quieter', () => {
+  const st = { active: 'A', clipGuard: false, slots: { A: eqOf(-6, []), B: eqOf(0, []) }, extras: {} };
+  const m = c.abMatch(st);
+  assert.equal(m.diff, 6);
+  assert.deepEqual(m.match, { A: 0, B: -6 });
+  assert.equal(c.abText(m), 'B er 6,0 dB højere – udlignet');
+  assert.equal(c.abText(m, false), 'B er 6,0 dB højere (den højeste lyder tit bedst)');
+  assert.equal(c.playbackOffset(st), 0);
+  assert.equal(c.playbackOffset({ ...st, active: 'B' }), -6);
+  assert.equal(c.playbackOffset({ ...st, active: 'B', abMatch: false }), 0);
+  // Same loudness: nothing to do.
+  assert.equal(c.abText(c.abMatch({ ...st, slots: { A: eqOf(0, []), B: eqOf(0, []) } })), 'A og B spiller lige højt');
+});
+
+test('A/B match counts the clip guard, and needs the EQ on in both slots', () => {
+  // B boosts 6 dB at 1 kHz: the guard takes it down 6 dB first, so B ends up quieter than flat A.
+  const st = { active: 'B', slots: { A: eqOf(0, []), B: eqOf(0, [pk(1000, 6)]) }, extras: {} };
+  const m = c.abMatch(st);
+  assert.ok(m.diff < 0, String(m.diff));
+  assert.ok(m.match.A < 0 && m.match.B === 0);
+  assert.ok(c.playbackOffset(st) <= -5.9 && c.playbackOffset(st) >= -6.1, 'B plays with the guard only');
+  const off = c.abMatch({ ...st, slots: { A: { ...eqOf(0, []), enabled: false }, B: eqOf(-6, []) } });
+  assert.equal(off.unmatched, true);
+  assert.deepEqual(off.match, { A: 0, B: 0 });
+  assert.match(c.abText(off), /kan kun udlignes, når EQ er slået til i både A og B/);
+});
+
+test('blind test verdicts', () => {
+  assert.match(c.blindVerdict(['B', 'B', 'B', 'B', 'B']).text, /B hver gang/);
+  const four = c.blindVerdict(['A', 'B', 'B', 'B', 'B']);
+  assert.equal(four.winner, 'B');
+  assert.equal(four.clear, true);
+  assert.match(four.text, /4 af 5 gange – B lyder bedst/);
+  const three = c.blindVerdict(['A', 'A', 'B', 'A', 'B']);
+  assert.equal(three.clear, false);
+  assert.match(three.text, /ingen tydelig forskel/);
+  assert.equal(c.blindVerdict(['A', 'B']).winner, null);
+});
+
+test('slotsEqual ignores ids and switched-off bands', () => {
+  const a = eqOf(-3, [{ ...pk(1000, 2), id: 'x' }, { ...pk(500, 9), enabled: false }]);
+  const b = eqOf(-3, [{ ...pk(1000, 2), id: 'y' }]);
+  assert.equal(c.slotsEqual(a, b), true);
+  assert.equal(c.slotsEqual(a, eqOf(-2, b.bands)), false);
+});
