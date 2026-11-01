@@ -83,7 +83,11 @@ jobs:
           $isMain = "${{ github.ref }}" -eq 'refs/heads/main' -and "${{ github.event_name }}" -ne 'pull_request'
           $publish = $isTag -or ($isMain -and -not $exists)
           if ($isTag) { $tag = "${{ github.ref_name }}" }
+          # Danish release notes for this version, if written (docs/releases/<version>.md).
+          $notes = "docs/releases/$($tag.TrimStart('v')).md"
+          if (-not (Test-Path $notes)) { $notes = '' }
           "tag=$tag" >> $env:GITHUB_OUTPUT
+          "notes=$notes" >> $env:GITHUB_OUTPUT
           "publish=$($publish.ToString().ToLower())" >> $env:GITHUB_OUTPUT
 
       - name: Release
@@ -93,6 +97,7 @@ jobs:
           tag_name: ${{ steps.rel.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: GoXLR Studio ${{ steps.rel.outputs.tag }}
+          body_path: ${{ steps.rel.outputs.notes }}
           files: dist/*
           generate_release_notes: true
 
