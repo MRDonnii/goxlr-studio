@@ -13,7 +13,7 @@ import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
 import { playbackOffset } from './eqchain.js';
-import { notesFor, markdownBlocks, channelEndpoint, enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
+import { dbToMeter, notesFor, markdownBlocks, channelEndpoint, enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { startDeviceTriggers } from './devicetriggers.js';
@@ -498,15 +498,19 @@ function followProfile() {
 }
 
 let trayStatusKey = '';
+let trayMicLevel = null;
+let trayMeterAt = 0;
 function syncTrayStatus() {
   const m = conn.mixer;
   const muted = !!m && m.cough_button.state !== 'Unmuted';
   const eq = ctx.outputEq?.slots[ctx.outputEq.active];
   const tip = ['GoXLR Studio', m?.profile_name, eq ? (eq.enabled ? `EQ: ${ctx.outputEq.presetName || 'tilpasset'}` : 'EQ fra') : null, muted ? 'Mikrofon muted' : null].filter(Boolean).join(' · ');
-  const key = `${muted}|${tip}`;
+  // Niveaumåler i bakken: the mic level in 8 steps (only sent when the step changes).
+  const level = ctx.prefs.trayMeter && !muted && trayMicLevel != null ? Math.round(dbToMeter(trayMicLevel) * 8) / 8 : null;
+  const key = `${muted}|${tip}|${level}`;
   if (key === trayStatusKey) return;
   trayStatusKey = key;
-  setTrayStatus(muted, t(tip));
+  setTrayStatus(muted, t(tip), level);
 }
 
 // ---------- hotkeys ----------
@@ -702,6 +706,7 @@ async function meterLoop() {
     db = talking ? -22 - Math.random() * 12 : -62 - Math.random() * 6;
   }
   ctx.onMicLevel?.(db);
+  if (ctx.prefs.trayMeter && performance.now() - trayMeterAt > 200) { trayMeterAt = performance.now(); trayMicLevel = db; syncTrayStatus(); }
   // Windows' peak meters: for the VU meters, chat-ducking and høreværn.
   const wantLevels = ctx.onLevels || ctx.ducker.settings.chat?.enabled || ctx.wantLevels;
   const levels = wantLevels ? await audioLevels().catch(() => null) : null;

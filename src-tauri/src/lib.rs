@@ -417,14 +417,38 @@ fn api_publish(state: State<'_, AppState>, status: Value, actions: Option<Value>
     }
 }
 
-/// Red dot on the tray icon while the mic is muted.
+/// The mic level (0–1) as a bar along the left edge of the tray icon: green, yellow near the top,
+/// red at the very top.
+fn draw_level(rgba: &mut [u8], w: u32, h: u32, level: f32) {
+    let level = level.clamp(0.0, 1.0);
+    let bar = (w as f32 * 0.2).ceil().max(2.0) as u32;
+    let filled = (h as f32 * level).round() as u32;
+    for y in 0..h {
+        let from_bottom = h - 1 - y;
+        for x in 0..bar {
+            let i = ((y * w + x) * 4) as usize;
+            let c: [u8; 4] = if from_bottom < filled {
+                let at = from_bottom as f32 / h as f32;
+                if at > 0.85 { [244, 63, 94, 255] } else if at > 0.65 { [251, 191, 36, 255] } else { [52, 211, 153, 255] }
+            } else {
+                [20, 26, 40, 200]
+            };
+            rgba[i..i + 4].copy_from_slice(&c);
+        }
+    }
+}
+
+/// Red dot on the tray icon while the mic is muted; with `level`, a level meter on its left edge.
 #[tauri::command]
-fn set_tray_status(app: AppHandle, muted: bool, tooltip: String) -> Result<(), String> {
+fn set_tray_status(app: AppHandle, muted: bool, tooltip: String, level: Option<f32>) -> Result<(), String> {
     let Some(tray) = app.tray_by_id("main") else { return Ok(()) };
     let _ = tray.set_tooltip(Some(&tooltip));
     let Some(base) = app.default_window_icon() else { return Ok(()) };
     let (w, h) = (base.width(), base.height());
     let mut rgba = base.rgba().to_vec();
+    if let Some(l) = level {
+        draw_level(&mut rgba, w, h, l);
+    }
     if muted {
         let (cx, cy, r) = (w as f32 * 0.72, h as f32 * 0.72, w as f32 * 0.28);
         for y in 0..h {
@@ -822,4 +846,20 @@ pub fn run() {
                 daemon_host::stop();
             }
         });
+}
+
+#[cfg(test)]
+mod tray_tests {
+    #[test]
+    fn level_bar_fills_from_the_bottom() {
+        let (w, h) = (16u32, 16u32);
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        super::draw_level(&mut px, w, h, 0.5);
+        let at = |px: &[u8], x: u32, y: u32| px[((y * w + x) * 4) as usize..((y * w + x) * 4 + 4) as usize].to_vec();
+        assert_eq!(at(&px, 0, 15), vec![52, 211, 153, 255]); // bottom: green
+        assert_eq!(at(&px, 0, 0), vec![20, 26, 40, 200]); // top: empty
+        assert_eq!(at(&px, 10, 15), vec![0, 0, 0, 0]); // the rest of the icon untouched
+        super::draw_level(&mut px, w, h, 1.0);
+        assert_eq!(at(&px, 0, 0), vec![244, 63, 94, 255]); // full: red at the top
+    }
 }

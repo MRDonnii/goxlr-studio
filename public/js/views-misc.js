@@ -441,6 +441,7 @@ export function settingsView(ctx) {
     h('div', { class: 'row' }, h('label', { 'data-no-i18n': '' }, 'Sprog / Language'), langSel),
     toggle(binder, { label: 'Auto-ducking', get: () => ctx.ducker.settings.enabled, set: (v) => { ctx.ducker.settings.enabled = v; ctx.ducker.save(); } }),
     isNative() ? toggle(binder, { label: 'Start med Windows', get: () => ctx.prefs.autostart, set: (v) => { ctx.prefs.autostart = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_autostart', { enabled: v }).catch((e) => toast(String(e))); } }) : null,
+    toggle(binder, { label: 'Niveaumåler i bakke-ikonet (mikrofon)', get: () => !!ctx.prefs.trayMeter, set: (v) => { ctx.prefs.trayMeter = v; ctx.savePrefs(); } }),
     isNative() ? toggle(binder, { label: 'Luk til bakke-ikon', get: () => ctx.prefs.closeToTray, set: (v) => { ctx.prefs.closeToTray = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_close_to_tray', { enabled: v }).catch(() => {}); } }) : null,
     h('div', { class: 'hint' }, 'Auto-ducking skruer ned for Music og Game, mens du taler. GoXLR Studio styrer GoXLR’en med sin egen indbyggede motor – GoXLR Utility og TC-Helicons app skal ikke køre.'));
   return h('div', { class: 'grid' }, h('div', { class: 'grid cols-2' }, h('div', { class: 'card' }, h('h2', {}, 'Enhed'), info), behaviour, app), systemSettings(ctx));

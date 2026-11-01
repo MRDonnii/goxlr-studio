@@ -355,8 +355,8 @@ export async function apiPublish(status, actions) {
   if (isNative()) return invoke('api_publish', { status, actions: actions ?? null }).catch(() => {});
 }
 
-export async function setTrayStatus(muted, tooltip) {
-  if (isNative()) return invoke('set_tray_status', { muted, tooltip }).catch(() => {});
+export async function setTrayStatus(muted, tooltip, level = null) {
+  if (isNative()) return invoke('set_tray_status', { muted, tooltip, level }).catch(() => {});
 }
 
 export async function appInfo() {

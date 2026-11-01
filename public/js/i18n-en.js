@@ -734,6 +734,7 @@ export const EN = {
  "Ned": "Down",
  "Nej": "No",
  "Niveau": "Level",
+ "Niveaumåler i bakke-ikonet (mikrofon)": "Level meter in the tray icon (mic)",
  "Nogle motorfiler fjernes først efter genstart": "Some engine files are only removed after a restart",
  "Nu": "Now",
  "Nulstil gain": "Reset gain",
