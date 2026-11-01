@@ -40,7 +40,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - **Klip-beskyttelse og headroom:** appen regner på hele kæden (EQ, Loudness og Crossfeed) og sænker selv lyden, hvis den ellers ville forvrænge. "Auto" sætter preamp lige under grænsen
 - Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
-- Crossfeed og loudness til hovedtelefoner
+- Crossfeed, loudness, mono og balance til hovedtelefoner
 - EQ der skifter med GoXLR-profilen, fx ét preset til "Headset" og et andet til "Speakers"
 - Lyttetest i appen, så du kan høre forskellen med og uden EQ
 
@@ -125,6 +125,7 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - Automatiske opdateringer
 - **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
 - Lokalt API til fx Stream Deck
+- **Lydtjek**, der finder Windows-indstillinger, som ændrer lyden (fx at Windows skruer ned for spillet under opkald), og retter dem med ét klik
 - Backup og en side med **Diagnose**, hvor du kan kopiere en rapport, hvis noget driller
 - Effekter på den store GoXLR: reverb, echo, pitch, gender, megafon, robot og hardtune
 
