@@ -460,6 +460,23 @@ export async function discordRunning() {
   return true;
 }
 
+// Profilhistorik (history.rs). The demo keeps two versions of each profile in memory.
+const demoHistory = new Map();
+export async function historySnapshot(profiles, mics) {
+  if (isNative()) return invoke('history_snapshot', { profiles: profiles || '', mics: mics || '' });
+  return 0;
+}
+export async function historyList(kind, name) {
+  if (isNative()) return invoke('history_list', { kind, name });
+  const k = `${kind}:${name}`;
+  if (!demoHistory.has(k)) demoHistory.set(k, [{ file: '20261101-214500.goxlr', at: '2026-11-01 21:45:00', size: 18234 }, { file: '20261031-190210.goxlr', at: '2026-10-31 19:02:10', size: 18190 }]);
+  return demoHistory.get(k);
+}
+export async function historyRestore(kind, name, version, folder) {
+  if (isNative()) return invoke('history_restore', { kind, name, version, folder });
+  return null;
+}
+
 // Lydtjek (soundcheck.rs). The browser demo has Windows' default ducking (−80 %), the GoXLR's
 // System output at 63 % and Chat Mic at 70 %.
 const demoSoundcheck = { ducking: null, backup: false, levels: { 'out-goxlr-system': 0.63, 'in-goxlr-chat': 0.7 }, muted: {} };

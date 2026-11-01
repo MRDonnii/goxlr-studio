@@ -3,7 +3,7 @@ import { h, Binder, toast, icon, ICONS, logActivity, confirmDialog, infoDialog }
 import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
-import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
+import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene, snapshotProfiles } from './views-misc.js';
 import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { soundcheckView } from './views-soundcheck.js';
@@ -841,6 +841,9 @@ async function boot() {
   startDeviceTriggers(ctx);
   startMqtt(ctx);
   startHearing(ctx);
+  // Profilhistorik: a version of each changed profile every 5 minutes.
+  setTimeout(() => snapshotProfiles(ctx), 20000);
+  setInterval(() => snapshotProfiles(ctx), 5 * 60 * 1000);
   startDiscordSync(ctx);
   ctx.applyOutputEq().catch(() => {});
   if (ctx.prefs.api?.enabled) applyApi();

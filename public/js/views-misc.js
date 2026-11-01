@@ -1,7 +1,7 @@
-import { h, slider, selectBox, toggle, toast, segmented, confirmDialog, promptDialog, logActivity } from './ui.js';
+import { h, slider, selectBox, toggle, toast, segmented, confirmDialog, promptDialog, logActivity, infoDialog } from './ui.js';
 import { CHANNELS } from './demo.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
-import { listAudioDevices, setDefaultDevice, storeSet, isNative } from './native.js';
+import { listAudioDevices, setDefaultDevice, storeSet, isNative, historySnapshot, historyList, historyRestore } from './native.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { resolveDevice } from './extras.js';
 import { systemSettings } from './views-system.js';
@@ -402,16 +402,62 @@ export function profilesView(ctx) {
     list.replaceChildren(...names.map((n) => h('div', { class: `item ${n === m().profile_name ? 'active' : ''}` },
       h('div', {}, n), h('div', { class: 'spacer' }),
       n === m().profile_name ? h('span', { class: 'badge ok' }, 'Aktiv') : h('button', { class: 'btn sm', onclick: () => conn.command('LoadProfile', n, true) }, 'Indlæs'),
+      h('button', { class: 'btn sm', 'data-testid': 'profile-history', title: 'Tidligere versioner af profilen', onclick: () => showHistory(ctx, 'profile', n) }, 'Historik'),
       n !== m().profile_name && h('button', { class: 'btn sm', 'data-testid': 'profile-delete', onclick: async () => { if (await confirmDialog(`Slet profilen "${n}"?`, { ok: 'Slet', danger: true })) conn.command('DeleteProfile', n); } }, 'Slet'))));
+  });
+  const micList = h('div', { class: 'list' });
+  let micKey = '';
+  binder.add(() => {
+    const names = conn.status.files?.mic_profiles || [];
+    const k = names.join('|') + '#' + m().mic_profile_name;
+    if (k === micKey) return;
+    micKey = k;
+    micList.replaceChildren(...names.map((n) => h('div', { class: `item ${n === m().mic_profile_name ? 'active' : ''}` },
+      h('div', {}, n), h('div', { class: 'spacer' }),
+      n === m().mic_profile_name ? h('span', { class: 'badge ok' }, 'Aktiv') : null,
+      h('button', { class: 'btn sm', 'data-testid': 'mic-profile-history', onclick: () => showHistory(ctx, 'mic', n) }, 'Historik'))));
+    if (!names.length) micList.append(h('div', { class: 'hint' }, 'Ingen mikrofonprofiler.'));
   });
   return h('div', { class: 'grid cols-2' },
     h('div', { class: 'card' }, h('h2', {}, 'GoXLR-profiler',
       h('span', { class: 'row' },
-        h('button', { class: 'btn sm', onclick: () => conn.command('SaveProfile') }, 'Gem aktiv'),
-        h('button', { class: 'btn sm', 'data-testid': 'profile-save-as', onclick: async () => { const n = await promptDialog('Navn på profil'); if (n) conn.command('SaveProfileAs', n); } }, 'Gem som…'))),
+        h('button', { class: 'btn sm', onclick: () => { conn.command('SaveProfile'); setTimeout(() => snapshotProfiles(ctx), 1500); } }, 'Gem aktiv'),
+        h('button', { class: 'btn sm', 'data-testid': 'profile-save-as', onclick: async () => { const n = await promptDialog('Navn på profil'); if (n) { conn.command('SaveProfileAs', n); setTimeout(() => snapshotProfiles(ctx), 1500); } } }, 'Gem som…'))),
     list),
+    h('div', { class: 'card' }, h('h2', {}, 'Mikrofonprofiler'), micList,
+      h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Historik: GoXLR Studio gemmer automatisk de 30 seneste versioner af hver profil, hver gang den er ændret. "Gendan" lægger en gammel version tilbage – den nuværende gemmes først, så det kan fortrydes.')),
     h('div', { class: 'card' }, h('h2', {}, 'Om profiler'),
       h('div', { class: 'hint' }, 'GoXLR-profiler indeholder routing, faders, farver, effekter og sampler. Mikrofonprofiler (gain, EQ, gate, kompressor) ligger under Mikrofon. Scener i GoXLR Studio er hurtigere og kan også skifte Windows-enheder og afspilnings-EQ.')));
+}
+
+// Profilhistorik: earlier versions of a profile, with "Gendan".
+async function showHistory(ctx, kind, name) {
+  const { conn } = ctx;
+  const folder = kind === 'mic' ? conn.status.paths?.mic_profile_directory : conn.status.paths?.profile_directory;
+  await snapshotProfiles(ctx);
+  const versions = await historyList(kind, name).catch(() => []);
+  const kb = (n) => `${String(Math.round(n / 102.4) / 10).replace('.', ',')} KB`;
+  const rows = versions.length ? versions.map((v, i) => h('div', { class: 'item', 'data-testid': 'history-version' },
+    h('div', {}, v.at, i === 0 ? h('span', { class: 'badge', style: { marginLeft: '8px' } }, 'nyeste') : null), h('div', { class: 'spacer' }), h('span', { class: 'hint' }, kb(v.size)),
+    h('button', { class: 'btn sm', 'data-testid': 'history-restore', onclick: async () => {
+      if (!(await confirmDialog(`Gendan "${name}" som den var ${v.at}?\n\nDen nuværende version gemmes først, så du kan fortryde.`, { ok: 'Gendan' }))) return;
+      try {
+        await historyRestore(kind, name, v.file, String(folder || ''));
+        if (kind === 'mic' ? conn.mixer?.mic_profile_name === name : conn.mixer?.profile_name === name) conn.command(kind === 'mic' ? 'LoadMicProfile' : 'LoadProfile', name, true);
+        logActivity(`Profilhistorik: "${name}" gendannet fra ${v.at}`);
+        toast(`"${name}" er gendannet fra ${v.at}`, 'info');
+        document.querySelector('[data-testid=profile-history-dialog] [data-testid=dialog-ok]')?.click();
+      } catch (e) { toast(String(e.message || e)); }
+    } }, 'Gendan')))
+    : [h('div', { class: 'hint' }, 'Ingen gemte versioner endnu – de kommer, når profilen bliver ændret.')];
+  infoDialog(`Historik for "${name}"`, h('div', { class: 'list' }, rows), { ok: 'Luk', testid: 'profile-history-dialog' });
+}
+
+/** Saves a version of every profile that changed (every 5 minutes and after "Gem"). */
+export async function snapshotProfiles(ctx) {
+  const p = ctx.conn.status?.paths;
+  if (!p?.profile_directory) return 0;
+  return historySnapshot(String(p.profile_directory), String(p.mic_profile_directory || '')).catch(() => 0);
 }
 
 // ---------- Settings ----------

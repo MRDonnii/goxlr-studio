@@ -7,6 +7,7 @@ mod daemon_host;
 mod deck;
 mod driver;
 mod engine;
+mod history;
 mod keys;
 mod meters;
 mod migrate;
@@ -341,6 +342,22 @@ fn mqtt_stop() {
 #[tauri::command]
 fn mqtt_status() -> mqtt::Status {
     mqtt::status()
+}
+
+/// Profilhistorik (history.rs).
+#[tauri::command]
+async fn history_snapshot(profiles: String, mics: String) -> Result<usize, String> {
+    blocking(move || Ok(history::snapshot(&profiles, &mics))).await
+}
+
+#[tauri::command]
+fn history_list(kind: String, name: String) -> Vec<history::Version> {
+    history::list(&kind, &name)
+}
+
+#[tauri::command]
+async fn history_restore(kind: String, name: String, version: String, folder: String) -> Result<(), String> {
+    blocking(move || history::restore(&kind, &name, &version, &folder)).await
 }
 
 /// Lydtjek (soundcheck.rs): Windows settings that change or hide the sound.
@@ -810,6 +827,9 @@ pub fn run() {
             send_keys,
             audio_levels,
             spectrum_read,
+            history_snapshot,
+            history_list,
+            history_restore,
             soundcheck_report,
             soundcheck_set_ducking,
             soundcheck_restore_ducking,
