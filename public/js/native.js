@@ -126,6 +126,7 @@ export const ADMIN_TASKS = {
   uninstall: 'Fjerner EQ-motoren fra alle udgange, afregistrerer den og sletter motorfilerne. Windows’ lydtjeneste genstartes.',
   'use-external': 'Peger Equalizer APO’s config-mappe (ConfigPath) på GoXLR Studios EQ og genstarter Windows’ lydtjeneste.',
   'restore-external': 'Giver Equalizer APO sin egen config-mappe tilbage og genstarter Windows’ lydtjeneste.',
+  'disable-autostart': 'Slår GoXLR-softwares autostart fra: deaktiverer planlagte opgaver (schtasks /DISABLE) og flytter genveje fra Startup-mappen til backup-mappen. Intet slettes.',
 };
 function adminEvent(phase, task, extra = {}) {
   try { window.dispatchEvent(new CustomEvent('admin-task', { detail: { phase, action: task.action, text: ADMIN_TASKS[task.action] || task.action, ...extra } })); } catch { /* no window */ }
@@ -157,6 +158,15 @@ async function engineTaskRaw(task) {
     demoEngine.installed = new Set(task.devices);
     if (task.mode) demoEngine.mode = task.mode;
     tests = demoTest(log, !task.mode);
+  } else if (task.action === 'disable-autostart') {
+    for (const a of demoAutostarts) {
+      if ((a.kind === 'task' && task.tasks?.includes(a.id)) || (a.kind === 'link' && task.links?.includes(a.id))) {
+        a.enabled = a.kind === 'task' ? false : a.enabled;
+        if (a.kind === 'link') a.moved = true;
+        log.push(a.kind === 'task' ? `Planlagt opgave slået fra: ${a.id}` : `Genvej flyttet fra Startup til backup: ${a.name}`);
+      }
+    }
+    demoAutostarts = demoAutostarts.filter((a) => !a.moved);
   } else if (task.action === 'test') {
     if (demoEngine.unregistered) {
       log.push('Rettet: Motorens pre-mix-del er ikke registreret i Windows; DisableProtectedAudioDG er ikke sat til 1 – motoren er registreret i Windows igen');
@@ -241,12 +251,22 @@ export async function daemonInfo() {
   return { bundled: true, version: '1.2.4', started_by_us: demoDaemon.started_by_us, process_running: true, foreign: [...demoDaemon.foreign], last_error: null };
 }
 
+// GoXLR software that starts with Windows (scheduled tasks, Startup shortcuts) – mindre fejl 3.
+let demoAutostarts = [
+  { kind: 'task', name: 'GoXLR Utility Startup (Single Instance)', id: '\\GoXLR Utility Startup (Single Instance)', target: 'C:\\Program Files\\GoXLR Utility\\goxlr-launcher.exe', enabled: true, owner: 'utility' },
+  { kind: 'link', name: 'GoXLR Control Panel Autostart', id: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\GoXLR Control Panel Autostart.lnk', target: 'C:\\Program Files\\TC-HELICON\\GoXLR_Audio_Driver\\W10_x64\\GoXLRControlPanel.exe', enabled: true, owner: 'driver' },
+];
+export async function migrateAutostarts() {
+  if (isNative()) return invoke('migrate_autostarts');
+  return structuredClone(demoAutostarts);
+}
+
 // Switch from an installed GoXLR Utility to GoXLR Studio's own engine.
 export async function daemonTakeover() {
   if (isNative()) return invoke('daemon_takeover');
   const stopped = demoDaemon.foreign.splice(0);
   demoDaemon.started_by_us = true;
-  return { stopped, autostart_disabled: stopped.length ? 'backup\\autostart-slået-fra\\GoXLR Utility.lnk' : null, old_engine_removed: false, started: 'GoXLR-motoren er startet', restored_utility: false };
+  return { stopped, autostart_disabled: stopped.length ? 'backup\\autostart-slået-fra\\GoXLR Utility.lnk' : null, old_engine_removed: false, started: 'GoXLR-motoren er startet', restored_utility: false, autostart_remaining: demoAutostarts.filter((a) => a.enabled) };
 }
 
 // ---------- moving over from the old programs ----------

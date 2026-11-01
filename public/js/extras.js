@@ -287,3 +287,16 @@ export function vuStep(state, target, now, { release = 0.86, hold = 1200 } = {})
   if (level >= peak || now - peakAt > hold) { peak = level; peakAt = now; }
   return { level, peak, peakAt };
 }
+
+// ---------- taking over from GoXLR Utility (mindre fejl 3) ----------
+// "GoXLR Utility er koblet fra" only when it is true: stopped AND nothing starts it with Windows.
+export function takeoverMessage(t = {}) {
+  const remaining = (t.autostart_remaining || []).filter((a) => a.enabled && a.owner !== 'driver');
+  const how = remaining.map((a) => (a.kind === 'task' ? `den planlagte opgave "${a.name}"` : `genvejen "${a.name}"`)).join(' og ');
+  if (!t.stopped?.length) {
+    if (remaining.length) return { ok: false, text: `GoXLR-motoren kører i GoXLR Studio, men ${how} starter stadig GoXLR-software med Windows – slå det fra under Overflytning` };
+    return { ok: true, text: t.old_engine_removed ? 'GoXLR-motoren kører nu inde i GoXLR Studio – den separate motor er fjernet' : (t.started || 'GoXLR-motoren kører') };
+  }
+  if (remaining.length) return { ok: false, text: `GoXLR Utility er stoppet, men starter igen med Windows via ${how} – slå det fra under Overflytning` };
+  return { ok: true, text: 'GoXLR Studio bruger nu sin egen GoXLR-motor – GoXLR Utility er stoppet og starter ikke længere med Windows' };
+}

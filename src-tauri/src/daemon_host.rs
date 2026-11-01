@@ -242,6 +242,9 @@ pub struct Takeover {
     pub old_engine_removed: bool,
     pub started: String,
     pub restored_utility: bool,
+    /// GoXLR Utility still starts with Windows through these (mindre fejl 3: the app must not say
+    /// "GoXLR Utility er koblet fra" while a scheduled task starts it again at the next login).
+    pub autostart_remaining: Vec<crate::migrate::Autostart>,
 }
 
 /// Stops an installed GoXLR Utility (and 0.3.x's separate engine), keeps GoXLR Utility from
@@ -285,6 +288,7 @@ pub fn take_over(restart_utility: impl Fn() -> Result<String, String>) -> Result
     let killed = !t.stopped.is_empty() || t.old_engine_removed;
     std::thread::sleep(Duration::from_millis(if killed { 1500 } else { 0 }));
     remove_old_engine();
+    t.autostart_remaining = crate::migrate::goxlr_autostarts().into_iter().filter(|a| a.enabled && a.owner != "driver").collect();
     match start_and_wait(Duration::from_secs(10)) {
         Ok(msg) => t.started = msg,
         Err(e) => {

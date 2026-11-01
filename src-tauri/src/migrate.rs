@@ -1,6 +1,6 @@
 //! "Move to GoXLR Studio": finds the old setup (AutoHotkey scripts, TC-Helicon app profiles,
 //! Equalizer APO/Peace) and backs everything up before the user uninstalls anything.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
@@ -376,6 +376,133 @@ pub struct InstalledApp {
     pub uninstall: String,
 }
 
+// ---------------------------------------------------------------------------------------------
+// GoXLR-related autostarts (mindre fejl 3): GoXLR Utility can start with Windows through a
+// scheduled task ("GoXLR Utility Startup (Single Instance)") and shortcuts in the user's or the
+// common Startup folder. The driver's control panel may start too – optional to turn off.
+// ---------------------------------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Autostart {
+    /// "task" (scheduled task) or "link" (shortcut in a Startup folder)
+    pub kind: String,
+    pub name: String,
+    /// Task: full name incl. folder ("\\GoXLR Utility Startup (Single Instance)"); link: file path.
+    pub id: String,
+    /// What it starts.
+    pub target: String,
+    pub enabled: bool,
+    /// "utility" (GoXLR Utility), "tc-app" (TC-Helicon's app – conflicts with the engine) or
+    /// "driver" (the driver's control panel – harmless, optional).
+    pub owner: String,
+}
+
+/// Pure: whose autostart is this? None = not GoXLR-related, or GoXLR Studio itself.
+pub fn classify_autostart(name: &str, target: &str) -> Option<&'static str> {
+    let all = format!("{name} {target}").to_lowercase();
+    if all.contains("goxlr studio") || all.contains("goxlr-studio") {
+        return None;
+    }
+    if all.contains("goxlr app") {
+        return Some("tc-app");
+    }
+    if all.contains("control panel") || all.contains("controlpanel") || all.contains("audio_driver") || all.contains("tusbaudio") {
+        return Some("driver");
+    }
+    if all.contains("goxlr") {
+        return Some("utility");
+    }
+    None
+}
+
+/// Executables a shortcut points to (target and arguments are stored as UTF-16 and/or ANSI text).
+fn exe_paths_in_lnk(bytes: &[u8]) -> Vec<String> {
+    let mut texts = vec![bytes.iter().map(|&b| if (32..127).contains(&b) { b as char } else { '\0' }).collect::<String>()];
+    for off in 0..2 {
+        let u: Vec<u16> = bytes[off..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        texts.push(String::from_utf16_lossy(&u).chars().map(|c| if c.is_control() { '\0' } else { c }).collect());
+    }
+    let mut out = Vec::new();
+    for t in texts {
+        for seg in t.split('\0') {
+            let lower = seg.to_lowercase();
+            if let (Some(end), Some(start)) = (lower.find(".exe"), lower.find(":\\")) {
+                if start >= 1 && end > start {
+                    let p = seg[start - 1..end + 4].to_string();
+                    if !out.contains(&p) {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+pub fn common_startup_dir() -> Option<PathBuf> {
+    env_path("ProgramData").map(|a| a.join(r"Microsoft\Windows\Start Menu\Programs\Startup"))
+}
+
+/// Shortcuts in the user's and the common Startup folder plus scheduled tasks that start GoXLR
+/// software (not GoXLR Studio). Read-only, works without admin.
+pub fn goxlr_autostarts() -> Vec<Autostart> {
+    let mut out = Vec::new();
+    for dir in [startup_dir(), common_startup_dir()].into_iter().flatten() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let path = e.path();
+            if !path.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk")) {
+                continue;
+            }
+            let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let target = std::fs::read(&path).map(|b| exe_paths_in_lnk(&b).join("; ")).unwrap_or_default();
+            if let Some(owner) = classify_autostart(&name, &target) {
+                out.push(Autostart { kind: "link".into(), name, id: path.display().to_string(), target, enabled: true, owner: owner.into() });
+            }
+        }
+    }
+    out.extend(goxlr_tasks());
+    out
+}
+
+#[derive(Deserialize)]
+struct TaskRow {
+    name: String,
+    path: String,
+    state: String,
+    #[serde(default)]
+    exec: String,
+}
+
+/// Pure: turns Get-ScheduledTask's JSON into autostarts (see tests).
+pub fn parse_task_rows(json: &str) -> Vec<Autostart> {
+    let rows: Vec<TaskRow> = serde_json::from_str(json.trim()).unwrap_or_default();
+    rows.into_iter()
+        .filter_map(|r| {
+            let owner = classify_autostart(&r.name, &r.exec)?;
+            Some(Autostart { kind: "task".into(), id: format!("{}{}", r.path, r.name), enabled: !r.state.eq_ignore_ascii_case("Disabled"), name: r.name, target: r.exec, owner: owner.into() })
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn goxlr_tasks() -> Vec<Autostart> {
+    use std::os::windows::process::CommandExt;
+    let script = r#"$t = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { ($_.TaskName + ' ' + (($_.Actions | ForEach-Object { $_.Execute }) -join ' ')) -match 'goxlr' } | ForEach-Object { [pscustomobject]@{ name = $_.TaskName; path = $_.TaskPath; state = [string]$_.State; exec = (($_.Actions | ForEach-Object { ("" + $_.Execute + " " + $_.Arguments).Trim() }) -join '; ') } }); ConvertTo-Json -InputObject $t -Compress"#;
+    let Ok(out) = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .creation_flags(0x0800_0000)
+        .output()
+    else {
+        return Vec::new();
+    };
+    parse_task_rows(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(not(windows))]
+fn goxlr_tasks() -> Vec<Autostart> {
+    Vec::new()
+}
+
 /// Classifies an uninstall entry by its display name; None = unrelated program.
 pub fn classify(name: &str) -> Option<(&'static str, &'static str)> {
     let n = name.to_lowercase();
@@ -386,7 +513,7 @@ pub fn classify(name: &str) -> Option<(&'static str, &'static str)> {
         return Some(("keep", "Driveren får GoXLR'en til at virke som lydkort i Windows. Den skal blive."));
     }
     if n.contains("goxlr utility") {
-        return Some(("replace", "GoXLR Studio har sin egen GoXLR-motor. Dine profiler bliver liggende."));
+        return Some(("replace", "GoXLR-motoren kører inde i GoXLR Studio (fra 0.4.0), så GoXLR Utility's afinstallation påvirker ikke appen. Dine profiler bliver liggende."));
     }
     // Peace's entry is called "Peace Equalizer, interface Equalizer APO", so check it first.
     if n.starts_with("peace") || n.contains("peace equalizer") {
@@ -509,6 +636,36 @@ pub fn run_uninstaller(key: &str) -> Result<String, String> {
 #[cfg(test)]
 mod app_tests {
     use super::*;
+
+    #[test]
+    fn classifies_goxlr_autostarts() {
+        assert_eq!(classify_autostart("GoXLR Utility Startup (Single Instance)", r"C:\Program Files\GoXLR Utility\goxlr-launcher.exe"), Some("utility"));
+        assert_eq!(classify_autostart("GoXLR Utility", ""), Some("utility"));
+        assert_eq!(classify_autostart("GoXLR Control Panel Autostart", r"C:\Program Files\TC-HELICON\GoXLR_Audio_Driver\W10_x64\GoXLRControlPanel.exe"), Some("driver"));
+        assert_eq!(classify_autostart("GoXLR App", r"C:\Program Files (x86)\TC-Helicon\GOXLR\GoXLR App.exe"), Some("tc-app"));
+        assert_eq!(classify_autostart("GoXLR Studio", r"C:\Users\x\AppData\Local\GoXLR Studio\goxlr-studio.exe"), None);
+        assert_eq!(classify_autostart("Discord", r"C:\Discord\Update.exe"), None);
+    }
+
+    #[test]
+    fn parses_scheduled_tasks() {
+        let json = r#"[{"name":"GoXLR Utility Startup (Single Instance)","path":"\\","state":"Ready","exec":"C:\\Program Files\\GoXLR Utility\\goxlr-launcher.exe"},{"name":"Other","path":"\\","state":"Disabled","exec":"C:\\x.exe"}]"#;
+        let t = parse_task_rows(json);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].id, r"\GoXLR Utility Startup (Single Instance)");
+        assert!(t[0].enabled && t[0].owner == "utility" && t[0].kind == "task");
+        assert!(parse_task_rows("").is_empty());
+        let d = parse_task_rows(r#"[{"name":"GoXLR Utility Startup (Single Instance)","path":"\\","state":"Disabled","exec":"goxlr-launcher.exe"}]"#);
+        assert!(!d[0].enabled);
+    }
+
+    #[test]
+    fn finds_exe_in_lnk() {
+        let mut b = vec![0u8; 20];
+        b.extend(r"C:\Program Files\GoXLR Utility\goxlr-launcher.exe".encode_utf16().flat_map(|u| u.to_le_bytes()));
+        b.extend([0, 0]);
+        assert_eq!(exe_paths_in_lnk(&b), vec![r"C:\Program Files\GoXLR Utility\goxlr-launcher.exe".to_string()]);
+    }
 
     #[test]
     fn classifies_old_programs() {

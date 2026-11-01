@@ -1,4 +1,5 @@
 import { h, toggle, toast, confirmDialog } from './ui.js';
+import { takeoverMessage } from './extras.js';
 import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo, daemonTakeover } from './native.js';
 import { DEFAULT_DISCORD_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
@@ -30,7 +31,7 @@ export function systemSettings(ctx) {
     takeoverBtn.disabled = true;
     try {
       const t = await daemonTakeover();
-      toast(`${t.started}${t.stopped.length ? ' – GoXLR Utility er koblet fra' : ''}`, 'info');
+      const m = takeoverMessage(t); toast(m.text, m.ok ? 'info' : undefined);
     } catch (e) { toast(String(e)); }
     takeoverBtn.disabled = false;
     refreshDaemon();

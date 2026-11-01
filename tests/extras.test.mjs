@@ -176,3 +176,14 @@ test('VU meter scale, channel → GoXLR output and ballistics', () => {
   s = x.vuStep(s, 0, 2000);
   assert.ok(s.peak < 0.8, 'peak falls after the hold time');
 });
+
+test('takeoverMessage only says "koblet fra" when GoXLR Utility will not start again', async () => {
+  const { takeoverMessage } = await import('../public/js/extras.js');
+  const task = { kind: 'task', name: 'GoXLR Utility Startup (Single Instance)', enabled: true, owner: 'utility' };
+  const panel = { kind: 'link', name: 'GoXLR Control Panel Autostart', enabled: true, owner: 'driver' };
+  assert.equal(takeoverMessage({ stopped: ['goxlr-daemon.exe'], autostart_remaining: [task, panel] }).ok, false);
+  assert.match(takeoverMessage({ stopped: ['goxlr-daemon.exe'], autostart_remaining: [task] }).text, /starter igen med Windows via den planlagte opgave "GoXLR Utility Startup \(Single Instance\)"/);
+  assert.equal(takeoverMessage({ stopped: ['goxlr-daemon.exe'], autostart_remaining: [panel] }).ok, true);
+  assert.equal(takeoverMessage({ stopped: ['x'], autostart_remaining: [{ ...task, enabled: false }] }).ok, true);
+  assert.match(takeoverMessage({ stopped: [], old_engine_removed: true }).text, /separate motor er fjernet/);
+});

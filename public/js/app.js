@@ -8,7 +8,7 @@ import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, s
 import { diagView } from './views-diag.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
-import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset } from './extras.js';
+import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames } from './actions.js';
@@ -586,8 +586,10 @@ async function registerNativeHooks() {
   // GoXLR Studio switched off an installed GoXLR Utility and started its own engine.
   await listen('engine-takeover', (ev) => {
     const t = ev.payload || {};
-    if (t.stopped?.length) toast('GoXLR Studio bruger nu sin egen GoXLR-motor – GoXLR Utility er koblet fra', 'info');
-    else if (t.old_engine_removed) toast('GoXLR-motoren kører nu inde i GoXLR Studio – den separate motor er fjernet', 'info');
+    if (t.stopped?.length || t.old_engine_removed || t.autostart_remaining?.length) {
+      const m = takeoverMessage(t);
+      toast(m.text, m.ok ? 'info' : undefined);
+    }
   });
   await listen('engine-takeover-failed', (ev) => toast(`Kunne ikke starte den indbyggede GoXLR-motor: ${ev.payload}`));
   // The GoXLR engine runs inside the app; it stops by itself only on errors (or if TC-Helicon's

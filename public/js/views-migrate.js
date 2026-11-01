@@ -1,9 +1,8 @@
 import { h, toast, confirmDialog } from './ui.js';
 import {
-  isNative, migrateScan, migrateBackup, migrateCopyProfiles, migrateDisableStartup, migrateStopAhk,
-  installedApps, runUninstaller, openPath, engineInfo, daemonInfo, daemonTakeover, appSessions, listAudioDevices, storeGet,
+  isNative, migrateScan, migrateBackup, migrateCopyProfiles, migrateDisableStartup, migrateStopAhk, installedApps, runUninstaller, openPath, engineInfo, daemonInfo, daemonTakeover, appSessions, listAudioDevices, storeGet, migrateAutostarts, engineTask,
 } from './native.js';
-import { parseAhk, deviceName } from './extras.js';
+import { parseAhk, deviceName, takeoverMessage } from './extras.js';
 import { importPeacePresets } from './views-outeq.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { actionLabel } from './actions.js';
@@ -27,7 +26,7 @@ export function migrateView(ctx) {
   const done = (ctx.prefs.migrate ??= {});
   const save = () => ctx.savePrefs();
   const root = h('div', { class: 'grid' }, h('div', { class: 'card hint' }, 'Leder efter din gamle opsætning…'));
-  let scan = null, apps = [], engine = null, daemon = null;
+  let scan = null, apps = [], engine = null, daemon = null, autostarts = [];
 
   const check = (ok, text, sub) => h('div', { class: `check-row ${ok === true ? 'ok' : ok === false ? 'todo' : 'info'}` },
     h('span', { class: 'check-icon' }, ok === true ? '✓' : ok === false ? '•' : 'i'), h('div', {}, h('div', {}, text), sub ? h('div', { class: 'hint' }, sub) : null));
@@ -152,17 +151,36 @@ export function migrateView(ctx) {
         toast(`Kopierede ${n1 + n2} profiler (eksisterende blev ikke overskrevet)`, 'info');
       } catch (e) { toast(String(e)); }
     } }, `Kopiér ${tc.profiles.length + tc.mic_profiles.length} TC-Helicon-profiler`) : null;
-    const state = daemon.foreign?.length ? [false, 'GoXLR Utility styrer stadig GoXLR’en. Lad GoXLR Studio overtage – GoXLR Utility stoppes og starter ikke længere med Windows.']
+    const state = daemon.foreign?.length ? [false, 'GoXLR Utility styrer stadig GoXLR’en. Lad GoXLR Studio overtage – GoXLR Utility stoppes, og dens genvej i din Startup-mappe flyttes til backup. Andre autostarts står nedenfor.']
       : daemon.started_by_us ? [true, 'GoXLR-motoren kører inde i GoXLR Studio. GoXLR Utility kan afinstalleres.']
         : daemon.last_error ? [false, `GoXLR-motoren kører ikke: ${daemon.last_error}`]
           : [null, 'GoXLR-motoren starter …'];
     const takeBtn = daemon.bundled && daemon.foreign?.length ? h('button', { class: 'btn sm primary', onclick: async () => {
       takeBtn.disabled = true;
-      try { const t = await daemonTakeover(); toast(`${t.started} – GoXLR Utility er koblet fra`, 'info'); } catch (e) { toast(String(e)); }
+      try { const t = await daemonTakeover(); const m = takeoverMessage(t); toast(m.text, m.ok ? 'info' : undefined); } catch (e) { toast(String(e)); }
       reload();
     } }, 'Lad GoXLR Studio overtage nu') : null;
+    // Mindre fejl 3 / P2.3–P2.4: each GoXLR autostart is its own line. GoXLR Utility's are turned
+    // off with the user's OK; the driver's control panel is optional (harmless).
+    const label = (a) => (a.kind === 'task' ? `Planlagt opgave "${a.name}"` : `Genvej "${a.name}" i Startup`);
+    const offer = autostarts.filter((a) => a.enabled && a.owner !== 'driver');
+    const disable = async (list) => {
+      if (!(await confirmDialog(`Slå disse fra, så de ikke starter med Windows?\n\n${list.map((a) => `• ${label(a)}`).join('\n')}\n\nPlanlagte opgaver deaktiveres, og genveje flyttes til backup-mappen – intet slettes.`, { ok: 'Slå fra' }))) return;
+      try {
+        const r = await engineTask({ action: 'disable-autostart', tasks: list.filter((a) => a.kind === 'task').map((a) => a.id), links: list.filter((a) => a.kind === 'link').map((a) => a.id) });
+        toast((r.log || []).join(' · ') || 'Færdig', r.ok ? 'info' : undefined);
+      } catch (e) { toast(String(e.message || e)); }
+      reload();
+    };
+    const autostartRows = autostarts.map((a) => a.owner === 'driver'
+      ? check(null, label(a), `TC-Helicons driver-kontrolpanel – ufarligt, og driveren skal blive. Du kan slå autostart fra, hvis du ikke bruger panelet.${a.enabled ? '' : ' (slået fra)'}`)
+      : check(!a.enabled, label(a), a.enabled ? `Starter ${a.owner === 'tc-app' ? 'TC-Helicons app (den tager GoXLR’en fra GoXLR Studio)' : 'GoXLR Utility'} med Windows: ${a.target || ''}` : 'Slået fra'));
+    const autostartBtn = offer.length ? h('button', { class: 'btn sm primary', 'data-testid': 'migrate-autostart-off', onclick: () => disable(offer) }, `Slå ${offer.length === 1 ? 'den' : `de ${offer.length}`} fra`) : null;
+    const driverBtns = autostarts.filter((a) => a.enabled && a.owner === 'driver').map((a) => h('button', { class: 'btn sm', 'data-testid': 'migrate-autostart-driver-off', onclick: () => disable([a]) }, 'Slå kontrolpanelets autostart fra (valgfrit)'));
     return h('div', { class: 'card' }, h('h2', {}, '4 · GoXLR-motor og profiler'),
       check(state[0], 'GoXLR-motor', daemon.bundled ? state[1] : 'Denne version har ikke GoXLR-motoren indbygget – behold GoXLR Utility.'),
+      ...autostartRows,
+      autostartBtn || driverBtns.length ? h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } }, autostartBtn, ...driverBtns) : null,
       check(null, 'Profiler', `Dine profiler (${(ctx.conn.status?.files?.profiles || []).join(', ') || '–'}) ligger i GoXLR-motorens mappe og bliver ved med at virke.`),
       tc.dir ? check(null, 'TC-Helicons app', `${tc.profiles.length} profiler og ${tc.mic_profiles.length} mikrofonprofiler i ${tc.dir}`) : null,
       h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap' } }, takeBtn, tcBtn));
@@ -238,7 +256,7 @@ export function migrateView(ctx) {
 
   async function reload() {
     try {
-      [scan, apps, engine, daemon] = await Promise.all([migrateScan(), installedApps(), engineInfo(), daemonInfo()]);
+      [scan, apps, engine, daemon, autostarts] = await Promise.all([migrateScan(), installedApps(), engineInfo(), daemonInfo(), migrateAutostarts().catch(() => [])]);
       render();
     } catch (e) {
       root.replaceChildren(h('div', { class: 'card' }, `Kunne ikke scanne: ${e}`));

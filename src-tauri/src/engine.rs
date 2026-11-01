@@ -1386,6 +1386,14 @@ pub enum Task {
     /// Check that the engine is loaded on the outputs it is installed on and fix how it is
     /// hooked in where it isn't (what Equalizer APO's Device Selector does after every change).
     Test,
+    /// Turn off GoXLR software that starts with Windows (mindre fejl 3): scheduled tasks are
+    /// disabled, Startup shortcuts are moved to the backup folder – nothing is deleted.
+    DisableAutostart {
+        #[serde(default)]
+        tasks: Vec<String>,
+        #[serde(default)]
+        links: Vec<String>,
+    },
     /// Remove the built-in engine completely.
     Uninstall,
     /// Keep a separate Equalizer APO but let it read GoXLR Studio's config folder.
@@ -1551,6 +1559,42 @@ fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>,
     Ok(verify(devices, mode.is_none(), log, tests, sound))
 }
 
+fn disable_autostarts(tasks: &[String], links: &[String], log: &mut Vec<String>) -> Result<bool, String> {
+    let goxlr = |s: &str| {
+        let l = s.to_lowercase();
+        l.contains("goxlr") && !l.contains("goxlr studio")
+    };
+    for t in tasks {
+        if !goxlr(t) {
+            log.push(format!("Sprunget over (ikke en GoXLR-opgave): {t}"));
+            continue;
+        }
+        let ok = hidden("schtasks").args(["/Change", "/TN", t.as_str(), "/DISABLE"]).status().map(|s| s.success()).unwrap_or(false);
+        log.push(if ok { format!("Planlagt opgave slået fra: {t}") } else { format!("Kunne ikke slå den planlagte opgave fra: {t}") });
+    }
+    if !links.is_empty() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let backup = crate::apo::studio_dir().join("backup").join(format!("autostart-{stamp}"));
+        std::fs::create_dir_all(&backup).map_err(|e| format!("{}: {e}", backup.display()))?;
+        let startups: Vec<PathBuf> = [crate::migrate::common_startup_dir(), std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join(r"Microsoft\Windows\Start Menu\Programs\Startup"))]
+            .into_iter()
+            .flatten()
+            .collect();
+        for l in links {
+            let path = PathBuf::from(l);
+            let in_startup = path.parent().is_some_and(|p| startups.iter().any(|s| same_path(&p.display().to_string(), s)));
+            if !in_startup || !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk")) || !goxlr(&path.display().to_string()) {
+                log.push(format!("Sprunget over (ikke en GoXLR-genvej i Startup): {l}"));
+                continue;
+            }
+            let dest = backup.join(path.file_name().unwrap_or_default());
+            let moved = std::fs::rename(&path, &dest).is_ok() || (std::fs::copy(&path, &dest).is_ok() && std::fs::remove_file(&path).is_ok());
+            log.push(if moved { format!("Genvej flyttet fra Startup til {}", dest.display()) } else { format!("Kunne ikke flytte genvejen {l}") });
+        }
+    }
+    Ok(false)
+}
+
 fn uninstall_engine(log: &mut Vec<String>) -> Result<bool, String> {
     apply_devices(&[], None, log)?;
     let dir = install_dir();
@@ -1620,6 +1664,7 @@ pub fn run_task(task: &Task) -> TaskResult {
                 Ok(verify(&guids, true, &mut log, &mut tests, &mut sound))
             }
         }),
+        Task::DisableAutostart { tasks, links } => disable_autostarts(tasks, links, &mut log),
         Task::Uninstall => uninstall_engine(&mut log),
         Task::UseExternal => use_external(true, &mut log),
         Task::RestoreExternal => use_external(false, &mut log),

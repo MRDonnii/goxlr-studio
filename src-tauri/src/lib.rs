@@ -252,6 +252,12 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
     .await
 }
 
+/// GoXLR software that starts with Windows (scheduled tasks, Startup shortcuts).
+#[tauri::command]
+async fn migrate_autostarts() -> Result<Vec<migrate::Autostart>, String> {
+    blocking(|| Ok(migrate::goxlr_autostarts())).await
+}
+
 #[tauri::command]
 async fn migrate_scan() -> Result<migrate::Scan, String> {
     blocking(|| Ok(migrate::scan())).await
@@ -593,6 +599,7 @@ pub fn run() {
             daemon_info,
             daemon_takeover,
             migrate_scan,
+            migrate_autostarts,
             migrate_backup,
             migrate_copy_profiles,
             migrate_disable_startup,
