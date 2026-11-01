@@ -271,3 +271,6 @@ a { color: var(--accent); }
 .deck-path { overflow-wrap: anywhere; max-width: 100%; }
 .deck-list .keycap { min-width: 0; cursor: default; }
 input[data-testid="deck-search"] { flex: 1; min-width: 0; }
+
+.toast-count { margin-left: 8px; font-weight: 600; opacity: .75; }
+.toast-count:empty { display: none; }

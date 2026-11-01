@@ -22,6 +22,16 @@ export function applyPatch(doc, ops) {
   }
 }
 
+// GoXLR Utility's commands are a Rust enum, and serde writes them as JSON like this:
+//   Name()        → {"Name": []}
+//   Name(value)   → {"Name": value}      (one value is NOT wrapped in a list)
+//   Name(a, b, …) → {"Name": [a, b, …]}
+// Before 0.4.6 one value was sent as a list, so e.g. SetSwearButtonVolume and SetCoughMuteState
+// failed with "invalid type: sequence, expected i8".
+export function commandJson(name, args) {
+  return { [name]: args.length === 1 ? args[0] : args };
+}
+
 export class GoXLRConnection extends EventTarget {
   constructor() {
     super();
@@ -153,13 +163,12 @@ export class GoXLRConnection extends EventTarget {
 
   async command(name, ...args) {
     if (!this.serial) return;
-    const cmd = { [name]: args };
     if (this.mode === 'demo') {
-      applyDemoCommand(this.status, this.serial, cmd);
+      applyDemoCommand(this.status, this.serial, { [name]: args });
       this.emit();
       return;
     }
-    const res = await this.request({ Command: [this.serial, cmd] });
+    const res = await this.request({ Command: [this.serial, commandJson(name, args)] });
     if (res && res.Error) this.dispatchEvent(new CustomEvent('error', { detail: `${name}: ${res.Error}` }));
   }
 

@@ -105,11 +105,28 @@ export function logActivity(msg) {
   if (activityLog.length > 100) activityLog.shift();
 }
 
+// The same text shown again (e.g. one error per step of a slider) restarts its timer and counts up
+// instead of stacking a new box for every repeat.
+const openToasts = new Map();
 export function toast(msg, kind = 'error') {
-  if (kind === 'error') { errorLog.push({ at: new Date().toISOString(), msg: String(msg) }); if (errorLog.length > 50) errorLog.shift(); }
-  const el = h('div', { class: `toast ${kind}` }, msg);
+  const text = String(msg);
+  if (kind === 'error') { errorLog.push({ at: new Date().toISOString(), msg: text }); if (errorLog.length > 50) errorLog.shift(); }
+  const key = `${kind}|${text}`;
+  const ms = kind === 'error' ? 6000 : 3000;
+  const open = openToasts.get(key);
+  if (open) {
+    open.count += 1;
+    open.badge.textContent = `×${open.count}`;
+    clearTimeout(open.timer);
+    open.timer = setTimeout(open.close, ms);
+    return;
+  }
+  const badge = h('span', { class: 'toast-count' });
+  const el = h('div', { class: `toast ${kind}` }, msg, badge);
+  const entry = { count: 1, badge, timer: 0, close: () => { el.remove(); openToasts.delete(key); } };
+  entry.timer = setTimeout(entry.close, ms);
+  openToasts.set(key, entry);
   document.getElementById('toasts').append(el);
-  setTimeout(() => el.remove(), kind === 'error' ? 6000 : 3000);
 }
 
 export const icon = (d) => {

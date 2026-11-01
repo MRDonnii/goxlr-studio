@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 globalThis.crypto ??= webcrypto;
 const { coefficients, magnitudeDb, parseApoConfig, toApoConfig, suggestedPreamp } = await import('../public/js/eq.js');
-const { applyPatch } = await import('../public/js/api.js');
+const { applyPatch, commandJson } = await import('../public/js/api.js');
 
 test('peaking filter hits its gain at the centre frequency', () => {
   for (const gain of [-12, -3, 3, 6, 12]) {
@@ -60,4 +60,12 @@ test('Peace GraphicEQ lines become peaking bands', () => {
   const eq = parseApoConfig('Preamp: -3 dB\nGraphicEQ: 25 0; 40 0; 63 4; 100 2; 160 0; 250 -2; 400 0');
   assert.deepEqual(eq.bands.map((b) => [b.freq, b.gain]), [[63, 4], [100, 2], [250, -2]]);
   assert.ok(eq.bands.every((b) => b.q > 0.5 && b.q < 10));
+});
+
+test('GoXLR commands are sent the way serde reads them (one value is not a list)', () => {
+  assert.deepEqual(commandJson('SetSwearButtonVolume', [-20]), { SetSwearButtonVolume: -20 });
+  assert.deepEqual(commandJson('SetCoughMuteState', ['MutedToX']), { SetCoughMuteState: 'MutedToX' });
+  assert.deepEqual(commandJson('SetVolume', ['Music', 128]), { SetVolume: ['Music', 128] });
+  assert.deepEqual(commandJson('SetRouter', ['Microphone', 'Headphones', true]), { SetRouter: ['Microphone', 'Headphones', true] });
+  assert.deepEqual(commandJson('SaveProfile', []), { SaveProfile: [] });
 });
