@@ -1,5 +1,10 @@
 //! Self-update from GitHub releases.
 //!
+//! Checking: every release carries `latest.json` (written by the build: version, notes and each
+//! file's SHA-256). It is fetched from github.com/…/releases/latest/download/ – an ordinary file
+//! download. GitHub's API allows only 60 requests an hour per internet connection without login
+//! (a user got "GitHub svarede 403"), so it is only used for releases without latest.json.
+//!
 //! Installing: download the installer (or the portable exe) and check its SHA-256. A hidden
 //! PowerShell helper then waits for the app to exit, runs the installer (waiting for that process
 //! only, not for what it starts), writes every step to %APPDATA%\GoXLR Studio\logs\update.log and
@@ -9,6 +14,8 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 const ALLOWED_PREFIX: &str = "https://github.com/MRDonnii/goxlr-studio/releases/download/";
+const LATEST_JSON: &str = "https://github.com/MRDonnii/goxlr-studio/releases/latest/download/latest.json";
+const LATEST_API: &str = "https://api.github.com/repos/MRDonnii/goxlr-studio/releases/latest";
 
 /// The NSIS installer leaves an uninstaller next to the exe; the portable build has none.
 pub fn is_installed() -> bool {
@@ -67,6 +74,73 @@ pub fn take_result() -> Option<Value> {
 fn write_result(v: &Value) {
     let _ = std::fs::create_dir_all(log_dir());
     let _ = std::fs::write(result_path(), v.to_string());
+}
+
+/// A release as the UI expects it (GitHub's API shape): tag_name, body, html_url and assets with
+/// name, browser_download_url and digest. Used for latest.json and for the API's answer.
+pub fn release_from_json(text: &str) -> Result<Value, String> {
+    let mut v: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("Ugyldigt svar fra GitHub: {e}"))?;
+    let tag = v.get("tag_name").and_then(Value::as_str).unwrap_or("");
+    if !tag.starts_with('v') || tag.len() < 2 {
+        return Err("Svaret fra GitHub mangler et versionsnummer".into());
+    }
+    if !v.get("assets").map(Value::is_array).unwrap_or(false) {
+        return Err("Svaret fra GitHub mangler filerne".into());
+    }
+    if v.get("body").map(Value::is_null).unwrap_or(true) {
+        v["body"] = json!("");
+    }
+    Ok(v)
+}
+
+/// What to tell the user when GitHub's API does not answer 200.
+pub fn http_error(status: u16, reset: Option<u64>, now: u64) -> String {
+    match status {
+        403 | 429 => {
+            let wait = reset
+                .filter(|r| *r > now)
+                .map(|r| format!(" Prøv igen om {} min.", (r - now).div_ceil(60)))
+                .unwrap_or_default();
+            format!("GitHub tager højst imod 60 opdateringstjek i timen fra samme internetforbindelse, og grænsen er nået lige nu. Det går over af sig selv.{wait}")
+        }
+        404 => "GitHub viser ingen udgivelser for GoXLR Studio. Er repoet privat, kan hverken appen eller andre se dem – gør det offentligt på GitHub (Settings → Danger Zone → Change repository visibility).".into(),
+        s => format!("GitHub svarede {s}"),
+    }
+}
+
+/// Finds the newest release: latest.json first (no hourly limit), GitHub's API as a fallback.
+#[cfg(windows)]
+pub async fn check(current: String) -> Result<Value, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(format!("GoXLR-Studio/{current}"))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    if let Ok(r) = client.get(LATEST_JSON).send().await {
+        if r.status().is_success() {
+            if let Ok(rel) = release_from_json(&r.text().await.unwrap_or_default()) {
+                return Ok(rel);
+            }
+        }
+    }
+    let r = client
+        .get(LATEST_API)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Kunne ikke kontakte GitHub: {e}"))?;
+    let status = r.status().as_u16();
+    if status != 200 {
+        let reset = r.headers().get("x-ratelimit-reset").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok());
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        return Err(http_error(status, reset, now));
+    }
+    release_from_json(&r.text().await.map_err(|e| e.to_string())?)
+}
+
+#[cfg(not(windows))]
+pub async fn check(_current: String) -> Result<Value, String> {
+    Err("Kun på Windows".into())
 }
 
 fn ps_quote(s: &str) -> String {
@@ -355,5 +429,25 @@ mod tests {
         let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
         let units: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         assert_eq!(String::from_utf16(&units).unwrap(), "Log 'æøå'");
+    }
+
+    #[test]
+    fn releases_are_read_from_latest_json_and_the_api() {
+        let rel = release_from_json("\u{feff}{\"tag_name\":\"v0.4.4\",\"assets\":[{\"name\":\"GoXLR.Studio_0.4.4_x64-setup.exe\"}]}").unwrap();
+        assert_eq!(rel["tag_name"], "v0.4.4");
+        assert_eq!(rel["body"], "");
+        assert!(release_from_json("{\"message\":\"Not Found\"}").is_err());
+        assert!(release_from_json("{\"tag_name\":\"v0.4.4\"}").is_err());
+        assert!(release_from_json("<html>").is_err());
+    }
+
+    #[test]
+    fn github_limits_are_explained() {
+        let t = http_error(403, Some(1_000 + 125), 1_000);
+        assert!(t.contains("60 opdateringstjek i timen"));
+        assert!(t.contains("om 3 min"));
+        assert!(!http_error(429, None, 0).contains(" min."));
+        assert!(http_error(404, None, 0).contains("privat"));
+        assert_eq!(http_error(500, None, 0), "GitHub svarede 500");
     }
 }

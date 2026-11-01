@@ -196,7 +196,12 @@ test('startLevelCommands sets only enabled, known channels (0-100 % -> 0-255)', 
   assert.deepEqual(startLevelCommands(undefined, ['Music']), []);
 });
 
-test('update: the outcome of the last update is explained', () => {
+test('update: GitHub limits and the last update are explained', () => {
+  const now = 1_000_000;
+  assert.match(x.updateHttpText(403, now / 1000 + 125, now), /60 opdateringstjek i timen.*om 3 min/);
+  assert.doesNotMatch(x.updateHttpText(429, null, now), /min\./);
+  assert.match(x.updateHttpText(404, null, now), /privat/);
+  assert.equal(x.updateHttpText(500, null, now), 'GitHub svarede 500');
   assert.equal(x.updateOutcome(null, '0.4.4'), null);
   assert.equal(x.updateOutcome({ from: '0.4.3', to: '0.4.4', code: 0 }, '0.4.4').ok, true);
   // Installed by hand afterwards: still a success.

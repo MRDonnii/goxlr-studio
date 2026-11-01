@@ -4,7 +4,7 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, updateResult, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
@@ -130,24 +130,13 @@ async function applyOutputEq() {
 }
 
 // ---------- updates ----------
-const RELEASES = 'https://api.github.com/repos/MRDonnii/goxlr-studio/releases/latest';
 async function checkUpdate(manual = false) {
   const u = ctx.updateState;
   try {
     const info = await appInfo();
     u.current = info.version;
     u.installed = info.installed;
-    const r = await fetch(RELEASES, { headers: { Accept: 'application/vnd.github+json' } });
-    // GitHub answers 404 both when there are no releases and when the repository is private (the
-    // update check is not logged in) – say so instead of "kan ikke finde nyeste".
-    if (r.status === 404) {
-      const why = 'GitHub viser ingen udgivelser for GoXLR Studio. Er repoet privat, kan hverken appen eller andre se dem – gør det offentligt på GitHub (Settings → Danger Zone → Change repository visibility).';
-      Object.assign(u, { latest: null, available: false, error: why, checkedAt: Date.now() });
-      if (manual) toast(why);
-      return;
-    }
-    if (!r.ok) throw new Error(`GitHub svarede ${r.status}`);
-    const rel = await r.json();
+    const rel = await latestRelease();
     const asset = pickUpdateAsset(rel, info.installed);
     Object.assign(u, { latest: rel.tag_name, notes: rel.body || '', url: rel.html_url, asset, error: null, checkedAt: Date.now() });
     u.available = compareVersions(rel.tag_name, info.version) > 0 && !!asset;

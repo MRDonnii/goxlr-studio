@@ -379,6 +379,11 @@ fn app_info(app: AppHandle) -> AppInfo {
     AppInfo { version: app.package_info().version.to_string(), installed: update::is_installed() }
 }
 
+#[tauri::command]
+async fn update_check(app: AppHandle) -> Result<Value, String> {
+    update::check(app.package_info().version.to_string()).await
+}
+
 /// `background`: the app sits in the tray – install silently and start it in the tray again.
 #[tauri::command]
 async fn install_update(app: AppHandle, url: String, sha256: Option<String>, version: Option<String>, background: Option<bool>) -> Result<(), String> {
@@ -631,6 +636,7 @@ pub fn run() {
             api_publish,
             set_tray_status,
             app_info,
+            update_check,
             install_update,
             update_result,
             update_log,

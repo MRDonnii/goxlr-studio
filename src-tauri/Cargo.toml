@@ -30,6 +30,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 [target.'cfg(windows)'.dependencies]
 # GoXLR Utility's engine, run inside GoXLR Studio (see goxlr-engine/README.md).
 goxlr-engine = { path = "goxlr-engine" }
+# Update check (latest.json from the release); same version and TLS as the GoXLR engine uses.
+reqwest = { version = "0.12.23", default-features = false, features = ["native-tls"] }
 windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_Media_Audio",

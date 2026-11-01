@@ -110,6 +110,17 @@ export function pickUpdateAsset(release, installed) {
   return a ? { url: a.browser_download_url, sha256: a.digest || null, name: a.name, size: a.size } : null;
 }
 
+// What to say when GitHub's API does not answer 200 (the browser demo; the app has the same texts
+// in update.rs). `reset` is GitHub's x-ratelimit-reset (seconds since 1970).
+export function updateHttpText(status, reset, nowMs) {
+  if (status === 403 || status === 429) {
+    const left = reset ? Math.ceil((reset * 1000 - nowMs) / 60000) : 0;
+    return `GitHub tager højst imod 60 opdateringstjek i timen fra samme internetforbindelse, og grænsen er nået lige nu. Det går over af sig selv.${left > 0 ? ` Prøv igen om ${left} min.` : ''}`;
+  }
+  if (status === 404) return 'GitHub viser ingen udgivelser for GoXLR Studio. Er repoet privat, kan hverken appen eller andre se dem – gør det offentligt på GitHub (Settings → Danger Zone → Change repository visibility).';
+  return `GitHub svarede ${status}`;
+}
+
 // The outcome of the last update, as written by the update helper ({ from, to, code }), seen from
 // the version that is running now. null = nothing to say.
 export function updateOutcome(result, current) {

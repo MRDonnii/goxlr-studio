@@ -1,3 +1,5 @@
+import { updateHttpText } from './extras.js';
+
 const tauri = () => window.__TAURI__;
 export const isNative = () => !!tauri();
 
@@ -347,6 +349,16 @@ export async function setTrayStatus(muted, tooltip) {
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
   return { version: '0.4.3', installed: false, browser: true };
+}
+
+// The newest release (GitHub's API shape). The app reads latest.json from the release – no hourly
+// limit – and falls back to GitHub's API itself; the browser demo asks the API directly.
+const RELEASES_API = 'https://api.github.com/repos/MRDonnii/goxlr-studio/releases/latest';
+export async function latestRelease() {
+  if (isNative()) return invoke('update_check');
+  const r = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });
+  if (!r.ok) throw new Error(updateHttpText(r.status, Number(r.headers.get('x-ratelimit-reset')) || null, Date.now()));
+  return r.json();
 }
 
 // `background`: the app is in the tray – install silently and start it in the tray again.

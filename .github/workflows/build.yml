@@ -90,6 +90,36 @@ jobs:
           "notes=$notes" >> $env:GITHUB_OUTPUT
           "publish=$($publish.ToString().ToLower())" >> $env:GITHUB_OUTPUT
 
+      # latest.json: what the app's update check reads from releases/latest/download/ – an ordinary
+      # file download, so it is not limited to GitHub API's 60 requests an hour per connection.
+      # Same shape as GitHub's API (tag_name, body, html_url, assets with SHA-256 digests).
+      - name: Write latest.json
+        if: steps.rel.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.rel.outputs.tag }}'
+          $repo = '${{ github.repository }}'
+          # GitHub turns spaces in uploaded file names into dots; name the files that way up front.
+          Get-ChildItem dist -File | Where-Object { $_.Name -match ' ' } | ForEach-Object { Rename-Item $_.FullName ($_.Name -replace ' ', '.') }
+          $assets = @(Get-ChildItem dist -File | ForEach-Object {
+            [ordered]@{
+              name = $_.Name
+              browser_download_url = "https://github.com/$repo/releases/download/$tag/$($_.Name)"
+              digest = 'sha256:' + (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+              size = $_.Length
+            }
+          })
+          $notes = '${{ steps.rel.outputs.notes }}'
+          $body = if ($notes) { Get-Content -Raw -Encoding utf8 $notes } else { '' }
+          [ordered]@{
+            tag_name = $tag
+            name = "GoXLR Studio $tag"
+            html_url = "https://github.com/$repo/releases/tag/$tag"
+            body = $body
+            assets = $assets
+          } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM dist/latest.json
+          Get-Content dist/latest.json
+
       - name: Release
         if: steps.rel.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
