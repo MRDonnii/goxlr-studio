@@ -395,6 +395,7 @@ export function outputEqView(ctx) {
   const run = async (task, busy) => {
     engineActions.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     engineText.textContent = busy;
+    const requested = task.devices ? [...task.devices] : null;
     try {
       const r = await engineTask(task);
       // The sound check is shown highlighted below the log (soundBox), not twice.
@@ -410,7 +411,13 @@ export function outputEqView(ctx) {
       const sum = engineTestSummary(r.tests, r.sound);
       toast(sum ? sum.text : r.reboot ? 'Færdig – genstart pc’en, så alle programmer bruger EQ’en' : 'Færdig', sum && !sum.ok ? undefined : 'info');
     } catch (e) { toast(String(e.message || e)); }
-    refreshEngine();
+    // Mindre fejl 2: the ticks show what really has the engine afterwards, and outputs that were
+    // ticked but did not get it are named.
+    chosen = null;
+    await refreshEngine();
+    const now = new Set(installedIds());
+    const dropped = (requested || []).filter((id) => !now.has(id)).map((id) => shortName(info.devices.find((d) => d.id === id)?.name || id));
+    if (dropped.length) engineLog.append(h('div', { class: 'bad', 'data-testid': 'engine-dropped' }, `✗ ${dropped.join(', ')} fik ikke EQ-motoren – afkrydsningen viser nu, hvilke udgange der faktisk har den.`));
   };
   const needDevices = (fn) => () => (chosen.size ? fn() : toast('Markér mindst én udgang'));
   const replaceExternal = async () => {

@@ -803,9 +803,31 @@ fn uninstall_device(d: &DeviceState) -> Result<(), String> {
 /// Installs on exactly `wanted` (endpoint ids or GUIDs) and removes the engine from all other outputs.
 /// `mode` forces another way of hooking in (Equalizer APO's "troubleshooting options") for outputs
 /// that don't play through the default one; outputs already installed differently are reinstalled.
+/// Name of an output from the registry, also when it is not connected right now.
+fn output_name(id: &str) -> String {
+    let guid = id.rfind('{').map(|i| &id[i..]).unwrap_or(id);
+    let props = format!(r"{RENDER_KEY}\{guid}\Properties");
+    match (reg::read_str(&props, DEVICE_VALUE), reg::read_str(&props, CONNECTION_VALUE)) {
+        (Some(d), Some(c)) => format!("{d} ({c})"),
+        (Some(n), None) | (None, Some(n)) => n,
+        _ => id.to_string(),
+    }
+}
+
+/// Outputs asked for that are not among the present ones (pure, see tests).
+pub fn missing_outputs<'a>(wanted: &'a [String], present_guids: &[String]) -> Vec<&'a String> {
+    wanted.iter().filter(|w| !present_guids.iter().any(|g| w.to_lowercase().ends_with(&g.to_lowercase()))).collect()
+}
+
 fn apply_devices(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -> Result<(), String> {
     let want = |guid: &str| wanted.iter().any(|w| w.to_lowercase().ends_with(&guid.to_lowercase()));
     let forced = mode.and_then(Mode::parse);
+    // Mindre fejl 2: an output that was ticked but is not connected (e.g. Steam Streaming
+    // Speakers) used to be skipped without a word.
+    let present: Vec<String> = devices().into_iter().map(|d| d.guid).collect();
+    for w in missing_outputs(wanted, &present) {
+        log.push(format!("– {}: ikke tilsluttet lige nu – fik ikke EQ-motoren", output_name(w)));
+    }
     for dev in devices() {
         let mut d = load_device(&dev.guid)?;
         if want(&dev.guid) && d.installed && forced.is_some_and(|m| m != d.mode) {
@@ -823,6 +845,11 @@ fn apply_devices(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -
             log.push(format!("EQ-motor fjernet fra: {}", dev.name));
         } else if d.installed {
             reg::delete_value(&fx_key(&dev.guid), DISABLE_ENHANCEMENTS)?;
+        }
+    }
+    for dev in devices() {
+        if want(&dev.guid) && !dev.installed {
+            log.push(format!("✗ {}: fik ikke EQ-motoren", dev.name));
         }
     }
     Ok(())
@@ -1743,6 +1770,13 @@ mod tests {
         assert_eq!(codes(&f), ["wrong-path-post-mix", "protected-audiodg"]);
         let f = RegFacts { dll_exists: false, ..facts_ok() };
         assert_eq!(codes(&f), ["missing-dll"]);
+    }
+
+    #[test]
+    fn ticked_outputs_that_are_not_connected_are_reported() {
+        let wanted = vec!["{0.0.0.00000000}.{aaaa}".to_string(), "{0.0.0.00000000}.{STEAM}".to_string()];
+        let present = vec!["{AAAA}".to_string(), "{bbbb}".to_string()];
+        assert_eq!(missing_outputs(&wanted, &present), vec![&wanted[1]]);
     }
 
     #[test]
