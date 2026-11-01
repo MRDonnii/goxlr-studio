@@ -2,6 +2,7 @@ import { FADER_LEDS, faderLeds, peakToMeter, dbToMeter, channelEndpoint, vuStep 
 import { h, slider, segmented, selectBox, toggle, throttle, toast } from './ui.js';
 import { CHANNELS, INPUTS, OUTPUTS } from './demo.js';
 import { listAudioDevices, setDefaultDevice } from './native.js';
+import { startLevelsCard } from './startlevels.js';
 
 export const CHANNEL_LABEL = {
   Mic: 'Mikrofon', LineIn: 'Line In', Console: 'Konsol', System: 'System', Game: 'Spil', Chat: 'Chat',
@@ -183,7 +184,7 @@ export function mixerView(ctx) {
     h('div', { class: 'hint' }, 'Vælg hvilket mix du lytter til i hovedtelefonerne – fx præcis det, streamen hører.'),
   );
 
-  root.append(h('div', { class: 'grid cols-2' }, chans, h('div', { class: 'grid' }, micCard, duckingCard(ctx), submixCard(ctx))));
+  root.append(h('div', { class: 'grid cols-2' }, h('div', { class: 'grid' }, chans, startLevelsCard(ctx)), h('div', { class: 'grid' }, micCard, duckingCard(ctx), submixCard(ctx))));
   return root;
 }
 

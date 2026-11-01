@@ -300,3 +300,12 @@ export function takeoverMessage(t = {}) {
   if (remaining.length) return { ok: false, text: `GoXLR Utility er stoppet, men starter igen med Windows via ${how} – slå det fra under Overflytning` };
   return { ok: true, text: 'GoXLR Studio bruger nu sin egen GoXLR-motor – GoXLR Utility er stoppet og starter ikke længere med Windows' };
 }
+
+// ---------- start levels (global, applied every time GoXLR Studio starts) ----------
+// cfg = { enabled, channels: { Music: 50, … } } in percent; only channels the GoXLR has.
+export function startLevelCommands(cfg, available = []) {
+  if (!cfg?.enabled) return [];
+  return Object.entries(cfg.channels || {})
+    .filter(([c, v]) => v != null && Number.isFinite(+v) && available.includes(c))
+    .map(([c, v]) => ['SetVolume', c, Math.round((Math.max(0, Math.min(100, +v)) * 255) / 100)]);
+}

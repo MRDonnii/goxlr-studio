@@ -257,3 +257,7 @@ a { color: var(--accent); }
 .engine-dev { flex-wrap: wrap; }
 .engine-dev > span:not(.badge) { white-space: nowrap; }
 .engine-dev .badge { margin-left: auto; }
+.start-levels .item { gap: 10px; }
+.start-levels .start-level-name { min-width: 96px; }
+.start-levels input[type=range] { flex: 1; min-width: 80px; }
+.start-levels input[type=range]:disabled { opacity: .35; }

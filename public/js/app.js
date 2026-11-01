@@ -8,6 +8,7 @@ import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, s
 import { diagView } from './views-diag.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
+import { applyStartLevels } from './startlevels.js';
 import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
@@ -471,7 +472,20 @@ function updateChrome() {
 
 let lastSerial = null;
 let lastMode = null;
+// Start levels: set once per device each time GoXLR Studio starts, a moment after the engine has
+// reported the device (so the profile it loads at start does not overwrite them).
+const startLevelsDone = new Set();
+function maybeStartLevels() {
+  const m = conn.mixer;
+  if (!m || !(conn.mode === 'live' || !isNative())) return;
+  const key = conn.serial || m.hardware?.serial_number || 'device';
+  if (startLevelsDone.has(key)) return;
+  startLevelsDone.add(key);
+  if (ctx.prefs.startLevels?.enabled) setTimeout(() => applyStartLevels(ctx), 1500);
+}
+
 conn.addEventListener('change', () => {
+  maybeStartLevels();
   updateChrome();
   syncTray();
   syncTrayStatus();

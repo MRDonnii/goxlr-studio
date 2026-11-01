@@ -187,3 +187,11 @@ test('takeoverMessage only says "koblet fra" when GoXLR Utility will not start a
   assert.equal(takeoverMessage({ stopped: ['x'], autostart_remaining: [{ ...task, enabled: false }] }).ok, true);
   assert.match(takeoverMessage({ stopped: [], old_engine_removed: true }).text, /separate motor er fjernet/);
 });
+
+test('startLevelCommands sets only enabled, known channels (0-100 % -> 0-255)', async () => {
+  const { startLevelCommands } = await import('../public/js/extras.js');
+  const cfg = { enabled: true, channels: { Music: 50, Chat: 100, Sample: 30, Game: 140, Mic: null } };
+  assert.deepEqual(startLevelCommands(cfg, ['Music', 'Chat', 'Game', 'Mic']), [['SetVolume', 'Music', 128], ['SetVolume', 'Chat', 255], ['SetVolume', 'Game', 255]]);
+  assert.deepEqual(startLevelCommands({ ...cfg, enabled: false }, ['Music']), []);
+  assert.deepEqual(startLevelCommands(undefined, ['Music']), []);
+});
