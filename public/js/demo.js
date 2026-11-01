@@ -29,10 +29,10 @@ export function createDemoStatus() {
     config: { daemon_version: 'demo', platform: 'demo', http_settings: { port: 14564 } },
     firmware: {},
     paths: {},
-    files: { profiles: ['Standard', 'Stream', 'Gaming'], mic_profiles: ['SM7B', 'Standard'], presets: [], samples: {}, icons: [] },
+    files: { profiles: ['Headset', 'Speakers', 'Stream'], mic_profiles: ['SM7B', 'Standard'], presets: [], samples: {}, icons: [] },
     mixers: {
       DEMO0001: {
-        hardware: { serial_number: 'DEMO0001', device_type: 'Full', colour_way: 'Black', versions: { firmware: [1, 5, 0, 0] }, manufactured_date: '', usb_device: {} },
+        hardware: { serial_number: 'DEMO0001', device_type: (typeof location !== 'undefined' && /[?&]mini\b/.test(location.search)) ? 'Mini' : 'Full', colour_way: 'Black', versions: { firmware: [1, 5, 0, 0] }, manufactured_date: '', usb_device: {} },
         fader_status: { A: fader('Mic', 'Mikrofon'), B: fader('Music', 'Musik'), C: fader('Chat', 'Discord'), D: fader('System', 'System') },
         mic_status: {
           mic_type: 'Dynamic',
@@ -73,7 +73,7 @@ export function createDemoStatus() {
         sampler: null,
         settings: { mute_hold_duration: 500, vc_mute_also_mute_cm: true, enable_monitor_with_fx: false, reset_sampler_on_clear: true, lock_faders: false, fade_duration: 0, vod_mode: 'Routable' },
         button_down: {},
-        profile_name: 'Standard',
+        profile_name: 'Headset',
         mic_profile_name: 'SM7B',
       },
     },

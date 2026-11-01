@@ -148,3 +148,40 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 .tile { all: unset; cursor: pointer; padding: 10px 12px; min-width: 64px; text-align: center; border-radius: 10px; font-size: 12.5px; background: color-mix(in srgb, var(--tc) 22%, #0d1320); border: 1px solid color-mix(in srgb, var(--tc) 60%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--tc) 30%, transparent); transition: transform .1s; }
 .tile:hover { transform: translateY(-1px); }
 .tile.sel { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* Quick switches in the top bar */
+.seg.quick button { padding: 4px 11px; font-size: 12.5px; }
+.seg.quick button.on { background: linear-gradient(90deg, rgba(34,211,238,.28), rgba(168,85,247,.22)); color: #fff; }
+select.quick { padding: 4px 8px; font-size: 12.5px; max-width: 200px; }
+.quick-eq { display: inline-flex; align-items: center; gap: 4px; }
+.eq-pill svg { margin-right: 4px; }
+.eq-pill:not(.on) { color: var(--muted); }
+.palette-item { display: flex; justify-content: space-between; gap: 12px; }
+.kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+
+/* EQ preset bar */
+.preset-bar { padding: 12px 14px; }
+.chip { all: unset; cursor: pointer; padding: 6px 13px; border-radius: 99px; font-size: 13px; background: var(--panel-2); border: 1px solid var(--line); transition: border-color .15s, background .15s, color .15s; white-space: nowrap; }
+.chip:hover { border-color: #3a4a6d; }
+.chip.ghost { color: var(--muted); border-style: dashed; }
+.chip.on { background: linear-gradient(90deg, rgba(34,211,238,.25), rgba(168,85,247,.2)); border-color: var(--accent); color: #fff; border-style: solid; box-shadow: 0 0 0 3px rgba(34,211,238,.08); }
+.chip.power { font-weight: 600; color: var(--muted); }
+.chip.power.on { background: rgba(52,211,153,.15); border-color: var(--ok); color: var(--ok); box-shadow: none; }
+.chip-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 2px; }
+.apo-devices { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.apo-devices .badge { align-self: flex-start; }
+
+/* Hotkeys */
+.btn.keycap { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; min-width: 150px; text-align: center; background: #0f1522; border-bottom-width: 3px; }
+.list .item select { max-width: 340px; }
+
+/* Per-app audio */
+.app-row { flex-wrap: wrap; }
+.app-row.stale { border-color: rgba(251,191,36,.45); }
+.app-name { display: flex; flex-direction: column; min-width: 160px; }
+.app-name .hint { font-size: 11.5px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-lbl { min-width: 0 !important; }
+.app-row select { width: 190px; }
+select.stale { border-color: var(--warn); color: var(--warn); }
+.warn-text { color: var(--warn); }
+a { color: var(--accent); }

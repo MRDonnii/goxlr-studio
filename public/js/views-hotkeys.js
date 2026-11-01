@@ -28,7 +28,7 @@ export function hotkeysView(ctx) {
   const list = h('div', { class: 'list' });
   let catalog = [];
 
-  const save = () => { ctx.saveHotkeys(); render(); };
+  const save = () => { render(); Promise.resolve(ctx.saveHotkeys()).then(render); };
 
   const capture = (binding, btn) => {
     btn.textContent = 'Tryk tasten… (Esc = annullér)';
@@ -83,9 +83,15 @@ export function hotkeysView(ctx) {
         ['Ctrl+PgUp → Headset', 'profile:Headset', 'Ctrl+PageUp'], ['Ctrl+PgDn → Speakers', 'profile:Speakers', 'Ctrl+PageDown']);
     }
     items.push(['Mute mikrofon', 'mute-mic', 'Ctrl+Alt+M'], ['EQ til/fra', 'eq-toggle', 'Ctrl+Alt+E'], ['Næste EQ-preset', 'eq-next', 'Ctrl+Alt+Q'], ['Næste udgang', 'output-next', 'Ctrl+Alt+O']);
-    suggestions.replaceChildren(...items
-      .filter(([, action, accel]) => !ctx.hotkeys.some((b) => b.action === action && b.accel === accel))
-      .map(([label, action, accel]) => h('button', { class: 'btn sm', onclick: () => { if (!ctx.hotkeys.some((b) => b.accel === accel)) add(action, accel); else toast(`${prettyAccel(accel)} er allerede i brug`); buildSuggestions(); } }, `+ ${label}`)));
+    const open = items.filter(([, action, accel]) => !ctx.hotkeys.some((b) => b.action === action && b.accel === accel));
+    const free = open.filter(([, , accel]) => !ctx.hotkeys.some((b) => b.accel === accel));
+    suggestions.replaceChildren(...open
+      .map(([label, action, accel]) => h('button', { class: 'btn sm', onclick: () => { if (!ctx.hotkeys.some((b) => b.accel === accel)) add(action, accel); else toast(`${prettyAccel(accel)} er allerede i brug`); buildSuggestions(); } }, `+ ${label}`)),
+      free.length > 1 ? h('button', { class: 'btn sm primary', onclick: () => {
+        for (const [, action, accel] of free) ctx.hotkeys.push({ id: crypto.randomUUID(), accel, action });
+        save(); buildSuggestions();
+      } }, `+ Tilføj alle (${free.length})`) : '');
+    if (!open.length) suggestions.append(h('span', { class: 'hint' }, 'Alle forslag er tilføjet.'));
   };
 
   actionCatalog(ctx).then((c) => { catalog = c; render(); buildSuggestions(); });

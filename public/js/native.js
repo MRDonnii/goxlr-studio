@@ -66,7 +66,11 @@ export async function setOutputEqEngine(eq) {
 
 export async function engineStatus() {
   if (isNative()) return invoke('output_eq_status');
-  return { available: false, reason: 'Browser-tilstand – lydmotoren findes kun i Windows-appen.' };
+  return {
+    available: false,
+    reason: 'Browser-tilstand – lydmotoren findes kun i Windows-appen.',
+    devices: demoDevices.filter((d) => d.flow === 'render').map((d) => ({ id: d.id, name: d.name, apo: /GoXLR/.test(d.name) })),
+  };
 }
 
 export async function apoTakeover(enable) {

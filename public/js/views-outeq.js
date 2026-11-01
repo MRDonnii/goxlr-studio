@@ -1,8 +1,58 @@
 import { h, toggle, toast, debounce } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, suggestedPreamp, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
-import { storeGet, storeSet, setOutputEqEngine, engineStatus, listAudioDevices, apoTakeover, apoReadConfig, isNative } from './native.js';
+import { storeGet, storeSet, setOutputEqEngine, engineStatus, listAudioDevices, apoTakeover, apoReadConfig, apoListConfigs, apoOpenConfigurator, isNative } from './native.js';
 import { shortName } from './views-mixer.js';
+import { applyEqPreset, toggleEq } from './actions.js';
+
+// Reads every Peace/APO preset file and stores the non-empty ones as presets. Returns the imported names.
+export async function importPeacePresets(ctx) {
+  const files = await apoListConfigs();
+  const names = [];
+  for (const f of files) {
+    const parsed = parseApoConfig(f.text);
+    if (!parsed.bands.length) continue;
+    let name = f.name.split(/[\\/]/).pop().replace(/ ParametricEQ$/i, '');
+    if (/^peace$/i.test(name)) name = 'Peace (nuværende)';
+    if (names.includes(name)) name = f.name;
+    ctx.outputEq.presets[name] = parsed;
+    names.push(name);
+  }
+  if (names.length) await storeSet('output-eq', ctx.outputEq);
+  return { names, total: files.length };
+}
+
+function presetBar(ctx) {
+  const state = ctx.outputEq;
+  const eq = state.slots[state.active];
+  const mine = Object.keys(state.presets);
+  const key = (n) => ctx.hotkeyFor?.(`eq-preset:${n}`);
+  const chip = (n, builtin) => h('button', {
+    class: `chip ${state.presetName === n ? 'on' : ''} ${builtin ? 'ghost' : ''}`,
+    title: key(n) ? `Genvej: ${key(n)}` : (builtin ? 'Indbygget preset' : 'Klik for at bruge'),
+    onclick: () => applyEqPreset(ctx, n),
+  }, n);
+  const importBtn = h('button', { class: 'btn sm', onclick: async () => {
+    if (!isNative()) { toast('Peace-presets kan kun importeres i Windows-appen.'); return; }
+    importBtn.disabled = true;
+    importBtn.textContent = 'Importerer…';
+    try {
+      const { names, total } = await importPeacePresets(ctx);
+      toast(names.length ? `Importeret ${names.length} Peace-presets` : `Fandt ingen presets med filtre (${total} filer gennemset)`, names.length ? 'info' : 'error');
+      ctx.onStateChanged?.('eq');
+    } catch (e) { toast(String(e)); importBtn.disabled = false; importBtn.textContent = 'Importér alle Peace-presets'; }
+  } }, 'Importér alle Peace-presets');
+  return h('div', { class: 'card preset-bar' },
+    h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '8px' } },
+      h('button', { class: `chip power ${eq.enabled ? 'on' : ''}`, title: 'EQ til/fra (B)', onclick: () => toggleEq(ctx) }, eq.enabled ? '● EQ til' : '○ EQ fra'),
+      h('span', { class: 'chip-sep' }),
+      mine.map((n) => chip(n)),
+      mine.length ? h('span', { class: 'chip-sep' }) : null,
+      Object.keys(BUILTIN_PRESETS).filter((n) => !mine.includes(n)).map((n) => chip(n, true)),
+      h('div', { class: 'spacer' }),
+      importBtn),
+    !mine.length ? h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Hent dine Peace-presets ind med ét klik – derefter skifter du med chipsene her, fra bakke-ikonet, toppen af vinduet eller en genvej.') : null);
+}
 
 
 export async function loadOutputEqState() {
@@ -97,7 +147,7 @@ export function outputEqView(ctx) {
     abSeg.append(b);
     return [k, b];
   });
-  const bypass = h('input', { type: 'checkbox', onchange: () => { eq().enabled = bypass.checked; changed(); } });
+  const bypass = h('input', { type: 'checkbox', onchange: () => { eq().enabled = bypass.checked; changed(); ctx.onStateChanged?.('eq-local'); } });
   const syncTop = () => {
     if (document.activeElement !== preampIn) preampIn.value = eq().preamp;
     const peak = Math.max(...totalResponse(eq(), graph.freqs));
@@ -135,6 +185,7 @@ export function outputEqView(ctx) {
     state.presetName = name;
     selected = 0;
     changed(); renderBands();
+    ctx.onStateChanged?.('eq-local');
   };
   const fileIn = h('input', { type: 'file', accept: '.txt,.cfg,text/plain', style: { display: 'none' } });
   fileIn.addEventListener('change', async () => {
@@ -145,7 +196,7 @@ export function outputEqView(ctx) {
     const name = f.name.replace(/\.(txt|cfg)$/i, '').replace(/ ParametricEQ$/i, '');
     state.presets[name] = parsed;
     loadEq(parsed, name);
-    renderPresets();
+    ctx.onStateChanged?.('eq');
     toast(`Importeret "${name}" – ${parsed.bands.length} filtre`, 'info');
     fileIn.value = '';
   });
@@ -155,12 +206,12 @@ export function outputEqView(ctx) {
       h('button', { class: 'btn sm', onclick: () => {
         const n = prompt('Navn på preset', state.presetName || '');
         if (!n) return;
-        state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); renderPresets(); toast(`Gemt "${n}"`, 'info');
+        state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); toast(`Gemt "${n}"`, 'info'); ctx.onStateChanged?.('eq');
       } }, 'Gem som…'),
       h('button', { class: 'btn sm', onclick: () => {
         const [k, ...r] = presetSel.value.split(':'); const n = r.join(':');
         if (k !== 'u' || !confirm(`Slet "${n}"?`)) return;
-        delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); renderPresets();
+        delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); ctx.onStateChanged?.('eq');
       } }, 'Slet')),
     h('div', { class: 'row' },
       h('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Importér APO / AutoEQ…'),
@@ -182,6 +233,8 @@ export function outputEqView(ctx) {
 
   const engineBadge = h('span', { class: 'badge' });
   const engineText = h('div', { class: 'hint' });
+  const apoLine = h('div', { class: 'apo-devices' });
+  const configBtn = h('button', { class: 'btn sm', onclick: () => apoOpenConfigurator().then(() => toast('Configurator åbnes – vælg enheder og genstart bagefter', 'info')).catch((e) => toast(String(e))) }, 'Åbn APO Configurator');
   const takeoverBtn = h('button', { class: 'btn sm primary' });
   const importApoBtn = h('button', { class: 'btn sm', onclick: async () => {
     try {
@@ -190,7 +243,7 @@ export function outputEqView(ctx) {
       if (!parsed.bands.length) { toast('Fandt ingen filtre i din APO-opsætning.'); return; }
       state.presets['Min APO-opsætning'] = parsed;
       loadEq(parsed, 'Min APO-opsætning');
-      renderPresets();
+      ctx.onStateChanged?.('eq');
       toast(`Importeret ${parsed.bands.length} filtre fra Equalizer APO`, 'info');
     } catch (e) { toast(String(e)); }
   } }, 'Importér min nuværende APO');
@@ -211,6 +264,22 @@ export function outputEqView(ctx) {
     takeoverBtn.className = `btn sm ${engine.taken_over ? '' : 'primary'}`;
     takeoverBtn.style.display = engine.apo_installed ? '' : 'none';
     importApoBtn.style.display = engine.apo_installed ? '' : 'none';
+    configBtn.style.display = isNative() && engine.apo_installed ? '' : 'none';
+    renderApo();
+  };
+  // Equalizer APO only processes devices it was installed on (chosen in its Configurator).
+  const renderApo = () => {
+    const devices = engine?.devices || [];
+    if (!devices.length) { apoLine.replaceChildren(); return; }
+    const pill = (d) => h('span', { class: `badge ${d.apo ? 'ok' : 'warn'}`, title: d.name }, `${d.apo ? '✓' : '✕'} ${shortName(d.name)}`);
+    if (state.target) {
+      const d = devices.find((x) => x.id === state.target);
+      apoLine.replaceChildren(
+        d ? pill(d) : h('span', { class: 'badge warn' }, 'Udgangen findes ikke'),
+        h('span', { class: 'hint' }, d?.apo ? ' APO er installeret på denne udgang.' : ' APO er ikke installeret på denne udgang – EQ’en høres ikke. Tilføj den i Configurator.'));
+    } else {
+      apoLine.replaceChildren(h('div', { class: 'hint' }, 'APO på udgange:'), h('div', { class: 'fx-toggle' }, devices.map(pill)));
+    }
   };
   listAudioDevices().then((devs) => {
     targetSel.replaceChildren(h('option', { value: '' }, 'Alle udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id }, shortName(d.name))));
@@ -219,7 +288,8 @@ export function outputEqView(ctx) {
   refreshEngine();
   const engineCard = h('div', { class: 'card' }, h('h2', {}, 'Lydmotor', engineBadge),
     h('div', { class: 'row' }, h('label', {}, 'EQ på udgang'), targetSel),
-    isNative() ? h('div', { class: 'row', style: { flexWrap: 'wrap' } }, takeoverBtn, importApoBtn) : null,
+    apoLine,
+    isNative() ? h('div', { class: 'row', style: { flexWrap: 'wrap' } }, takeoverBtn, importApoBtn, configBtn) : null,
     engineText);
 
   const preview = makePreview(eq);
@@ -233,7 +303,7 @@ export function outputEqView(ctx) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && eq().bands[selected]) { eq().bands.splice(selected, 1); selected = Math.max(0, selected - 1); changed(); renderBands(); }
-    else if (e.key.toLowerCase() === 'b') { eq().enabled = !eq().enabled; changed(); }
+    else if (e.key.toLowerCase() === 'b' && !e.ctrlKey && !e.altKey) { toggleEq(ctx); }
   };
   document.addEventListener('keydown', onKey);
   ctx.cleanup.push(() => { graph.destroy(); preview.stop(); document.removeEventListener('keydown', onKey); });
@@ -243,6 +313,7 @@ export function outputEqView(ctx) {
   apply();
 
   return h('div', { class: 'grid' },
+    presetBar(ctx),
     h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar,
       h('div', { class: 'eq-wrap', style: { marginTop: '12px' } }, canvas),
       h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),

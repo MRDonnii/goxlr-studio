@@ -4,8 +4,10 @@ import { applyScene } from './views-misc.js';
 import { BUILTIN_PRESETS } from './eq.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
 
+// The user's own presets; the built-in ones until the user has any (e.g. before importing Peace).
 export function eqPresetNames(ctx) {
-  return Object.keys(ctx.outputEq?.presets || {});
+  const mine = Object.keys(ctx.outputEq?.presets || {});
+  return mine.length ? mine : Object.keys(BUILTIN_PRESETS);
 }
 
 export function applyEqPreset(ctx, name) {

@@ -2,6 +2,7 @@ import { h, slider, selectBox, toggle, toast, segmented } from './ui.js';
 import { CHANNELS } from './demo.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
 import { listAudioDevices, setDefaultDevice, storeSet, isNative } from './native.js';
+import { prettyAccel } from './views-hotkeys.js';
 
 const STYLE_LABELS = {
   reverb: ['Library', 'DarkBloom', 'MusicClub', 'RealPlate', 'Chapel', 'HockeyArena'],
@@ -88,6 +89,7 @@ export function effectsView(ctx) {
 export async function captureScene(ctx, name, opts) {
   const m = ctx.conn.mixer;
   const scene = { id: crypto.randomUUID(), name, color: opts.color || '#22d3ee', parts: opts.parts };
+  if (opts.parts.profile) { scene.profile_name = m.profile_name; scene.mic_profile_name = m.mic_profile_name; }
   if (opts.parts.volumes) scene.volumes = { ...m.levels.volumes };
   if (opts.parts.mutes) scene.mutes = Object.fromEntries(['A', 'B', 'C', 'D'].map((f) => [f, m.fader_status[f].mute_state]));
   if (opts.parts.routing) scene.router = structuredClone(m.router);
@@ -104,12 +106,19 @@ export async function captureScene(ctx, name, opts) {
 
 export async function applyScene(ctx, scene) {
   const { conn } = ctx;
+  if (!conn.mixer) return;
+  // Profiles replace most of the mixer state, so load them first and then layer the rest on top.
+  let loaded = false;
+  if (scene.profile_name && conn.mixer.profile_name !== scene.profile_name) { await conn.command('LoadProfile', scene.profile_name, true); loaded = true; }
+  if (scene.mic_profile_name && conn.mixer.mic_profile_name !== scene.mic_profile_name) { await conn.command('LoadMicProfile', scene.mic_profile_name, true); loaded = true; }
   const m = conn.mixer;
+  // After a profile load the local state may lag behind the daemon's patches, so send everything.
+  const differs = (a, b) => loaded || a !== b;
   const jobs = [];
-  if (scene.volumes) for (const [c, v] of Object.entries(scene.volumes)) if (m.levels.volumes[c] !== v) jobs.push(conn.command('SetVolume', c, v));
-  if (scene.mutes) for (const [f, s] of Object.entries(scene.mutes)) if (m.fader_status[f].mute_state !== s) jobs.push(conn.command('SetFaderMuteState', f, s));
-  if (scene.router) for (const [i, outs] of Object.entries(scene.router)) for (const [o, on] of Object.entries(outs)) if (m.router[i]?.[o] !== on) jobs.push(conn.command('SetRouter', i, o, on));
-  if (scene.monitor && m.levels.output_monitor !== scene.monitor) jobs.push(conn.command('SetMonitorMix', scene.monitor));
+  if (scene.volumes) for (const [c, v] of Object.entries(scene.volumes)) if (differs(m.levels.volumes[c], v)) jobs.push(conn.command('SetVolume', c, v));
+  if (scene.mutes) for (const [f, s] of Object.entries(scene.mutes)) if (differs(m.fader_status[f].mute_state, s)) jobs.push(conn.command('SetFaderMuteState', f, s));
+  if (scene.router) for (const [i, outs] of Object.entries(scene.router)) for (const [o, on] of Object.entries(outs)) if (differs(m.router[i]?.[o], on)) jobs.push(conn.command('SetRouter', i, o, on));
+  if (scene.monitor && differs(m.levels.output_monitor, scene.monitor)) jobs.push(conn.command('SetMonitorMix', scene.monitor));
   if (scene.output) jobs.push(setDefaultDevice(scene.output, 'all').catch((e) => toast(`Udgang: ${e}`)));
   if (scene.input) jobs.push(setDefaultDevice(scene.input, 'all').catch((e) => toast(`Mikrofon: ${e}`)));
   if (scene.lighting) jobs.push(...applyLighting(conn, scene.lighting));
@@ -117,6 +126,7 @@ export async function applyScene(ctx, scene) {
     ctx.outputEq.slots[ctx.outputEq.active] = structuredClone(scene.eqSlot);
     storeSet('output-eq', ctx.outputEq);
     ctx.applyOutputEq?.();
+    ctx.onStateChanged?.('eq');
   }
   await Promise.all(jobs);
   ctx.refreshDevices?.();
@@ -127,17 +137,24 @@ export function scenesView(ctx) {
   const list = h('div', { class: 'grid cols-3' });
   const render = () => {
     list.replaceChildren(...ctx.scenes.map((s, idx) => h('div', { class: 'card', style: { borderTop: `3px solid ${s.color}` } },
-      h('h2', {}, h('span', { style: { color: 'var(--text)', textTransform: 'none', letterSpacing: 0, fontSize: '16px' } }, s.name), h('span', { class: 'badge' }, idx < 9 ? `Ctrl+Alt+${idx + 1}` : '')),
-      h('div', { class: 'hint' }, Object.entries(s.parts).filter(([, v]) => v).map(([k]) => PART_LABEL[k]).join(' · ')),
+      h('h2', {}, h('span', { style: { color: 'var(--text)', textTransform: 'none', letterSpacing: 0, fontSize: '16px' } }, s.name), sceneKey(ctx, s)),
+      h('div', { class: 'hint' }, Object.entries(s.parts).filter(([, v]) => v).map(([k]) => (k === 'profile' && s.profile_name ? `Profil: ${s.profile_name}${s.mic_profile_name ? ` / ${s.mic_profile_name}` : ''}` : PART_LABEL[k])).join(' · ')),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: () => applyScene(ctx, s) }, 'Aktivér'),
         h('button', { class: 'btn sm', onclick: async () => { const n = await captureScene(ctx, s.name, { color: s.color, parts: s.parts }); ctx.scenes[idx] = { ...n, id: s.id }; ctx.saveScenes(); render(); toast('Scene opdateret', 'info'); } }, 'Overskriv med nu'),
-        h('button', { class: 'btn sm', onclick: () => { if (confirm(`Slet "${s.name}"?`)) { ctx.scenes.splice(idx, 1); ctx.saveScenes(); render(); } } }, 'Slet')))));
+        h('button', { class: 'btn sm', onclick: () => {
+          if (!confirm(`Slet "${s.name}"?`)) return;
+          ctx.scenes.splice(idx, 1);
+          const before = ctx.hotkeys.length;
+          ctx.hotkeys = ctx.hotkeys.filter((b) => b.action !== `scene:${s.id}`);
+          if (ctx.hotkeys.length !== before) ctx.saveHotkeys();
+          ctx.saveScenes(); render();
+        } }, 'Slet')))));
     if (!ctx.scenes.length) list.append(h('div', { class: 'card hint' }, 'Ingen scener endnu. Indstil lyden som du vil have den – fx "Gaming", "Stream" eller "Film" – og gem den som scene.'));
   };
   const name = h('input', { type: 'text', placeholder: 'Navn, fx Gaming' });
   const color = h('input', { type: 'color', value: '#22d3ee' });
-  const parts = { volumes: true, mutes: true, routing: false, monitor: true, devices: true, eq: false, lighting: false };
+  const parts = { profile: false, volumes: true, mutes: true, routing: false, monitor: true, devices: true, eq: false, lighting: false };
   const partBtns = h('div', { class: 'fx-toggle' }, Object.keys(parts).map((k) => {
     const b = h('button', { class: `btn sm ${parts[k] ? 'on' : ''}`, onclick: () => { parts[k] = !parts[k]; b.classList.toggle('on', parts[k]); } }, PART_LABEL[k]);
     return b;
@@ -145,15 +162,25 @@ export function scenesView(ctx) {
   const create = h('div', { class: 'card' }, h('h2', {}, 'Ny scene fra nuværende indstillinger'),
     h('div', { class: 'row color-row' }, name, color, h('button', { class: 'btn primary', onclick: async () => {
       if (!name.value.trim()) { name.focus(); return; }
-      ctx.scenes.push(await captureScene(ctx, name.value.trim(), { color: color.value, parts: { ...parts } }));
+      const scene = await captureScene(ctx, name.value.trim(), { color: color.value, parts: { ...parts } });
+      ctx.scenes.push(scene);
+      // Give new scenes the next free Ctrl+Alt+digit, like before shortcuts became configurable.
+      const free = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `Ctrl+Alt+${n}`).find((a) => !ctx.hotkeys.some((b) => b.accel === a));
+      if (free) { ctx.hotkeys.push({ id: crypto.randomUUID(), accel: free, action: `scene:${scene.id}` }); ctx.saveHotkeys(); }
       ctx.saveScenes(); name.value = ''; render();
     } }, 'Gem scene')),
     h('div', { class: 'row' }, h('label', {}, 'Medtag'), partBtns),
-    h('div', { class: 'hint' }, isNative() ? 'Scener aktiveres med Ctrl+Alt+1…9 overalt i Windows (også i spil) og fra bakke-ikonet. Ctrl+Alt+M muter mikrofonen.' : 'Ctrl+Alt+1…9 aktiverer scener.'));
+    h('div', { class: 'hint' }, 'Nye scener får automatisk en ledig Ctrl+Alt+1…9. ',
+      isNative() ? 'Genvejene virker overalt i Windows (også i spil), og scenerne ligger også i bakke-menuen. ' : '',
+      h('a', { href: '#', onclick: (e) => { e.preventDefault(); ctx.navigate('hotkeys'); } }, 'Ret genveje')));
   render();
   return h('div', { class: 'grid' }, create, list);
 }
-const PART_LABEL = { volumes: 'Volumer', mutes: 'Mute', routing: 'Routing', monitor: 'Monitor-mix', devices: 'Windows-enheder', eq: 'Afspilnings-EQ', lighting: 'Lys' };
+function sceneKey(ctx, s) {
+  const k = ctx.hotkeyFor?.(`scene:${s.id}`);
+  return h('span', { class: 'badge' }, k ? prettyAccel(k) : 'Ingen genvej');
+}
+const PART_LABEL = { profile: 'GoXLR-profil', volumes: 'Volumer', mutes: 'Mute', routing: 'Routing', monitor: 'Monitor-mix', devices: 'Windows-enheder', eq: 'Afspilnings-EQ', lighting: 'Lys' };
 
 function applyLighting(conn, L) {
   const cur = conn.mixer.lighting;
