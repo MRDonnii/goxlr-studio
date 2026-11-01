@@ -1,4 +1,4 @@
-import { h, slider, segmented, selectBox, toggle, throttle } from './ui.js';
+import { h, slider, segmented, selectBox, toggle, throttle, promptDialog } from './ui.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { coefficients, magnitudeDb, formatFreq } from './eq.js';
@@ -140,7 +140,7 @@ export function micView(ctx) {
   });
   profiles.append(h('div', { class: 'row' }, h('label', {}, 'Aktiv'), profSel,
     h('button', { class: 'btn sm', onclick: () => conn.command('SaveMicProfile') }, 'Gem'),
-    h('button', { class: 'btn sm', onclick: () => { const n = prompt('Navn på ny mikrofonprofil'); if (n) conn.command('SaveMicProfileAs', n); } }, 'Gem som…')));
+    h('button', { class: 'btn sm', 'data-testid': 'mic-profile-save-as', onclick: async () => { const n = await promptDialog('Navn på ny mikrofonprofil'); if (n) conn.command('SaveMicProfileAs', n); } }, 'Gem som…')));
 
   return h('div', { class: 'grid' }, eqCard, h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp));
 }

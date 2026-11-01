@@ -1,4 +1,4 @@
-import { h, toast } from './ui.js';
+import { h, toast, confirmDialog } from './ui.js';
 import {
   isNative, migrateScan, migrateBackup, migrateCopyProfiles, migrateDisableStartup, migrateStopAhk,
   installedApps, runUninstaller, openPath, engineInfo, daemonInfo, daemonTakeover, appSessions, listAudioDevices, storeGet,
@@ -74,7 +74,7 @@ export function migrateView(ctx) {
       render();
     } }, fresh.length ? `Importér ${fresh.length} genveje` : 'Alle genveje er importeret');
     const stopBtn = h('button', { class: 'btn sm', onclick: async () => {
-      if (!confirm('Luk alle kørende AutoHotkey-scripts nu? Så kan GoXLR Studio bruge tasterne.')) return;
+      if (!(await confirmDialog('Luk alle kørende AutoHotkey-scripts nu? Så kan GoXLR Studio bruge tasterne.', { ok: 'Luk AutoHotkey' }))) return;
       await migrateStopAhk().catch((e) => toast(String(e)));
       setTimeout(async () => { await ctx.saveHotkeys(); toast('AutoHotkey er lukket – genvejene virker nu i GoXLR Studio', 'info'); reload(); }, 800);
     } }, 'Luk AutoHotkey nu');
@@ -191,7 +191,7 @@ export function migrateView(ctx) {
           : a.category === 'engine' ? h('button', { class: 'btn sm', onclick: () => ctx.navigate('outeq') }, 'Erstat på EQ-siden')
             : h('button', { class: 'btn sm', onclick: async () => {
               const pre = !done.backup ? 'Du har ikke taget backup endnu (trin 1).\n\n' : '';
-              if (!confirm(`${pre}Afinstallér "${a.name}"?\n\n${a.note}`)) return;
+              if (!(await confirmDialog(`${pre}Afinstallér "${a.name}"?\n\n${a.note}`, { ok: 'Afinstallér' }))) return;
               try { const n = await runUninstaller(a.key); toast(`Afinstallationen af ${n} er startet – følg dens vejledning`, 'info'); setTimeout(reload, 8000); } catch (e) { toast(String(e)); }
             } }, 'Afinstallér');
         return h('div', { class: `item app-item ${a.category}` },

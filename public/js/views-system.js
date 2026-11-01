@@ -1,4 +1,4 @@
-import { h, toggle, toast } from './ui.js';
+import { h, toggle, toast, confirmDialog } from './ui.js';
 import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo, daemonTakeover } from './native.js';
 import { DEFAULT_DISCORD_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
@@ -104,7 +104,7 @@ export function systemSettings(ctx) {
     toggle(binder, { label: 'Slå API til', get: () => api.enabled, set: (v) => { api.enabled = v; saveApi(); } }),
     toggle(binder, { label: 'Tillad fra andre enheder på netværket', get: () => api.lan, set: (v) => { api.lan = v; saveApi(); } }),
     h('div', { class: 'row' }, h('label', {}, 'Port'), port,
-      h('button', { class: 'btn sm', onclick: () => { if (confirm('Lav en ny token? Gamle links holder op med at virke.')) { api.token = newToken(); saveApi(); } } }, 'Ny token'),
+      h('button', { class: 'btn sm', 'data-testid': 'api-new-token', onclick: async () => { if (await confirmDialog('Lav en ny token? Gamle links holder op med at virke.', { ok: 'Ny token' })) { api.token = newToken(); saveApi(); } } }, 'Ny token'),
       h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(api.token).then(() => toast('Token kopieret', 'info')) }, 'Kopiér token')),
     examples,
     h('div', { class: 'hint' }, isNative() ? 'Alle handlinger fra Genveje kan kaldes – se listen på /actions. Windows Firewall spørger første gang, hvis netværksadgang er slået til.' : 'API’et findes kun i Windows-appen.'));
@@ -119,7 +119,7 @@ export function systemSettings(ctx) {
     try {
       const data = JSON.parse(await f.text());
       if (data.app !== 'goxlr-studio' || !data.data) throw new Error('Ikke en GoXLR Studio-backup');
-      if (!confirm(`Gendan backup fra ${new Date(data.created).toLocaleString('da-DK')}? Dine nuværende indstillinger overskrives.`)) return;
+      if (!(await confirmDialog(`Gendan backup fra ${new Date(data.created).toLocaleString('da-DK')}? Dine nuværende indstillinger overskrives.`, { ok: 'Gendan' }))) return;
       for (const k of BACKUP_KEYS) if (k in data.data) await storeSet(k, data.data[k]);
       toast('Backup gendannet – genindlæser', 'info');
       setTimeout(() => location.reload(), 600);

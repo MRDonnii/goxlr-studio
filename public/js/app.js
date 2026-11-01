@@ -211,7 +211,7 @@ function renderBanners() {
   }
   if (ctx.eqTargetNotice && ctx.outputEq?.target) {
     const name = ctx.outputEq.target_name || 'én udgang';
-    const confirm = (all) => {
+    const decide = (all) => {
       if (all) { ctx.outputEq.target = null; ctx.outputEq.target_name = null; storeSet('output-eq', ctx.outputEq); applyOutputEq().catch(() => {}); }
       ctx.prefs.eqTargetConfirmed = true; ctx.savePrefs(); ctx.eqTargetNotice = false; renderBanners();
       if (current === 'outeq') mount();
@@ -219,8 +219,8 @@ function renderBanners() {
     };
     items.push(h('div', { class: 'banner warn', 'data-testid': 'banner-eq-target' },
       `EQ’en gælder kun ${name} – en indstilling fra en tidligere version. Lyd på andre udgange (fx Music fra Spotify) får ingen EQ.`,
-      h('button', { class: 'btn sm primary', 'data-testid': 'banner-eq-target-all', onclick: () => confirm(true) }, 'Gælder alle markerede udgange'),
-      h('button', { class: 'btn sm', 'data-testid': 'banner-eq-target-keep', onclick: () => confirm(false) }, `Behold kun ${name}`)));
+      h('button', { class: 'btn sm primary', 'data-testid': 'banner-eq-target-all', onclick: () => decide(true) }, 'Gælder alle markerede udgange'),
+      h('button', { class: 'btn sm', 'data-testid': 'banner-eq-target-keep', onclick: () => decide(false) }, `Behold kun ${name}`)));
   }
   const rep = ctx.engineRepair;
   if (rep?.needed) {

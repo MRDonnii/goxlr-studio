@@ -1,4 +1,4 @@
-import { h, toggle, toast, debounce } from './ui.js';
+import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, suggestedPreamp, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative } from './native.js';
@@ -328,20 +328,20 @@ export function outputEqView(ctx) {
   const presetsCard = h('div', { class: 'card' }, h('h2', {}, 'Presets'),
     h('div', { class: 'row', style: { flexWrap: 'wrap' } }, presetSel,
       h('button', { class: 'btn sm', onclick: () => { const [k, ...r] = presetSel.value.split(':'); const n = r.join(':'); loadEq(k === 'u' ? state.presets[n] : BUILTIN_PRESETS[n], k === 'u' ? n : null); } }, 'Indlæs'),
-      h('button', { class: 'btn sm', onclick: () => {
-        const n = prompt('Navn på preset', state.presetName || '');
+      h('button', { class: 'btn sm', 'data-testid': 'preset-save-as', onclick: async () => {
+        const n = await promptDialog('Navn på preset', state.presetName || '', { ok: 'Gem' });
         if (!n) return;
         state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); toast(`Gemt "${n}"`, 'info'); ctx.onStateChanged?.('eq');
       } }, 'Gem som…'),
-      h('button', { class: 'btn sm', onclick: () => {
+      h('button', { class: 'btn sm', 'data-testid': 'preset-delete', onclick: async () => {
         const [k, ...r] = presetSel.value.split(':'); const n = r.join(':');
-        if (k !== 'u' || !confirm(`Slet "${n}"?`)) return;
+        if (k !== 'u' || !(await confirmDialog(`Slet "${n}"?`, { ok: 'Slet', danger: true }))) return;
         delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); ctx.onStateChanged?.('eq');
       } }, 'Slet')),
     h('div', { class: 'row' },
       h('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Importér APO / AutoEQ…'),
       h('button', { class: 'btn sm', onclick: async () => {
-        const txt = prompt('Indsæt Equalizer APO-konfiguration (Preamp/Filter-linjer):');
+        const txt = await promptDialog('Indsæt Equalizer APO-konfiguration (Preamp/Filter-linjer):', '', { ok: 'Indsæt', input: { multiline: true, placeholder: 'Preamp: -6 dB\nFilter 1: ON PK Fc 100 Hz Gain 3 dB Q 1.41' } });
         if (!txt) return;
         const parsed = parseApoConfig(txt);
         if (!parsed.bands.length) { toast('Fandt ingen filtre.'); return; }
@@ -421,7 +421,7 @@ export function outputEqView(ctx) {
   };
   const needDevices = (fn) => () => (chosen.size ? fn() : toast('Markér mindst én udgang'));
   const replaceExternal = async () => {
-    if (!confirm('GoXLR Studio erstatter Equalizer APO med sin indbyggede EQ-motor:\n\n1. Dine Peace/APO-presets importeres og gemmes.\n2. Equalizer APO afinstalleres (Peace virker derefter ikke længere og kan fjernes).\n3. GoXLR Studios motor sættes på de markerede udgange.\n\nWindows beder om administrator-adgang én gang, og lyden afbrydes et øjeblik. Fortsæt?')) return;
+    if (!(await confirmDialog('GoXLR Studio erstatter Equalizer APO med sin indbyggede EQ-motor:\n\n1. Dine Peace/APO-presets importeres og gemmes.\n2. Equalizer APO afinstalleres (Peace virker derefter ikke længere og kan fjernes).\n3. GoXLR Studios motor sættes på de markerede udgange.\n\nWindows beder om administrator-adgang én gang, og lyden afbrydes et øjeblik. Fortsæt?', { ok: 'Erstat' }))) return;
     try { const { names } = await importPeacePresets(ctx); if (names.length) toast(`Importeret ${names.length} Peace-presets`, 'info'); } catch { /* no presets */ }
     await run({ action: 'install', devices: [...chosen] }, 'Erstatter Equalizer APO med den indbyggede motor…');
   };
@@ -447,14 +447,14 @@ export function outputEqView(ctx) {
       if (installedIds().length && !selectionChanged()) {
         list.push(btn('Test EQ-motoren', lastTest?.tests?.some((t) => !t.ok && !t.error) ? 'primary' : '', () => run({ action: 'test' }, 'Tester EQ-motoren på udgangene – lyden afbrydes et øjeblik…')));
         // Manual fallback (Equalizer APO's "troubleshooting options"): cycle through the three ways.
-        list.push(btn('Prøv en anden måde', '', () => {
+        list.push(btn('Prøv en anden måde', '', async () => {
           const cur = info.devices.find((d) => d.installed)?.mode || 'lfx-gfx';
           const next = ENGINE_MODES[(ENGINE_MODES.indexOf(cur) + 1) % ENGINE_MODES.length];
-          if (!confirm(`Sæt EQ-motoren på de markerede udgange på en anden måde (${ENGINE_MODE_LABEL[next]})?\n\nNormalt finder "Test EQ-motoren" selv den måde der virker. Lyden afbrydes et øjeblik.`)) return;
+          if (!(await confirmDialog(`Sæt EQ-motoren på de markerede udgange på en anden måde (${ENGINE_MODE_LABEL[next]})?\n\nNormalt finder "Test EQ-motoren" selv den måde der virker. Lyden afbrydes et øjeblik.`, { ok: 'Skift måde' }))) return;
           run({ action: 'set-devices', devices: [...chosen], mode: next }, 'Skifter måde…');
         }));
       }
-      list.push(btn('Fjern EQ-motor', '', () => { if (confirm('Fjern GoXLR Studios EQ-motor fra alle udgange?')) run({ action: 'uninstall' }, 'Fjerner EQ-motoren…'); }));
+      list.push(btn('Fjern EQ-motor', '', async () => { if (await confirmDialog('Fjern GoXLR Studios EQ-motor fra alle udgange?', { ok: 'Fjern', danger: true })) run({ action: 'uninstall' }, 'Fjerner EQ-motoren…'); }));
     }
     if (info.external_config) list.push(importApoBtn);
     engineActions.replaceChildren(...list);

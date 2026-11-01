@@ -1,4 +1,4 @@
-import { h, slider, selectBox, toggle, toast, segmented } from './ui.js';
+import { h, slider, selectBox, toggle, toast, segmented, confirmDialog, promptDialog } from './ui.js';
 import { CHANNELS } from './demo.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
 import { listAudioDevices, setDefaultDevice, storeSet, isNative } from './native.js';
@@ -176,8 +176,8 @@ export function scenesView(ctx) {
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: () => applyScene(ctx, s) }, 'Aktivér'),
         h('button', { class: 'btn sm', onclick: async () => { const n = await captureScene(ctx, s.name, { color: s.color, parts: s.parts }); ctx.scenes[idx] = { ...n, id: s.id }; ctx.saveScenes(); render(); toast('Scene opdateret', 'info'); } }, 'Overskriv med nu'),
-        h('button', { class: 'btn sm', onclick: () => {
-          if (!confirm(`Slet "${s.name}"?`)) return;
+        h('button', { class: 'btn sm', 'data-testid': 'scene-delete', onclick: async () => {
+          if (!(await confirmDialog(`Slet "${s.name}"?`, { ok: 'Slet', danger: true }))) return;
           ctx.scenes.splice(idx, 1);
           const before = ctx.hotkeys.length;
           ctx.hotkeys = ctx.hotkeys.filter((b) => b.action !== `scene:${s.id}`);
@@ -401,13 +401,13 @@ export function profilesView(ctx) {
     list.replaceChildren(...names.map((n) => h('div', { class: `item ${n === m().profile_name ? 'active' : ''}` },
       h('div', {}, n), h('div', { class: 'spacer' }),
       n === m().profile_name ? h('span', { class: 'badge ok' }, 'Aktiv') : h('button', { class: 'btn sm', onclick: () => conn.command('LoadProfile', n, true) }, 'Indlæs'),
-      n !== m().profile_name && h('button', { class: 'btn sm', onclick: () => { if (confirm(`Slet profilen "${n}"?`)) conn.command('DeleteProfile', n); } }, 'Slet'))));
+      n !== m().profile_name && h('button', { class: 'btn sm', 'data-testid': 'profile-delete', onclick: async () => { if (await confirmDialog(`Slet profilen "${n}"?`, { ok: 'Slet', danger: true })) conn.command('DeleteProfile', n); } }, 'Slet'))));
   });
   return h('div', { class: 'grid cols-2' },
     h('div', { class: 'card' }, h('h2', {}, 'GoXLR-profiler',
       h('span', { class: 'row' },
         h('button', { class: 'btn sm', onclick: () => conn.command('SaveProfile') }, 'Gem aktiv'),
-        h('button', { class: 'btn sm', onclick: () => { const n = prompt('Navn på profil'); if (n) conn.command('SaveProfileAs', n); } }, 'Gem som…'))),
+        h('button', { class: 'btn sm', 'data-testid': 'profile-save-as', onclick: async () => { const n = await promptDialog('Navn på profil'); if (n) conn.command('SaveProfileAs', n); } }, 'Gem som…'))),
     list),
     h('div', { class: 'card' }, h('h2', {}, 'Om profiler'),
       h('div', { class: 'hint' }, 'GoXLR-profiler indeholder routing, faders, farver, effekter og sampler. Mikrofonprofiler (gain, EQ, gate, kompressor) ligger under Mikrofon. Scener i GoXLR Studio er hurtigere og kan også skifte Windows-enheder og afspilnings-EQ.')));

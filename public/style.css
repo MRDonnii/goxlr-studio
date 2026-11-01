@@ -61,8 +61,8 @@ main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; }
 .seg button { all: unset; cursor: pointer; padding: 5px 11px; border-radius: 7px; color: var(--muted); font-size: 13px; }
 .seg button.on { background: #26324d; color: var(--text); }
-select, input[type=text], input[type=number] { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; outline: none; }
-select:focus, input:focus { border-color: var(--accent); }
+select, input[type=text], input[type=number], textarea { background: var(--panel-2); color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; outline: none; }
+select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 input[type=number] { width: 84px; }
 
 input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) var(--p, 50%), #263049 var(--p, 50%)); outline: none; min-width: 80px; }
@@ -238,3 +238,9 @@ a { color: var(--accent); }
 .vu-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(to top, #22c55e 0, #22c55e 138px, #facc15 184px, #ef4444 230px); background-size: 100% 230px; background-position: bottom; }
 .vu::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(to top, transparent 0 6px, #080b12 6px 8px); pointer-events: none; }
 .vu-peak { position: absolute; left: 0; right: 0; height: 2px; background: #f8fafc; opacity: 0; }
+.dlg-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 16px; }
+.dlg { width: min(560px, 100%); max-height: 90vh; overflow: auto; background: var(--panel, #121826); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.dlg h3 { margin: 0 0 10px; font-size: 16px; }
+.dlg p { margin: 0 0 8px; line-height: 1.45; }
+.dlg-input { width: 100%; box-sizing: border-box; margin-top: 6px; font: 13px/1.4 ui-monospace, Consolas, monospace; }
+.dlg-actions { justify-content: flex-end; margin-top: 14px; }

@@ -133,3 +133,33 @@ export const ICONS = {
   move: '<path d="M4 12h13M13 7l5 5-5 5"/><path d="M4 5v14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
 };
+
+// In-app dialogs instead of the browser's confirm()/prompt(): those block the whole window and
+// cannot be driven by tests (mindre fejl 8, P1.4). Resolves true/false, or the text (null = cancel).
+export function dialog({ title = '', text = '', input = null, ok = 'OK', cancel = 'Annullér', danger = false } = {}) {
+  return new Promise((resolve) => {
+    let field = null;
+    if (input) {
+      field = h(input.multiline ? 'textarea' : 'input', { class: 'dlg-input', 'data-testid': 'dialog-input', placeholder: input.placeholder || '', rows: input.multiline ? 10 : null });
+      field.value = input.value || '';
+    }
+    const close = (v) => { overlay.remove(); document.removeEventListener('keydown', onKey, true); resolve(v); };
+    const okBtn = h('button', { class: `btn sm ${danger ? 'danger on' : 'primary'}`, 'data-testid': 'dialog-ok', onclick: () => close(field ? field.value : true) }, ok);
+    const cancelBtn = h('button', { class: 'btn sm', 'data-testid': 'dialog-cancel', onclick: () => close(field ? null : false) }, cancel);
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(field ? null : false); }
+      else if (e.key === 'Enter' && !(field && input.multiline)) { e.preventDefault(); e.stopPropagation(); okBtn.click(); }
+    };
+    const overlay = h('div', { class: 'dlg-overlay', 'data-testid': 'dialog' },
+      h('div', { class: 'dlg', role: 'dialog', 'aria-modal': 'true' },
+        title ? h('h3', {}, title) : null,
+        String(text).split('\n').filter((l) => l.trim()).map((l) => h('p', {}, l)),
+        field,
+        h('div', { class: 'row dlg-actions' }, cancelBtn, okBtn)));
+    document.body.append(overlay);
+    document.addEventListener('keydown', onKey, true);
+    (field || okBtn).focus();
+  });
+}
+export const confirmDialog = (text, opts = {}) => dialog({ text, ...opts });
+export const promptDialog = (text, value = '', opts = {}) => dialog({ text, ...opts, input: { value, ...(opts.input || {}) } });
