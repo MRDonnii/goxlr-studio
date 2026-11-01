@@ -25,6 +25,7 @@ futures-util = "0.3"
 anyhow = "1"
 log = "0.4"
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [target.'cfg(windows)'.dependencies]
 # GoXLR Utility's engine, run inside GoXLR Studio (see goxlr-engine/README.md).

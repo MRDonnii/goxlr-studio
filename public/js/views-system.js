@@ -57,12 +57,14 @@ export function systemSettings(ctx) {
   const installBtn = h('button', { class: 'btn sm primary', onclick: () => ctx.installUpdate() }, 'Installér nu');
   const renderUpd = () => {
     const u = ctx.updateState || {};
-    updInfo.replaceChildren(
+    updInfo.replaceChildren(...[
       h('div', { class: 'item' }, 'Denne version', h('div', { class: 'spacer' }), u.current || '…'),
       h('div', { class: 'item' }, 'Nyeste udgivelse', h('div', { class: 'spacer' }),
         u.error ? h('span', { class: 'badge warn', title: u.error }, 'Kunne ikke tjekke') : (u.latest || '–'),
         u.available ? h('span', { class: 'badge ok' }, 'Ny version') : null),
-      u.checkedAt ? h('div', { class: 'item' }, 'Sidst tjekket', h('div', { class: 'spacer' }), new Date(u.checkedAt).toLocaleString('da-DK')) : null);
+      u.checkedAt ? h('div', { class: 'item' }, 'Sidst tjekket', h('div', { class: 'spacer' }), new Date(u.checkedAt).toLocaleString('da-DK')) : null,
+      u.error ? h('div', { class: 'item hint', 'data-testid': 'update-error' }, u.error) : null,
+      u.failed ? h('div', { class: 'item hint', 'data-testid': 'update-failed' }, u.failed) : null].filter(Boolean));
     installBtn.style.display = u.available && isNative() ? '' : 'none';
   };
   ctx.onUpdateState = renderUpd;
@@ -72,7 +74,7 @@ export function systemSettings(ctx) {
     toggle(binder, { label: 'Installér automatisk (når appen ligger i bakken)', get: () => p.autoUpdate !== false, set: (v) => { p.autoUpdate = v; ctx.savePrefs(); } }),
     h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => ctx.checkUpdate(true) }, 'Søg efter opdatering'), installBtn,
       h('a', { href: 'https://github.com/MRDonnii/goxlr-studio/releases', target: '_blank', rel: 'noopener' }, 'Udgivelser')),
-    h('div', { class: 'hint' }, 'Appen tjekker GitHub hver 6. time. Filen kontrolleres mod GitHubs checksum, før den installeres; dine indstillinger bevares.'));
+    h('div', { class: 'hint' }, 'Appen tjekker GitHub hver 6. time. Filen kontrolleres mod GitHubs checksum, før den installeres; dine indstillinger bevares. Under installationen lukker GoXLR Studio, installeren vises kort, og appen starter igen af sig selv – hvert trin skrives i Diagnose.'));
 
   // ---- API ----
   p.api ??= { enabled: false, port: 14610, lan: false, token: '' };

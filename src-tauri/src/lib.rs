@@ -379,11 +379,25 @@ fn app_info(app: AppHandle) -> AppInfo {
     AppInfo { version: app.package_info().version.to_string(), installed: update::is_installed() }
 }
 
+/// `background`: the app sits in the tray – install silently and start it in the tray again.
 #[tauri::command]
-async fn install_update(app: AppHandle, url: String, sha256: Option<String>) -> Result<(), String> {
-    blocking(move || update::prepare(&url, sha256.as_deref())).await?;
+async fn install_update(app: AppHandle, url: String, sha256: Option<String>, version: Option<String>, background: Option<bool>) -> Result<(), String> {
+    let to = version.unwrap_or_else(|| "?".into()).trim_start_matches('v').to_string();
+    blocking(move || update::prepare(&url, sha256.as_deref(), &to, background.unwrap_or(false))).await?;
     app.exit(0);
     Ok(())
+}
+
+/// The outcome of the last update (once) and the end of update.log.
+#[tauri::command]
+fn update_result() -> Value {
+    serde_json::json!({ "result": update::take_result(), "log": update::log_tail(40) })
+}
+
+/// The end of update.log (%APPDATA%\GoXLR Studio\logs), for Diagnose.
+#[tauri::command]
+fn update_log() -> Vec<String> {
+    update::log_tail(40)
 }
 
 fn show_main(app: &AppHandle) {
@@ -618,6 +632,8 @@ pub fn run() {
             set_tray_status,
             app_info,
             install_update,
+            update_result,
+            update_log,
         ])
         .build(tauri::generate_context!())
         .expect("error while building GoXLR Studio")

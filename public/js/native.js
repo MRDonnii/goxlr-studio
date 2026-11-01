@@ -349,9 +349,21 @@ export async function appInfo() {
   return { version: '0.4.3', installed: false, browser: true };
 }
 
-export async function installUpdate(url, sha256) {
+// `background`: the app is in the tray – install silently and start it in the tray again.
+export async function installUpdate(url, sha256, version, background = false) {
   if (!isNative()) throw new Error('Kun i Windows-appen');
-  return invoke('install_update', { url, sha256 });
+  return invoke('install_update', { url, sha256, version, background });
+}
+
+export async function updateLog() {
+  if (isNative()) return invoke('update_log');
+  return [];
+}
+
+// { result: { from, to, code, installed, at } | null, log: [lines of update.log] }
+export async function updateResult() {
+  if (isNative()) return invoke('update_result');
+  return { result: null, log: [] };
 }
 
 export async function openUrl(url) {

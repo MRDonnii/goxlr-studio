@@ -195,3 +195,15 @@ test('startLevelCommands sets only enabled, known channels (0-100 % -> 0-255)', 
   assert.deepEqual(startLevelCommands({ ...cfg, enabled: false }, ['Music']), []);
   assert.deepEqual(startLevelCommands(undefined, ['Music']), []);
 });
+
+test('update: the outcome of the last update is explained', () => {
+  assert.equal(x.updateOutcome(null, '0.4.4'), null);
+  assert.equal(x.updateOutcome({ from: '0.4.3', to: '0.4.4', code: 0 }, '0.4.4').ok, true);
+  // Installed by hand afterwards: still a success.
+  assert.equal(x.updateOutcome({ from: '0.4.3', to: '0.4.4', code: null }, '0.4.5').ok, true);
+  const failed = x.updateOutcome({ from: '0.4.3', to: '0.4.4', code: 2 }, '0.4.3');
+  assert.equal(failed.ok, false);
+  assert.match(failed.text, /kunne ikke lukke GoXLR Studio.*Du kører stadig 0\.4\.3/);
+  assert.match(x.updateOutcome({ to: '0.4.4', code: null }, '0.4.3').text, /nåede ikke at starte/);
+  assert.match(x.updateOutcome({ to: '0.4.4', code: 7 }, '0.4.3').text, /kode 7/);
+});

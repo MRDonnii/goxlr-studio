@@ -4,12 +4,12 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, updateResult, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
-import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage } from './extras.js';
+import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames } from './actions.js';
@@ -152,7 +152,7 @@ async function checkUpdate(manual = false) {
     Object.assign(u, { latest: rel.tag_name, notes: rel.body || '', url: rel.html_url, asset, error: null, checkedAt: Date.now() });
     u.available = compareVersions(rel.tag_name, info.version) > 0 && !!asset;
     if (manual) toast(u.available ? `Version ${rel.tag_name} er klar` : 'Du har den nyeste version', 'info');
-    if (u.available && isNative() && ctx.prefs.autoUpdate !== false && document.hidden) doInstallUpdate();
+    if (u.available && isNative() && ctx.prefs.autoUpdate !== false && document.hidden) doInstallUpdate(true);
   } catch (e) {
     u.error = String(e.message || e);
     u.checkedAt = Date.now();
@@ -162,14 +162,30 @@ async function checkUpdate(manual = false) {
   renderBanners();
 }
 
-async function doInstallUpdate() {
+// `background`: started by the automatic update while the app is in the tray.
+async function doInstallUpdate(background = false) {
   const u = ctx.updateState;
   if (!u.asset) return;
   if (!isNative()) { window.open(u.url, '_blank'); return; }
   u.installing = true;
   renderBanners();
-  toast(`Henter ${u.latest}… appen genstarter af sig selv`, 'info');
-  try { await installUpdate(u.asset.url, u.asset.sha256); } catch (e) { u.installing = false; toast(`Opdatering fejlede: ${e}`); renderBanners(); }
+  logActivity(`Opdatering til ${u.latest} startet (${background ? 'automatisk' : 'manuelt'})`);
+  toast(`Henter ${u.latest}… GoXLR Studio lukker, installerer og starter igen af sig selv`, 'info');
+  try { await installUpdate(u.asset.url, u.asset.sha256, u.latest, background); } catch (e) { u.installing = false; toast(`Opdatering fejlede: ${e}`); renderBanners(); }
+}
+
+// After an update: say whether it worked (the helper writes the outcome before it starts the app).
+async function reportUpdateResult() {
+  const r = await updateResult().catch(() => null);
+  const u = ctx.updateState;
+  u.log = r?.log || [];
+  const info = await appInfo().catch(() => null);
+  const out = info && updateOutcome(r?.result, info.version);
+  if (!out) return;
+  logActivity(out.text);
+  if (out.ok) toast(out.text, 'info');
+  else { u.failed = out.text; renderBanners(); }
+  ctx.onUpdateState?.();
 }
 
 // ---------- local API ----------
@@ -247,8 +263,13 @@ function renderBanners() {
       h('button', { class: 'btn sm', onclick: () => ctx.onApoChanged(false) }, 'Ignorér')));
   }
   const u = ctx.updateState;
-  if (u.available) {
-    items.push(h('div', { class: 'banner' }, `GoXLR Studio ${u.latest} er klar.`,
+  if (u.failed) {
+    items.push(h('div', { class: 'banner warn', 'data-testid': 'banner-update-failed' }, u.failed,
+      u.available ? h('button', { class: 'btn sm primary', disabled: u.installing, onclick: () => doInstallUpdate() }, 'Prøv igen') : null,
+      h('button', { class: 'btn sm', onclick: () => openUrl('https://github.com/MRDonnii/goxlr-studio/releases/latest') }, 'Hent installeren på GitHub'),
+      h('button', { class: 'btn sm', onclick: () => { u.failed = null; renderBanners(); } }, 'Luk')));
+  } else if (u.available) {
+    items.push(h('div', { class: 'banner', 'data-testid': 'banner-update' }, `GoXLR Studio ${u.latest} er klar.`,
       h('button', { class: 'btn sm primary', disabled: u.installing, onclick: () => doInstallUpdate() }, u.installing ? 'Installerer…' : 'Installér og genstart'),
       h('a', { href: u.url, target: '_blank', rel: 'noopener' }, 'Hvad er nyt?')));
   }
@@ -647,6 +668,7 @@ async function boot() {
   setTimeout(apoWatchdog, 4000);
   setTimeout(checkEngineRegistration, 3000);
   setInterval(daemonWatchdog, 15000);
+  setTimeout(() => reportUpdateResult(), 2000);
   setTimeout(() => checkUpdate(), 15000);
   setInterval(() => checkUpdate(), 6 * 3600 * 1000);
   current = localStorage.getItem('studio.page') || 'mixer';

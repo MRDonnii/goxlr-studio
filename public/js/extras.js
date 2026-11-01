@@ -110,6 +110,22 @@ export function pickUpdateAsset(release, installed) {
   return a ? { url: a.browser_download_url, sha256: a.digest || null, name: a.name, size: a.size } : null;
 }
 
+// The outcome of the last update, as written by the update helper ({ from, to, code }), seen from
+// the version that is running now. null = nothing to say.
+export function updateOutcome(result, current) {
+  if (!result?.to || result.to === '?') return null;
+  if (compareVersions(current, result.to) >= 0) return { ok: true, text: `GoXLR Studio er opdateret til ${result.to}.` };
+  const why = {
+    null: 'opdateringen nåede ikke at starte, efter appen lukkede',
+    1: 'installationen blev annulleret',
+    2: 'installeren kunne ikke lukke GoXLR Studio og gav op',
+    '-2': 'installeren blev ikke færdig',
+    '-3': 'installeren kunne ikke startes – måske blokeret af antivirus',
+    '-4': 'exe-filen kunne ikke udskiftes',
+  }[String(result.code ?? null)] || `installeren sluttede med kode ${result.code}`;
+  return { ok: false, text: `Opdateringen til ${result.to} blev ikke installeret: ${why}. Du kører stadig ${current}.` };
+}
+
 // ---------- app triggers ----------
 // Given the exes running before and now, returns the actions to run.
 export function triggerActions(triggers, before, now) {
