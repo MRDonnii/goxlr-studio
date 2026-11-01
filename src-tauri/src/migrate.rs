@@ -18,6 +18,9 @@ pub struct TcHelicon {
     pub dir: Option<String>,
     pub profiles: Vec<String>,
     pub mic_profiles: Vec<String>,
+    /// Full paths – the folder names differ ("MicProfiles", "Mic Profiles" …), so the copy uses these.
+    pub profile_files: Vec<String>,
+    pub mic_profile_files: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -112,12 +115,24 @@ fn read_small(p: &Path, max: u64) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn names(dir: &Path, ext: &str) -> Vec<String> {
+/// Profile files of one type anywhere in a GoXLR folder (two levels deep).
+fn profile_files(goxlr_dir: &Path, ext: &str) -> Vec<PathBuf> {
     let mut v = Vec::new();
-    walk(dir, 0, ext, &mut v);
-    let mut n: Vec<String> = v.iter().filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).collect();
-    n.sort();
-    n
+    walk(goxlr_dir, 2, ext, &mut v);
+    v
+}
+
+/// One file per profile name: files in the profile folders themselves ("Profiles", "MicProfiles",
+/// "Mic Profiles") win over copies elsewhere (e.g. a backup folder). Sorted by name.
+pub fn unique_by_name(mut files: Vec<PathBuf>) -> Vec<PathBuf> {
+    let home = |p: &PathBuf| {
+        let parent = p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().to_lowercase().replace([' ', '-', '_'], "")).unwrap_or_default();
+        u8::from(!matches!(parent.as_str(), "profiles" | "micprofiles"))
+    };
+    let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    files.sort_by(|a, b| name(a).cmp(&name(b)).then(home(a).cmp(&home(b))).then(a.cmp(b)));
+    files.dedup_by(|b, a| name(a) == name(b));
+    files
 }
 
 fn ahk_running() -> bool {
@@ -183,15 +198,28 @@ pub fn scan() -> Scan {
             }
         }
     }
+    // TC-Helicon's app keeps profiles in Documents\GoXLR\Profiles and mic profiles in
+    // Documents\GoXLR\MicProfiles – other setups say "Mic Profiles" – so they are found by file
+    // type, not by folder name, in every GoXLR folder (Documents may be on OneDrive).
+    let (mut profiles, mut mics) = (Vec::new(), Vec::new());
     for d in documents_dirs() {
         let g = d.join("GoXLR");
-        if g.is_dir() {
-            tc.profiles = names(&g.join("Profiles"), "goxlr");
-            tc.mic_profiles = names(&g.join("Mic Profiles"), "goxlrMicProfile");
-            tc.dir = Some(g.display().to_string());
-            break;
+        if !g.is_dir() {
+            continue;
         }
+        let (p, m) = (profile_files(&g, "goxlr"), profile_files(&g, "goxlrMicProfile"));
+        if tc.dir.is_none() || (profiles.is_empty() && mics.is_empty() && !(p.is_empty() && m.is_empty())) {
+            tc.dir = Some(g.display().to_string());
+        }
+        profiles.extend(p);
+        mics.extend(m);
     }
+    let stem = |p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let (profiles, mics) = (unique_by_name(profiles), unique_by_name(mics));
+    tc.profiles = profiles.iter().map(stem).collect();
+    tc.mic_profiles = mics.iter().map(stem).collect();
+    tc.profile_files = profiles.iter().map(|p| p.display().to_string()).collect();
+    tc.mic_profile_files = mics.iter().map(|p| p.display().to_string()).collect();
 
     let mut apo = ApoInfo::default();
     if let Some(dir) = crate::apo::original_config_dir() {
@@ -657,6 +685,28 @@ mod app_tests {
         assert!(parse_task_rows("").is_empty());
         let d = parse_task_rows(r#"[{"name":"GoXLR Utility Startup (Single Instance)","path":"\\","state":"Disabled","exec":"goxlr-launcher.exe"}]"#);
         assert!(!d[0].enabled);
+    }
+
+    #[test]
+    fn tc_helicon_profiles_are_found_whatever_the_folder_is_called() {
+        let dir = std::env::temp_dir().join(format!("goxlr-studio-test-{}", std::process::id()));
+        let g = dir.join("GoXLR");
+        for (sub, file) in [
+            ("Profiles", "Headset.goxlr"),
+            ("MicProfiles", "Røde.goxlrMicProfile"),
+            ("Mic Profiles", "Shure.goxlrMicProfile"),
+            ("Backup", "Headset.goxlr"),
+            ("", "Loose.goxlr"),
+            ("Presets", "Voice.preset"),
+        ] {
+            let d = if sub.is_empty() { g.clone() } else { g.join(sub) };
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(file), b"x").unwrap();
+        }
+        let names = |v: Vec<PathBuf>| v.iter().map(|p| p.strip_prefix(&g).unwrap().display().to_string().replace('\\', "/")).collect::<Vec<_>>();
+        assert_eq!(names(unique_by_name(profile_files(&g, "goxlr"))), vec!["Profiles/Headset.goxlr", "Loose.goxlr"]);
+        assert_eq!(names(unique_by_name(profile_files(&g, "goxlrMicProfile"))), vec!["MicProfiles/Røde.goxlrMicProfile", "Mic Profiles/Shure.goxlrMicProfile"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

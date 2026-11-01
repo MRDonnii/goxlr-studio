@@ -285,7 +285,10 @@ export async function migrateScan() {
   return {
     ahk: [{ path: 'C:\\Users\\demo\\Documents\\GoXLR.ahk', text: DEMO_AHK, autostart: true, startup_entry: 'C:\\Users\\demo\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\GoXLR.lnk' }],
     ahk_running: true,
-    tc_helicon: { installed: false, dir: null, profiles: [], mic_profiles: [] },
+    // As on the user's pc: TC-Helicon's mic profiles lie in "MicProfiles" (no space).
+    tc_helicon: { installed: false, dir: 'C:\\Users\\demo\\Documents\\GoXLR', profiles: ['Headset', 'Speakers'], mic_profiles: ['Røde'],
+      profile_files: ['C:\\Users\\demo\\Documents\\GoXLR\\Profiles\\Headset.goxlr', 'C:\\Users\\demo\\Documents\\GoXLR\\Profiles\\Speakers.goxlr'],
+      mic_profile_files: ['C:\\Users\\demo\\Documents\\GoXLR\\MicProfiles\\Røde.goxlrMicProfile'] },
     apo: { config_dir: demoEngine.kind === 'external' ? 'C:\\Program Files\\EqualizerAPO\\config' : null, peace_installed: demoEngine.kind === 'external', peace_txt: null, preset_files: 12 },
     backup_root: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR Studio\\backup',
   };

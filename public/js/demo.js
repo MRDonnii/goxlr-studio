@@ -28,7 +28,10 @@ export function createDemoStatus() {
   return {
     config: { daemon_version: '1.2.4', platform: 'demo', http_settings: { port: 14564 } },
     firmware: {},
-    paths: {},
+    paths: {
+      profile_directory: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR-on-Linux\\GoXLR-Utility\\profiles',
+      mic_profile_directory: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR-on-Linux\\GoXLR-Utility\\mic-profiles',
+    },
     files: { profiles: ['Headset', 'Speakers', 'Stream'], mic_profiles: ['SM7B', 'Standard'], presets: [], samples: {}, icons: [] },
     mixers: {
       DEMO0001: {

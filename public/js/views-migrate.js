@@ -146,9 +146,12 @@ export function migrateView(ctx) {
     const paths = ctx.conn.status?.paths || {};
     const tcBtn = tc.dir && (tc.profiles.length || tc.mic_profiles.length) ? h('button', { class: 'btn sm primary', onclick: async () => {
       try {
-        const n1 = paths.profile_directory ? await migrateCopyProfiles(tc.profiles.map((p) => `${tc.dir}\\Profiles\\${p}.goxlr`), String(paths.profile_directory)) : 0;
-        const n2 = paths.mic_profile_directory ? await migrateCopyProfiles(tc.mic_profiles.map((p) => `${tc.dir}\\Mic Profiles\\${p}.goxlrMicProfile`), String(paths.mic_profile_directory)) : 0;
-        toast(`Kopierede ${n1 + n2} profiler (eksisterende blev ikke overskrevet)`, 'info');
+        // Full paths from the scan: TC-Helicon's folder is "MicProfiles", others say "Mic Profiles".
+        if (!paths.profile_directory || !paths.mic_profile_directory) throw new Error('GoXLR-motoren kører ikke endnu – start den, og prøv igen');
+        const n1 = await migrateCopyProfiles(tc.profile_files || [], String(paths.profile_directory));
+        const n2 = await migrateCopyProfiles(tc.mic_profile_files || [], String(paths.mic_profile_directory));
+        const all = (tc.profile_files || []).length + (tc.mic_profile_files || []).length;
+        toast(`Kopierede ${n1} profiler og ${n2} mikrofonprofiler${n1 + n2 < all ? ` – ${all - n1 - n2} fandtes allerede og blev ikke overskrevet` : ''}`, 'info');
       } catch (e) { toast(String(e)); }
     } }, `Kopiér ${tc.profiles.length + tc.mic_profiles.length} TC-Helicon-profiler`) : null;
     const state = daemon.foreign?.length ? [false, 'GoXLR Utility styrer stadig GoXLR’en. Lad GoXLR Studio overtage – GoXLR Utility stoppes, og dens genvej i din Startup-mappe flyttes til backup. Andre autostarts står nedenfor.']
