@@ -74,7 +74,7 @@ export function diagView(ctx) {
         section('App', [row('Version', r.app.version || '–'), row('Installation', r.app.browser ? 'Browser' : r.app.installed ? 'Installeret' : 'Portable'),
           row('API', r.api?.enabled ? (r.api.error ? 'Fejl' : `Port ${r.api.port}`) : 'Fra', r.api?.error ? 'warn' : null)]),
         section('GoXLR', [row('Forbindelse', g.mode === 'live' ? 'Live' : g.mode, g.mode === 'live' ? 'ok' : 'warn'),
-          row('GoXLR-motor', g.engine?.started_by_us ? `Indbygget ${g.engine.version}` : g.engine?.process_running ? 'GoXLR Utility' : 'Kører ikke', g.engine?.started_by_us ? 'ok' : null),
+          row('GoXLR-motor', g.engine?.started_by_us ? `I appen (${g.engine.version})` : g.engine?.foreign?.length ? 'GoXLR Utility' : g.engine?.last_error ? `Stoppet: ${g.engine.last_error}` : 'Kører ikke', g.engine?.started_by_us ? 'ok' : 'warn'),
           g.model ? row('Model', g.model === 'Mini' ? 'GoXLR Mini' : 'GoXLR') : null, g.firmware ? row('Firmware', g.firmware) : null,
           g.daemon ? row('GoXLR Utility', g.daemon) : null, g.profile ? row('Profil', `${g.profile} / ${g.mic_profile}`) : null].filter(Boolean)),
         section('Afspilnings-EQ', [row('EQ-motor', e.running ? 'Aktiv' : e.available ? 'Klar' : 'Ikke aktiv', e.running ? 'ok' : 'warn'),

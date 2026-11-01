@@ -688,6 +688,352 @@ fn apply_devices(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -
 }
 
 // ---------------------------------------------------------------------------------------------
+// Device test (port of Equalizer APO 1.4's DeviceTestThread): with the test pipe registered, the
+// engine reports in from Windows' audio service when it is loaded on an output ("Initialize" of
+// its pre-mix and post-mix part). Each output is opened briefly; outputs where the engine did not
+// load are tried in the other ways of hooking in, like Equalizer APO does after every change.
+// ---------------------------------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct DeviceTest {
+    pub guid: String,
+    pub name: String,
+    /// How the engine is hooked in on this output after the test.
+    pub mode: String,
+    pub pre_mix: bool,
+    pub post_mix: bool,
+    /// The engine is loaded on this output (both parts reported in).
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+const TEST_PIPE_VALUE: &str = "DeviceTestPipeName";
+const TEST_PIPE_NAME: &str = "GoXLRStudioEngineTest";
+/// The order Equalizer APO tries (Windows 8.1+), minus the way that was already tested.
+const TEST_MODES: [Mode; 3] = [Mode::SfxEfx, Mode::SfxMfx, Mode::LfxGfx];
+
+#[derive(Deserialize)]
+struct TestMessage {
+    #[serde(rename = "deviceGuid")]
+    device_guid: String,
+    stage: String,
+    phase: String,
+}
+
+/// Marks the parts the engine reported in for (messages as sent by EqualizerAPO.dll).
+fn apply_test_messages(messages: &[String], results: &mut [DeviceTest]) {
+    for m in messages {
+        let Ok(msg) = serde_json::from_str::<TestMessage>(m) else { continue };
+        if msg.phase != "Initialize" {
+            continue;
+        }
+        if let Some(r) = results.iter_mut().find(|r| r.guid.eq_ignore_ascii_case(&msg.device_guid)) {
+            match msg.stage.as_str() {
+                "PreMix" => r.pre_mix = true,
+                "PostMix" => r.post_mix = true,
+                _ => {}
+            }
+            r.ok = r.pre_mix && r.post_mix;
+        }
+    }
+}
+
+fn mode_label(mode: &str) -> &'static str {
+    match mode {
+        "sfx-efx" => "SFX/EFX",
+        "sfx-mfx" => "SFX/MFX",
+        _ => "LFX/GFX",
+    }
+}
+
+/// Receives the engine's test messages on a named pipe (port of Equalizer APO's ReceiveThread).
+#[cfg(windows)]
+mod pipe {
+    use std::sync::{Arc, Mutex};
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::*;
+    use windows::Win32::Security::*;
+    use windows::Win32::Storage::FileSystem::*;
+    use windows::Win32::System::Pipes::*;
+
+    pub struct Receiver {
+        path: Vec<u16>,
+        messages: Arc<Mutex<Vec<String>>>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    struct Handle(HANDLE);
+    unsafe impl Send for Handle {}
+
+    fn create(path: &[u16]) -> Option<Handle> {
+        unsafe {
+            // NULL DACL: the engine runs in Windows' audio service (LOCAL SERVICE) and must connect.
+            let mut sd = SECURITY_DESCRIPTOR::default();
+            let psd = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut core::ffi::c_void);
+            InitializeSecurityDescriptor(psd, windows::Win32::System::SystemServices::SECURITY_DESCRIPTOR_REVISION).ok()?;
+            SetSecurityDescriptorDacl(psd, true, None, false).ok()?;
+            let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: psd.0, bInheritHandle: false.into() };
+            let h = CreateNamedPipeW(
+                PCWSTR(path.as_ptr()),
+                PIPE_ACCESS_INBOUND,
+                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                PIPE_UNLIMITED_INSTANCES,
+                0,
+                1024,
+                0,
+                Some(&sa),
+            );
+            (!h.is_invalid()).then_some(Handle(h))
+        }
+    }
+
+    impl Receiver {
+        pub fn start(name: &str) -> Option<Receiver> {
+            let path = super::reg::wide(&format!(r"\\.\pipe\{name}"));
+            let messages = Arc::new(Mutex::new(Vec::new()));
+            // The first instance exists before the engine can try to connect.
+            let first = create(&path)?;
+            let (m, p) = (messages.clone(), path.clone());
+            let thread = std::thread::spawn(move || serve(first, &p, &m));
+            Some(Receiver { path, messages, thread: Some(thread) })
+        }
+
+        pub fn messages(&self) -> Vec<String> {
+            self.messages.lock().unwrap().clone()
+        }
+    }
+
+    fn serve(first: Handle, path: &[u16], messages: &Mutex<Vec<String>>) {
+        let mut pipe = first;
+        loop {
+            let connected = match unsafe { ConnectNamedPipe(pipe.0, None) } {
+                Ok(()) => true,
+                Err(e) => e.code() == ERROR_PIPE_CONNECTED.to_hresult(),
+            };
+            // A new instance listens before this one is read, so messages that arrive at the same
+            // time (several outputs, two parts each) are not lost.
+            let next = create(path);
+            let mut stop = next.is_none();
+            if connected {
+                let mut buf = [0u8; 1024];
+                let mut read = 0u32;
+                if unsafe { ReadFile(pipe.0, Some(&mut buf), Some(&mut read), None) }.is_ok() && read > 0 {
+                    let s = String::from_utf8_lossy(&buf[..read as usize]).to_string();
+                    if s == "stop" {
+                        stop = true;
+                    } else {
+                        messages.lock().unwrap().push(s);
+                    }
+                }
+                let _ = unsafe { DisconnectNamedPipe(pipe.0) };
+            }
+            let _ = unsafe { CloseHandle(pipe.0) };
+            match next {
+                Some(n) if !stop => pipe = n,
+                Some(n) => {
+                    let _ = unsafe { CloseHandle(n.0) };
+                    return;
+                }
+                None => return,
+            }
+        }
+    }
+
+    impl Drop for Receiver {
+        fn drop(&mut self) {
+            // Wake the server with "stop", as Equalizer APO's ReceiveThread does (waiting for a
+            // free pipe instance if the engine is just sending a message).
+            let mut delivered = false;
+            for _ in 0..3 {
+                let opened = unsafe { CreateFileW(PCWSTR(self.path.as_ptr()), GENERIC_WRITE.0, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) };
+                match opened {
+                    Ok(h) => {
+                        let mut written = 0u32;
+                        delivered = unsafe { WriteFile(h, Some(b"stop"), Some(&mut written), None) }.is_ok();
+                        unsafe {
+                            let _ = FlushFileBuffers(h);
+                            let _ = CloseHandle(h);
+                        }
+                        break;
+                    }
+                    Err(_) => {
+                        let _ = unsafe { WaitNamedPipeW(PCWSTR(self.path.as_ptr()), 1000) };
+                    }
+                }
+            }
+            // Never hang the elevated helper: without the stop message the thread is left behind.
+            if let Some(t) = self.thread.take() {
+                if delivered {
+                    let _ = t.join();
+                }
+            }
+        }
+    }
+}
+
+/// Opens a shared-mode stream on an output, so Windows' audio engine loads its effects (port of
+/// DeviceAPOInfo::testAPOInstallation).
+#[cfg(windows)]
+fn open_output(guid: &str) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Media::Audio::*;
+    use windows::Win32::System::Com::*;
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.message())?;
+        let id = reg::wide(&endpoint_id(guid));
+        let dev = en.GetDevice(PCWSTR(id.as_ptr())).map_err(|e| e.message())?;
+        let state = dev.GetState().map_err(|e| e.message())?;
+        if state != DEVICE_STATE_ACTIVE {
+            return Err("udgangen er ikke tilsluttet".into());
+        }
+        let client: IAudioClient = dev.Activate(CLSCTX_ALL, None).map_err(|e| e.message())?;
+        let format = client.GetMixFormat().map_err(|e| e.message())?;
+        let r = client.Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 1_000_000, 0, format, None);
+        CoTaskMemFree(Some(format as *const _));
+        r.map_err(|e| e.message())
+    }
+}
+
+#[cfg(not(windows))]
+fn open_output(_guid: &str) -> Result<(), String> {
+    Err("Kun på Windows".into())
+}
+
+fn reinstall(guid: &str, mode: Mode) -> Result<(), String> {
+    let mut d = load_device(guid)?;
+    if d.installed {
+        uninstall_device(&d)?;
+        d = load_device(guid)?;
+    }
+    d.mode = mode;
+    install_device(&d)
+}
+
+/// One test round: restart the audio service with the test pipe registered, open the outputs and
+/// collect the engine's messages for up to 3 seconds.
+fn test_round(results: &mut [DeviceTest], which: &[usize], log: &mut Vec<String>) {
+    for &i in which {
+        let r = &mut results[i];
+        (r.pre_mix, r.post_mix, r.ok, r.error) = (false, false, false, None);
+    }
+    #[cfg(windows)]
+    let receiver = pipe::Receiver::start(TEST_PIPE_NAME);
+    #[cfg(not(windows))]
+    let receiver: Option<()> = None;
+    if receiver.is_none() {
+        log.push("Kunne ikke starte testen af EQ-motoren".into());
+    }
+    // Registered before the restart, so outputs that start playing right away report in too.
+    let _ = reg::write_str(APP_KEY, TEST_PIPE_VALUE, TEST_PIPE_NAME);
+    restart_audio(log);
+    for &i in which {
+        if let Err(e) = open_output(&results[i].guid) {
+            results[i].error = Some(e);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(rx) = &receiver {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            apply_test_messages(&rx.messages(), results);
+            if which.iter().all(|&i| results[i].ok || results[i].error.is_some()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        apply_test_messages(&rx.messages(), results);
+    }
+    let _ = reg::delete_value(APP_KEY, TEST_PIPE_VALUE);
+    #[cfg(windows)]
+    drop(receiver);
+}
+
+/// Tests the engine on these outputs and, with `auto_adjust`, hooks it in another way where it did
+/// not load (SFX/EFX → SFX/MFX → LFX/GFX), keeping the best way found.
+fn test_outputs(guids: &[String], auto_adjust: bool, log: &mut Vec<String>) -> Vec<DeviceTest> {
+    let names: std::collections::HashMap<String, String> = devices().into_iter().map(|d| (d.guid.to_lowercase(), d.name)).collect();
+    let mut results: Vec<DeviceTest> = guids
+        .iter()
+        .map(|g| DeviceTest { guid: g.clone(), name: names.get(&g.to_lowercase()).cloned().unwrap_or_else(|| g.clone()), ..Default::default() })
+        .collect();
+    let mut remaining: Vec<Vec<Mode>> = vec![TEST_MODES.to_vec(); results.len()];
+    let mut best: Vec<Option<(u8, Mode)>> = vec![None; results.len()];
+    let mut pending: Vec<usize> = (0..results.len()).collect();
+    log.push("Tester at EQ-motoren bliver indlæst på udgangene…".into());
+    while !pending.is_empty() {
+        for &i in &pending {
+            if let Ok(d) = load_device(&results[i].guid) {
+                remaining[i].retain(|m| *m != d.mode);
+                results[i].mode = d.mode.as_str().into();
+            }
+        }
+        test_round(&mut results, &pending, log);
+        let failing: Vec<usize> = pending.iter().copied().filter(|&i| !results[i].ok && results[i].error.is_none()).collect();
+        if !auto_adjust || failing.is_empty() {
+            break;
+        }
+        let mut next = Vec::new();
+        let mut changed = false;
+        for i in failing {
+            let Some(cur) = Mode::parse(&results[i].mode) else { continue };
+            let score = results[i].pre_mix as u8 + results[i].post_mix as u8;
+            if best[i].map_or(true, |(s, _)| score > s) {
+                best[i] = Some((score, cur));
+            }
+            if !remaining[i].is_empty() {
+                let m = remaining[i].remove(0);
+                if reinstall(&results[i].guid, m).is_ok() {
+                    log.push(format!("{}: prøver en anden måde ({})", results[i].name, mode_label(m.as_str())));
+                    next.push(i);
+                    changed = true;
+                }
+            } else if let Some((_, m)) = best[i] {
+                // Nothing worked fully: keep the way that worked best.
+                if m != cur && reinstall(&results[i].guid, m).is_ok() {
+                    results[i].mode = m.as_str().into();
+                    changed = true;
+                }
+            }
+        }
+        if next.is_empty() {
+            if changed {
+                restart_audio(log);
+            }
+            break;
+        }
+        pending = next;
+    }
+    results
+}
+
+/// Tests the installed outputs among `wanted` and reports per output. Returns true when Windows
+/// should be restarted (the engine did not load everywhere).
+fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &mut Vec<DeviceTest>) -> bool {
+    let guids: Vec<String> = devices()
+        .into_iter()
+        .filter(|d| d.installed && wanted.iter().any(|w| w.to_lowercase().ends_with(&d.guid.to_lowercase())))
+        .map(|d| d.guid)
+        .collect();
+    if guids.is_empty() {
+        return !restart_audio(log);
+    }
+    *tests = test_outputs(&guids, auto_adjust, log);
+    for t in tests.iter() {
+        log.push(match (&t.error, t.ok) {
+            (_, true) => format!("✓ {}: EQ-motoren kører ({})", t.name, mode_label(&t.mode)),
+            (Some(e), _) => format!("– {}: kunne ikke testes ({e})", t.name),
+            (None, false) => format!("✗ {}: EQ-motoren blev ikke indlæst – genstart pc'en og tryk \"Test EQ-motoren\"", t.name),
+        });
+    }
+    tests.iter().any(|t| !t.ok && t.error.is_none())
+}
+
+fn installed_guids() -> Vec<String> {
+    devices().into_iter().filter(|d| d.installed).map(|d| d.guid).collect()
+}
+
+// ---------------------------------------------------------------------------------------------
 // Elevated tasks
 // ---------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -706,6 +1052,9 @@ pub enum Task {
         #[serde(default)]
         mode: Option<String>,
     },
+    /// Check that the engine is loaded on the outputs it is installed on and fix how it is
+    /// hooked in where it isn't (what Equalizer APO's Device Selector does after every change).
+    Test,
     /// Remove the built-in engine completely.
     Uninstall,
     /// Keep a separate Equalizer APO but let it read GoXLR Studio's config folder.
@@ -721,6 +1070,9 @@ pub struct TaskResult {
     pub log: Vec<String>,
     /// Windows should be restarted for the change to be heard everywhere.
     pub reboot: bool,
+    /// Per output: is the engine loaded (see `Task::Test`).
+    #[serde(default)]
+    pub tests: Vec<DeviceTest>,
 }
 
 fn hidden(program: &str) -> std::process::Command {
@@ -745,10 +1097,7 @@ fn powershell(script: &str) -> Result<(), String> {
 
 fn restart_audio(log: &mut Vec<String>) -> bool {
     match powershell("Restart-Service -Name Audiosrv -Force -ErrorAction Stop") {
-        Ok(()) => {
-            log.push("Windows-lydtjenesten er genstartet".into());
-            true
-        }
+        Ok(()) => true,
         Err(e) => {
             log.push(format!("Kunne ikke genstarte lydtjenesten ({e}) – genstart pc'en"));
             false
@@ -827,7 +1176,7 @@ fn remove_external(log: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>) -> Result<bool, String> {
+fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>, tests: &mut Vec<DeviceTest>) -> Result<bool, String> {
     if !bundled() {
         return Err("Denne version af GoXLR Studio indeholder ikke EQ-motoren".into());
     }
@@ -866,7 +1215,7 @@ fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>)
     reg::create(AUDIO_KEY)?;
     reg::write_dword(AUDIO_KEY, "DisableProtectedAudioDG", 1)?;
     apply_devices(devices, mode, log)?;
-    Ok(!restart_audio(log))
+    Ok(verify(devices, mode.is_none(), log, tests))
 }
 
 fn uninstall_engine(log: &mut Vec<String>) -> Result<bool, String> {
@@ -920,16 +1269,26 @@ fn use_external(enable: bool, log: &mut Vec<String>) -> Result<bool, String> {
 
 pub fn run_task(task: &Task) -> TaskResult {
     let mut log = Vec::new();
+    let mut tests = Vec::new();
     let res = match task {
-        Task::Install { devices, mode } => install_engine(devices, mode.as_deref(), &mut log),
-        Task::SetDevices { devices, mode } => apply_devices(devices, mode.as_deref(), &mut log).map(|_| !restart_audio(&mut log)),
+        Task::Install { devices, mode } => install_engine(devices, mode.as_deref(), &mut log, &mut tests),
+        // A way chosen by hand is only tested; otherwise the way that works is found automatically.
+        Task::SetDevices { devices, mode } => apply_devices(devices, mode.as_deref(), &mut log).map(|_| verify(devices, mode.is_none(), &mut log, &mut tests)),
+        Task::Test => {
+            let guids = installed_guids();
+            if guids.is_empty() {
+                Err("EQ-motoren er ikke sat på nogen udgang".into())
+            } else {
+                Ok(verify(&guids, true, &mut log, &mut tests))
+            }
+        }
         Task::Uninstall => uninstall_engine(&mut log),
         Task::UseExternal => use_external(true, &mut log),
         Task::RestoreExternal => use_external(false, &mut log),
     };
     match res {
-        Ok(reboot) => TaskResult { ok: true, error: None, log, reboot },
-        Err(e) => TaskResult { ok: false, error: Some(e), log, reboot: false },
+        Ok(reboot) => TaskResult { ok: true, error: None, log, reboot, tests },
+        Err(e) => TaskResult { ok: false, error: Some(e), log, reboot: false, tests },
     }
 }
 
@@ -1034,6 +1393,26 @@ mod tests {
         assert!(matches!(t, Task::SetDevices { mode: Some(ref m), .. } if m == "sfx-efx"));
         let t: Task = serde_json::from_str(r#"{"action":"install","devices":[]}"#).unwrap();
         assert!(matches!(t, Task::Install { mode: None, .. }));
+    }
+
+    #[test]
+    fn engine_test_messages_mark_outputs() {
+        let mut r = vec![
+            DeviceTest { guid: "{AAAA}".into(), ..Default::default() },
+            DeviceTest { guid: "{bbbb}".into(), ..Default::default() },
+        ];
+        let msgs = [
+            r#"{"deviceGuid":"{aaaa}", "stage":"PreMix", "phase":"Initialize"}"#.to_string(),
+            r#"{"deviceGuid":"{aaaa}", "stage":"PostMix", "phase":"Initialize"}"#.to_string(),
+            r#"{"deviceGuid":"{bbbb}", "stage":"PostMix", "phase":"ChildAPO"}"#.to_string(),
+            "not json".to_string(),
+        ];
+        apply_test_messages(&msgs, &mut r);
+        assert!(r[0].pre_mix && r[0].post_mix && r[0].ok);
+        assert!(!r[1].post_mix && !r[1].ok);
+        let t: Task = serde_json::from_str(r#"{"action":"test"}"#).unwrap();
+        assert!(matches!(t, Task::Test));
+        assert_eq!(mode_label("sfx-efx"), "SFX/EFX");
     }
 
     #[test]

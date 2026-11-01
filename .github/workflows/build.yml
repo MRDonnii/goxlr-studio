@@ -18,24 +18,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Built-in GoXLR engine: GoXLR Utility's daemon (MIT), built unchanged from its release tag.
-      - name: Check out GoXLR Utility
-        uses: actions/checkout@v4
-        with:
-          repository: GoXLR-on-Linux/goxlr-utility
-          ref: v1.2.4
-          path: goxlr-utility
-
+      # The GoXLR engine (GoXLR Utility's daemon, MIT) is compiled into the app from
+      # src-tauri/goxlr-engine; its sibling crates come from GoXLR Utility's v1.2.4 tag.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            src-tauri
-            goxlr-utility
-
-      - name: Build GoXLR engine
-        env:
-          RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo build --manifest-path goxlr-utility/Cargo.toml -p goxlr-daemon --release
+          workspaces: src-tauri
 
       # Built-in EQ engine: Equalizer APO's engine files (GPL), taken unchanged from the official
       # installer, verified by SHA-256. The matching source code is attached to every release.
@@ -60,8 +47,6 @@ jobs:
           }
           "ENGINE_DIR=$((Resolve-Path engine).Path)" >> $env:GITHUB_ENV
           "ENGINE_VERSION=1.4.2" >> $env:GITHUB_ENV
-          "GOXLR_DAEMON_EXE=$((Resolve-Path goxlr-utility/target/release/goxlr-daemon.exe).Path)" >> $env:GITHUB_ENV
-          "GOXLR_DAEMON_VERSION=1.2.4" >> $env:GITHUB_ENV
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked

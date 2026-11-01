@@ -24,7 +24,17 @@ export async function importPeacePresets(ctx) {
 }
 
 const ENGINE_MODES = ['lfx-gfx', 'sfx-efx', 'sfx-mfx'];
-const ENGINE_MODE_LABEL = { 'lfx-gfx': 'LFX/GFX – standard', 'sfx-efx': 'SFX/EFX', 'sfx-mfx': 'SFX/MFX' };
+const ENGINE_MODE_LABEL = { 'lfx-gfx': 'LFX/GFX', 'sfx-efx': 'SFX/EFX', 'sfx-mfx': 'SFX/MFX' };
+
+// Summary of the last engine test (see engine.rs Task::Test): which outputs the engine loads on.
+export function engineTestSummary(tests = []) {
+  const tested = tests.filter((t) => !t.error);
+  const ok = tested.filter((t) => t.ok);
+  if (!tested.length) return null;
+  if (ok.length === tested.length) return { ok: true, text: `EQ-motoren er testet og kører på ${ok.length === 1 ? 'udgangen' : `alle ${ok.length} udgange`}.` };
+  const bad = tested.filter((t) => !t.ok).map((t) => shortName(t.name)).join(', ');
+  return { ok: false, text: `EQ-motoren blev ikke indlæst på: ${bad}. Genstart pc’en og tryk "Test EQ-motoren".` };
+}
 
 // "EQ follows profile": pick a preset per GoXLR profile; applied whenever the profile changes.
 function profileLinksCard(ctx) {
@@ -359,6 +369,9 @@ export function outputEqView(ctx) {
   const targetSel = h('select', { onchange: () => { state.target = targetSel.value || null; state.target_name = targetSel.selectedOptions[0]?.dataset.name || null; persist(); apply(); renderTarget(); } });
   let info = { kind: 'none', devices: [] };
   let chosen = null;
+  let lastTest = null; // { at, tests } from the last engine task
+  storeGet('engine-test', null).then((t) => { lastTest = t; if (info.devices.length) { renderDevices(); refreshText(); } }).catch(() => {});
+  const testOf = (d) => lastTest?.tests?.find((t) => d.guid && t.guid.toLowerCase() === d.guid.toLowerCase());
   const isGoXLR = (n) => /goxlr|tc-helicon/i.test(n);
   const installedIds = () => info.devices.filter((d) => d.installed).map((d) => d.id);
   const selectionChanged = () => { const inst = new Set(installedIds()); return chosen.size !== inst.size || [...chosen].some((id) => !inst.has(id)); };
@@ -367,11 +380,16 @@ export function outputEqView(ctx) {
     engineText.textContent = busy;
     try {
       const r = await engineTask(task);
-      engineLog.replaceChildren(...(r.log || []).map((l) => h('div', {}, '• ', l)));
+      engineLog.replaceChildren(...(r.log || []).map((l) => h('div', { class: /^✓/.test(l) ? 'ok' : /^✗/.test(l) ? 'bad' : '' }, /^[✓✗–]/.test(l) ? '' : '• ', l)));
       if (!r.ok) throw new Error(r.error || 'Ukendt fejl');
+      if (r.tests?.length || task.action === 'uninstall') {
+        lastTest = { at: Date.now(), tests: r.tests || [] };
+        storeSet('engine-test', lastTest).catch(() => {});
+      }
       ctx.onApoChanged?.(task.action !== 'uninstall' && task.action !== 'restore-external');
       apply();
-      toast(r.reboot ? 'Færdig – genstart pc’en, så alle programmer bruger EQ’en' : 'Færdig', 'info');
+      const sum = engineTestSummary(r.tests);
+      toast(sum ? sum.text : r.reboot ? 'Færdig – genstart pc’en, så alle programmer bruger EQ’en' : 'Færdig', sum && !sum.ok ? undefined : 'info');
     } catch (e) { toast(String(e.message || e)); }
     refreshEngine();
   };
@@ -396,13 +414,15 @@ export function outputEqView(ctx) {
     if (info.kind === 'builtin') {
       if (!info.uses_our_config) list.push(btn('Reparér', 'primary', needDevices(() => run({ action: 'install', devices: [...chosen] }, 'Reparerer EQ-motoren…'))));
       else if (selectionChanged()) list.push(btn('Gem udgange', 'primary', () => run({ action: 'set-devices', devices: [...chosen] }, 'Opdaterer udgange…')));
-      // Equalizer APO's "troubleshooting options": some drivers only play through the engine when
-      // it is hooked in another way. Cycle through the three ways.
+      // The test checks that Windows' audio engine really loads the engine on each output, and
+      // finds the way of hooking in that works (Equalizer APO's Device Selector does the same).
       if (installedIds().length && !selectionChanged()) {
-        list.push(btn('Hører du ikke EQ’en? Prøv en anden måde', '', () => {
+        list.push(btn('Test EQ-motoren', lastTest?.tests?.some((t) => !t.ok && !t.error) ? 'primary' : '', () => run({ action: 'test' }, 'Tester EQ-motoren på udgangene – lyden afbrydes et øjeblik…')));
+        // Manual fallback (Equalizer APO's "troubleshooting options"): cycle through the three ways.
+        list.push(btn('Prøv en anden måde', '', () => {
           const cur = info.devices.find((d) => d.installed)?.mode || 'lfx-gfx';
           const next = ENGINE_MODES[(ENGINE_MODES.indexOf(cur) + 1) % ENGINE_MODES.length];
-          if (!confirm(`Sæt EQ-motoren på de markerede udgange på en anden måde (${ENGINE_MODE_LABEL[next]})?\n\nLyden afbrydes et øjeblik. Virker det heller ikke, så prøv igen – der er tre måder – og genstart pc’en til sidst.`)) return;
+          if (!confirm(`Sæt EQ-motoren på de markerede udgange på en anden måde (${ENGINE_MODE_LABEL[next]})?\n\nNormalt finder "Test EQ-motoren" selv den måde der virker. Lyden afbrydes et øjeblik.`)) return;
           run({ action: 'set-devices', devices: [...chosen], mode: next }, 'Skifter måde…');
         }));
       }
@@ -414,7 +434,11 @@ export function outputEqView(ctx) {
   const renderDevices = () => {
     devList.replaceChildren(...info.devices.map((d) => {
       const cb = h('input', { type: 'checkbox', checked: chosen.has(d.id), onchange: () => { if (cb.checked) chosen.add(d.id); else chosen.delete(d.id); renderActions(); } });
-      return h('label', { class: 'engine-dev', title: d.mode ? `${d.name} – ${ENGINE_MODE_LABEL[d.mode] || d.mode}` : d.name }, cb, h('span', {}, shortName(d.name)), d.installed ? h('span', { class: 'badge ok' }, 'aktiv') : null);
+      const t = d.installed ? testOf(d) : null;
+      const badge = !d.installed ? null
+        : t && !t.error ? h('span', { class: `badge ${t.ok ? 'ok' : 'warn'}` }, t.ok ? 'kører' : 'ikke indlæst')
+          : h('span', { class: 'badge ok' }, 'aktiv');
+      return h('label', { class: 'engine-dev', title: d.mode ? `${d.name} – ${ENGINE_MODE_LABEL[d.mode] || d.mode}` : d.name }, cb, h('span', {}, shortName(d.name)), badge);
     }));
     if (!info.devices.length) devList.append(h('div', { class: 'hint' }, 'Fandt ingen udgange.'));
   };
@@ -429,14 +453,21 @@ export function outputEqView(ctx) {
     const running = info.kind !== 'none' && info.uses_our_config && inst.length > 0;
     engineBadge.textContent = running ? 'Aktiv' : info.kind === 'none' ? 'Ikke installeret' : 'Ikke aktiv';
     engineBadge.className = `badge ${running ? 'ok' : 'warn'}`;
+    refreshText();
+    renderDevices(); renderActions(); renderTarget();
+  };
+  function refreshText() {
+    const running = info.kind !== 'none' && info.uses_our_config && installedIds().length > 0;
     const kind = {
       builtin: `GoXLR Studios indbyggede EQ-motor${info.version ? ` (Equalizer APO ${info.version})` : ''}.`,
       external: 'Equalizer APO er installeret som et separat program.',
       none: 'EQ-motoren er ikke installeret endnu.',
     }[info.kind] || '';
-    engineText.textContent = `${kind} ${running ? 'EQ’en virker på de markerede udgange, og ændringer høres med det samme.' : ''}${info.error ? ` (${info.error})` : ''}`;
-    renderDevices(); renderActions(); renderTarget();
-  };
+    const sum = running && info.kind === 'builtin' ? engineTestSummary(lastTest?.tests) : null;
+    const state = !running ? '' : sum ? sum.text : 'Tryk "Test EQ-motoren" for at tjekke at den kører på udgangene.';
+    engineText.textContent = `${kind} ${state}${info.error ? ` (${info.error})` : ''}`;
+    if (sum && !sum.ok) { engineBadge.textContent = 'Ikke indlæst'; engineBadge.className = 'badge warn'; }
+  }
   listAudioDevices().then((devs) => {
     targetSel.replaceChildren(h('option', { value: '' }, 'Alle markerede udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id, 'data-name': d.name }, shortName(d.name))));
     targetSel.value = state.target || '';

@@ -222,10 +222,13 @@ async fn start_daemon() -> Result<String, String> {
 struct DaemonInfo {
     bundled: bool,
     version: String,
+    /// GoXLR Studio's own engine runs (inside this process).
     started_by_us: bool,
     process_running: bool,
     /// Paths of other GoXLR engines running (an installed GoXLR Utility).
     foreign: Vec<String>,
+    /// Why the built-in engine last stopped with an error.
+    last_error: Option<String>,
 }
 
 /// Switches from an installed GoXLR Utility to GoXLR Studio's own engine.
@@ -243,6 +246,7 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
             started_by_us: daemon_host::started_by_us(),
             process_running: daemon_host::daemon_process_running(),
             foreign: daemon_host::foreign_engines(),
+            last_error: daemon_host::last_error(),
         })
     })
     .await
@@ -491,12 +495,25 @@ pub fn run() {
             state.close_to_tray.store(prefs_close_to_tray(&handle), Ordering::SeqCst);
             state.daemon.clone().spawn(handle.clone(), DAEMON_URL.to_string());
             update::cleanup();
+            // The GoXLR engine runs inside GoXLR Studio: requests to show "its" UI show ours, and
+            // the UI hears when it stops by itself (e.g. TC-Helicon's app took the GoXLR).
+            let h = handle.clone();
+            daemon_host::on_activate(move || show_main(&h));
+            let h = handle.clone();
+            daemon_host::on_stopped(move |error| {
+                let _ = h.emit("engine-stopped", error);
+            });
             // One app: GoXLR Studio runs its own GoXLR engine. An installed GoXLR Utility that is
             // running is switched off (and kept from autostarting) unless the user turned that off.
-            if prefs_flag(&handle, "autoStartDaemon", true) {
+            {
                 let h = handle.clone();
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(2500));
+                    std::thread::sleep(std::time::Duration::from_millis(800));
+                    // 0.3.x ran the engine as a separate goxlr-daemon.exe; it is part of the app now.
+                    let retired = daemon_host::retire_old_engine();
+                    if !prefs_flag(&h, "autoStartDaemon", true) {
+                        return;
+                    }
                     let builtin = daemon_host::bundled() && prefs_flag(&h, "builtinEngine", true);
                     if builtin && !daemon_host::foreign_engines().is_empty() {
                         match daemon_host::take_over(start_installed_utility) {
@@ -507,7 +524,7 @@ pub fn run() {
                                 let _ = h.emit("engine-takeover-failed", e);
                             }
                         }
-                    } else if !h.state::<AppState>().daemon.connected() {
+                    } else if retired || !h.state::<AppState>().daemon.connected() {
                         let res = if daemon_host::bundled() { daemon_host::start() } else { start_installed_utility() };
                         if let Err(e) = res {
                             log::warn!("GoXLR-motor: {e}");

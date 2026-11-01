@@ -129,8 +129,8 @@ export function migrateView(ctx) {
       } catch (e) { toast(String(e)); }
     } }, `Kopiér ${tc.profiles.length + tc.mic_profiles.length} TC-Helicon-profiler`) : null;
     const state = daemon.foreign?.length ? [false, 'GoXLR Utility styrer stadig GoXLR’en. Lad GoXLR Studio overtage – GoXLR Utility stoppes og starter ikke længere med Windows.']
-      : daemon.started_by_us ? [true, 'GoXLR Studios indbyggede GoXLR-motor kører. GoXLR Utility kan afinstalleres.']
-        : [false, 'Ingen GoXLR-motor kører.'];
+      : daemon.started_by_us ? [true, 'GoXLR-motoren kører inde i GoXLR Studio. GoXLR Utility kan afinstalleres.']
+        : [false, `Ingen GoXLR-motor kører.${daemon.last_error ? ` ${daemon.last_error}` : ''}`];
     const takeBtn = daemon.bundled && daemon.foreign?.length ? h('button', { class: 'btn sm primary', onclick: async () => {
       takeBtn.disabled = true;
       try { const t = await daemonTakeover(); toast(`${t.started} – GoXLR Utility er koblet fra`, 'info'); } catch (e) { toast(String(e)); }

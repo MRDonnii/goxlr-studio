@@ -504,8 +504,12 @@ async function registerNativeHooks() {
   await listen('engine-takeover', (ev) => {
     const t = ev.payload || {};
     if (t.stopped?.length) toast('GoXLR Studio bruger nu sin egen GoXLR-motor – GoXLR Utility er koblet fra', 'info');
+    else if (t.old_engine_removed) toast('GoXLR-motoren kører nu inde i GoXLR Studio – den separate motor er fjernet', 'info');
   });
   await listen('engine-takeover-failed', (ev) => toast(`Kunne ikke starte den indbyggede GoXLR-motor: ${ev.payload}`));
+  // The GoXLR engine runs inside the app; it stops by itself only on errors (or if TC-Helicon's
+  // own app takes the GoXLR). The watchdog starts it again.
+  await listen('engine-stopped', (ev) => { if (ev.payload) toast(`GoXLR-motoren stoppede: ${ev.payload}`); });
   // Tray ids are action ids: profile:…, eq-preset:…, eq-toggle, scene:…, mute-mic.
   await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });
   await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });

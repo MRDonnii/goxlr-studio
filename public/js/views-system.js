@@ -38,8 +38,8 @@ export function systemSettings(ctx) {
   const refreshDaemon = () => daemonInfo().then((d) => {
     daemonState.textContent = !d.bundled ? 'Denne version har ikke GoXLR-motoren indbygget – den bruger en installeret GoXLR Utility.'
       : d.foreign?.length ? 'GoXLR Utility kører stadig og styrer GoXLR’en. Tryk nedenfor for at lade GoXLR Studio overtage.'
-        : d.started_by_us ? `GoXLR Studios indbyggede GoXLR-motor kører (GoXLR Utility ${d.version}, MIT-licens).`
-          : 'GoXLR-motoren kører ikke.';
+        : d.started_by_us ? `GoXLR-motoren kører inde i GoXLR Studio – der er intet separat program (bygget på GoXLR Utility ${d.version}, MIT-licens).`
+          : `GoXLR-motoren kører ikke.${d.last_error ? ` ${d.last_error}` : ''}`;
     takeoverBtn.style.display = d.bundled && d.foreign?.length ? '' : 'none';
   }).catch(() => {});
   refreshDaemon();
@@ -49,7 +49,7 @@ export function systemSettings(ctx) {
     toggle(binder, { label: 'Brug altid GoXLR Studios egen motor', get: () => p.builtinEngine !== false, set: (v) => { p.builtinEngine = v; ctx.savePrefs(); } }),
     h('div', { class: 'row', style: { flexWrap: 'wrap' } }, takeoverBtn,
       h('button', { class: 'btn sm', disabled: !isNative(), onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start nu')),
-    h('div', { class: 'hint' }, 'Motoren taler med GoXLR’en over USB og bruger samme profiler og indstillinger som GoXLR Utility.'));
+    h('div', { class: 'hint' }, 'Motoren er en del af GoXLR Studio: den taler med GoXLR’en over USB, starter og stopper med appen og bruger samme profiler og indstillinger som GoXLR Utility.'));
 
   // ---- updates ----
   const updInfo = h('div', { class: 'list' });

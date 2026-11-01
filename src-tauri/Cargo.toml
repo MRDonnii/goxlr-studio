@@ -1,6 +1,6 @@
 [package]
 name = "goxlr-studio"
-version = "0.3.3"
+version = "0.4.0"
 description = "GoXLR Studio"
 edition = "2021"
 license = "MIT"
@@ -27,6 +27,8 @@ log = "0.4"
 base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
+# GoXLR Utility's engine, run inside GoXLR Studio (see goxlr-engine/README.md).
+goxlr-engine = { path = "goxlr-engine" }
 windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_Media_Audio",
@@ -47,6 +49,9 @@ windows = { version = "0.58", features = [
   "Win32_Security_Authorization",
   "Win32_System_SystemServices",
   "Win32_System_Memory",
+  "Win32_System_Pipes",
+  "Win32_System_IO",
+  "Win32_Storage_FileSystem",
 ] }
 windows-core = "0.58"
 

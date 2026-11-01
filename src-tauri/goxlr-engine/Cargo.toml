@@ -1,0 +1,85 @@
+[package]
+name = "goxlr-engine"
+description = "GoXLR Utility's daemon (v1.2.4) as a library, so GoXLR Studio runs the GoXLR engine in its own process."
+version = "1.2.4"
+edition = "2024"
+license = "MIT"
+authors = ["Nathan Adams <dinnerbone@dinnerbone.com>", "Craig McLure <craig@mclure.net>", "Lars Mühlbauer <lm41@dismail.de>"]
+repository = "https://github.com/GoXLR-on-Linux/GoXLR-Utility"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+tts = ["dep:tts"]
+
+[dependencies]
+# The other GoXLR Utility crates, unchanged, from the same release.
+goxlr-usb = { git = "https://github.com/GoXLR-on-Linux/goxlr-utility", tag = "v1.2.4" }
+goxlr-ipc = { git = "https://github.com/GoXLR-on-Linux/goxlr-utility", tag = "v1.2.4" }
+goxlr-types = { git = "https://github.com/GoXLR-on-Linux/goxlr-utility", tag = "v1.2.4" }
+goxlr-audio = { git = "https://github.com/GoXLR-on-Linux/goxlr-utility", tag = "v1.2.4" }
+goxlr-profile-loader = { git = "https://github.com/GoXLR-on-Linux/goxlr-utility", tag = "v1.2.4" }
+goxlr-scribbles = { git = "https://github.com/GoXLR-on-Linux/goxlr-utility", tag = "v1.2.4" }
+
+# Versions as in GoXLR Utility 1.2.4's workspace.
+log = "0.4.28"
+anyhow = "1.0.100"
+strum = { version = "0.27.2", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+json-patch = "4.1.0"
+tokio = { version = "1.47.1", features = ["full"] }
+enumset = "1.1.10"
+enum-map = { version = "2.7.3", features = ["serde"] }
+interprocess = { version = "2.2.3", features = ["tokio"] }
+byteorder = "1.5.0"
+clap = { version = "4.5.48", features = ["derive"] }
+include_dir = "0.7.4"
+cfg-if = "1.0.3"
+lazy_static = "1.5.0"
+fancy-regex = "0.16.2"
+which = "8.0.0"
+
+simplelog = "0.12.2"
+file-rotate = "0.8.0"
+log-panics = { version = "2.1.0", features = ["with-backtrace"] }
+directories = "6.0.0"
+ritelinked = "0.3.2"
+open = "5.3.2"
+chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
+glob = "0.3.3"
+tts = { version = "0.26.3", features = ["tolk"], optional = true }
+notify = "8.2.0"
+sys-locale = "0.3.2"
+
+actix-web = { version = "4.11.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip"] }
+actix-ws = "0.3.0"
+actix-cors = "0.7.1"
+actix-multipart = "0.7.2"
+mime_guess = "2.0.5"
+jsonpath-rust = "1.0.4"
+
+# GoXLR Studio: Windows' own TLS (schannel) instead of rustls/ring.
+reqwest = { version = "0.12.23", default-features = false, features = ["stream", "native-tls"] }
+xmltree = "0.11.0"
+futures-util = "0.3.31"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+image = "0.25.8"
+sysinfo = "0.37.2"
+winrt-toast-reborn = "0.3.8"
+mslnk = "0.1.8"
+dunce = "1.0.5"
+winreg = "0.55.0"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Shutdown",
+    "Win32_System_RemoteDesktop"
+] }

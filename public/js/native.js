@@ -85,23 +85,43 @@ export async function engineInfo() {
 }
 
 // task: {action: 'install'|'set-devices', devices: [ids]} | {action: 'uninstall'|'use-external'|'restore-external'}
+// Browser demo of the engine test: like on some PCs, LFX/GFX does not load, so the test moves the
+// outputs to SFX/EFX by itself.
+function demoTest(log, autoAdjust = true) {
+  const label = { 'sfx-efx': 'SFX/EFX', 'sfx-mfx': 'SFX/MFX', 'lfx-gfx': 'LFX/GFX' };
+  log.push('Tester at EQ-motoren bliver indlæst på udgangene…');
+  const ids = [...demoEngine.installed];
+  if (demoEngine.mode === 'lfx-gfx' && autoAdjust) {
+    for (const id of ids) log.push(`${demoDevices.find((x) => x.id === id)?.name || id}: prøver en anden måde (SFX/EFX)`);
+    demoEngine.mode = 'sfx-efx';
+  }
+  const ok = demoEngine.mode !== 'lfx-gfx';
+  const tests = ids.map((id) => ({ guid: id, name: demoDevices.find((x) => x.id === id)?.name || id, mode: demoEngine.mode, pre_mix: ok, post_mix: ok, ok, error: null }));
+  for (const t of tests) log.push(t.ok ? `✓ ${t.name}: EQ-motoren kører (${label[t.mode]})` : `✗ ${t.name}: EQ-motoren blev ikke indlæst – genstart pc'en og tryk "Test EQ-motoren"`);
+  return tests;
+}
+
 export async function engineTask(task) {
   if (isNative()) return invoke('engine_task', { task });
   await new Promise((r) => setTimeout(r, 600));
   const log = [];
+  let tests = [];
   if (task.action === 'install') {
     if (demoEngine.kind === 'external') log.push('Equalizer APO’s config (inkl. Peace-presets) gemt', 'Den separate Equalizer APO er afinstalleret');
-    demoEngine.kind = 'builtin'; demoEngine.uses_our_config = true; demoEngine.installed = new Set(task.devices);
-    log.push('Motorfiler lagt i C:\\Program Files\\GoXLR Studio Engine', ...task.devices.map((d) => `EQ-motor sat på: ${demoDevices.find((x) => x.id === d)?.name || d}`), 'Windows-lydtjenesten er genstartet');
+    demoEngine.kind = 'builtin'; demoEngine.uses_our_config = true; demoEngine.installed = new Set(task.devices); demoEngine.mode = 'lfx-gfx';
+    log.push('Motorfiler lagt i C:\\Program Files\\GoXLR Studio Engine', ...task.devices.map((d) => `EQ-motor sat på: ${demoDevices.find((x) => x.id === d)?.name || d} (lfx-gfx)`));
+    tests = demoTest(log);
   } else if (task.action === 'set-devices') {
     demoEngine.installed = new Set(task.devices);
     if (task.mode) demoEngine.mode = task.mode;
-    log.push(task.mode ? `EQ-motoren sat på igen (${task.mode})` : 'Udgange opdateret', 'Windows-lydtjenesten er genstartet');
+    tests = demoTest(log, !task.mode);
+  } else if (task.action === 'test') {
+    tests = demoTest(log);
   } else if (task.action === 'uninstall') {
     demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); log.push('EQ-motoren er fjernet');
   } else if (task.action === 'use-external') { demoEngine.uses_our_config = true; log.push('Equalizer APO læser nu GoXLR Studios EQ'); }
   else if (task.action === 'restore-external') { demoEngine.uses_our_config = false; log.push('Equalizer APO bruger igen sin egen config-mappe'); }
-  return { ok: true, error: null, log, reboot: false };
+  return { ok: true, error: null, log, reboot: tests.some((t) => !t.ok && !t.error), tests };
 }
 
 export async function engineStatus() {
@@ -170,7 +190,7 @@ export async function startDaemon() {
 const demoDaemon = { started_by_us: false, foreign: ['C:\\Program Files\\GoXLR Utility\\goxlr-daemon.exe'] };
 export async function daemonInfo() {
   if (isNative()) return invoke('daemon_info');
-  return { bundled: true, version: '1.2.4', started_by_us: demoDaemon.started_by_us, process_running: true, foreign: [...demoDaemon.foreign] };
+  return { bundled: true, version: '1.2.4', started_by_us: demoDaemon.started_by_us, process_running: true, foreign: [...demoDaemon.foreign], last_error: null };
 }
 
 // Switch from an installed GoXLR Utility to GoXLR Studio's own engine.
@@ -178,7 +198,7 @@ export async function daemonTakeover() {
   if (isNative()) return invoke('daemon_takeover');
   const stopped = demoDaemon.foreign.splice(0);
   demoDaemon.started_by_us = true;
-  return { stopped, autostart_disabled: stopped.length ? 'backup\\autostart-slået-fra\\GoXLR Utility.lnk' : null, started: 'GoXLR-motoren er startet', restored_utility: false };
+  return { stopped, autostart_disabled: stopped.length ? 'backup\\autostart-slået-fra\\GoXLR Utility.lnk' : null, old_engine_removed: false, started: 'GoXLR-motoren er startet', restored_utility: false };
 }
 
 // ---------- moving over from the old programs ----------
@@ -258,7 +278,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.3.3', installed: false, browser: true };
+  return { version: '0.4.0', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {

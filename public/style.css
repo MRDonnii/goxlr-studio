@@ -207,6 +207,8 @@ a { color: var(--accent); }
 .engine-dev span:first-of-type { flex: 1; }
 .engine-log { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
 .engine-log:empty { display: none; }
+.engine-log .ok { color: var(--ok); }
+.engine-log .bad { color: var(--warn); }
 
 /* Migration page */
 .migrate-head .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }
