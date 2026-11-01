@@ -477,7 +477,8 @@ export function outputEqView(ctx) {
   const refreshEngine = async () => {
     info = await engineInfo().catch((e) => ({ kind: 'none', bundled: false, devices: [], error: String(e) }));
     const inst = installedIds();
-    if (!chosen) chosen = new Set(inst.length ? inst : info.devices.filter((d) => isGoXLR(d.name)).map((d) => d.id));
+    // Default: the GoXLR outputs you listen to (Chat, Game, Music, System) – not Sample.
+    if (!chosen) chosen = new Set(inst.length ? inst : info.devices.filter((d) => isGoXLR(d.name) && !/sample/i.test(d.name)).map((d) => d.id));
     const running = info.kind !== 'none' && info.uses_our_config && inst.length > 0;
     engineBadge.textContent = running ? 'Aktiv' : info.kind === 'none' ? 'Ikke installeret' : 'Ikke aktiv';
     engineBadge.className = `badge ${running ? 'ok' : 'warn'}`;
