@@ -34,7 +34,10 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 
 ![Afspilnings-EQ](docs/screenshots/afspilnings-eq.png)
 
-- Parametrisk EQ med en kurve, du trækker i, A/B-sammenligning, fortryd/gentag og advarsel, hvis lyden kan klippe
+- Parametrisk EQ med en kurve, du trækker i, og fortryd/gentag
+- **Live-spektrum** bag kurven: du ser, hvor musikken eller spillet har sin energi, mens du stiller på EQ'en
+- **A/B ved samme lydstyrke:** den højeste af A og B sænkes, så du hører forskellen i klang og ikke bare i lydstyrke. Med **blindtest** hører du dem som X og Y uden at vide, hvilken er hvilken
+- **Klip-beskyttelse og headroom:** appen regner på hele kæden (EQ, Loudness og Crossfeed) og sænker selv lyden, hvis den ellers ville forvrænge. "Auto" sætter preamp lige under grænsen
 - Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
 - Crossfeed og loudness til hovedtelefoner

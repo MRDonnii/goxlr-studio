@@ -135,7 +135,7 @@ export class EqGraph {
     const g = c.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    if (!sp?.db?.length) return;
+    if (!sp?.db?.length || Math.max(...sp.db) <= lo) return;
     const p = this.pad();
     const bottom = H - p.b;
     const yS = (db) => p.t + (1 - Math.min(Math.max((db - lo) / (hi - lo), 0), 1)) * (bottom - p.t);

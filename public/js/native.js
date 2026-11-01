@@ -455,8 +455,11 @@ export async function discordRunning() {
 export async function spectrumRead(device) {
   if (isNative()) return invoke('spectrum_read', { device: device || null });
   const { demoSpectrum, SPECTRUM_BANDS, SPECTRUM_FLOOR } = await import('./spectrum.js');
-  const playing = !device || device === 'out-goxlr-music';
-  return { device: device || '', rate: 48000, playing, error: null, bands: playing ? demoSpectrum(performance.now() / 1000) : new Array(SPECTRUM_BANDS).fill(SPECTRUM_FLOOR) };
+  // The same outputs that move on the demo's VU meters (audioLevels below), the quieter ones lower.
+  const offset = { 'out-goxlr-music': 0, 'out-goxlr-game': -4, 'out-goxlr-system': -9, 'out-goxlr-chat': -13 }[device || 'out-goxlr-music'];
+  const playing = offset !== undefined;
+  const t = performance.now() / 1000 + (offset || 0);
+  return { device: device || '', rate: 48000, playing, error: null, bands: playing ? demoSpectrum(t).map((v) => v + offset) : new Array(SPECTRUM_BANDS).fill(SPECTRUM_FLOOR) };
 }
 
 // Peak level (0–1) per audio endpoint, for the VU meters.
