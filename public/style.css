@@ -197,3 +197,24 @@ a { color: var(--accent); }
 .autoeq-results { margin-top: 8px; max-height: 260px; overflow: auto; }
 .list .item.stale { border-color: rgba(251,191,36,.45); }
 .list .item select.trigger-sel { width: 240px; }
+
+/* EQ engine card */
+.engine-devices { display: flex; flex-direction: column; gap: 4px; }
+.engine-dev { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; background: var(--panel-2); cursor: pointer; font-size: 13px; }
+.engine-dev span:first-of-type { flex: 1; }
+.engine-log { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.engine-log:empty { display: none; }
+
+/* Migration page */
+.migrate-head .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); margin-top: 6px; }
+.check-row .check-icon { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex: none; background: #26324d; color: var(--muted); }
+.check-row.ok .check-icon { background: rgba(52,211,153,.18); color: var(--ok); }
+.check-row.todo .check-icon { background: rgba(251,191,36,.15); color: var(--warn); }
+.ahk-script { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.ahk-script .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.list.compact .item { padding: 5px 9px; font-size: 13px; }
+.app-item { flex-wrap: wrap; }
+.app-item.keep { border-color: rgba(52,211,153,.45); }
+.app-item .app-name { min-width: 0; flex: 1 1 260px; }
+.app-item .app-name .hint { white-space: normal; max-width: none; }

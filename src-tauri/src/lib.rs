@@ -3,6 +3,9 @@ mod apo;
 mod apps;
 mod audio;
 mod daemon;
+mod daemon_host;
+mod engine;
+mod migrate;
 mod osd;
 mod store;
 mod update;
@@ -101,9 +104,23 @@ async fn output_eq_status() -> Result<apo::EngineStatus, String> {
     blocking(|| Ok(apo::status())).await
 }
 
+/// Lets a separately installed Equalizer APO read GoXLR Studio's EQ (or gives it back).
 #[tauri::command]
 async fn apo_takeover(enable: bool) -> Result<(), String> {
-    blocking(move || apo::takeover(enable)).await
+    let task = if enable { engine::Task::UseExternal } else { engine::Task::RestoreExternal };
+    let res = blocking(move || engine::run_elevated(&task)).await?;
+    if res.ok { Ok(()) } else { Err(res.error.unwrap_or_else(|| "Ukendt fejl".into())) }
+}
+
+#[tauri::command]
+async fn engine_info() -> Result<engine::EngineInfo, String> {
+    blocking(|| Ok(engine::info())).await
+}
+
+/// Installs/changes/removes the built-in EQ engine (one UAC prompt).
+#[tauri::command]
+async fn engine_task(task: engine::Task) -> Result<engine::TaskResult, String> {
+    blocking(move || engine::run_elevated(&task)).await
 }
 
 #[tauri::command]
@@ -144,10 +161,6 @@ async fn set_app_device(pid: u32, flow: String, id: Option<String>) -> Result<()
     blocking(move || apps::set(pid, &flow, id.as_deref())).await
 }
 
-#[tauri::command]
-async fn apo_open_configurator() -> Result<(), String> {
-    blocking(apo::open_configurator).await
-}
 
 #[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
@@ -176,9 +189,7 @@ fn show_osd(app: AppHandle, text: String, kind: Option<String>) {
     osd::show(&app, text, kind.unwrap_or_default());
 }
 
-/// Starts GoXLR Utility if it is installed in one of the usual places.
-#[tauri::command]
-fn start_daemon() -> Result<String, String> {
+fn start_installed_utility() -> Result<String, String> {
     let mut roots = Vec::new();
     for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
         if let Some(v) = std::env::var_os(var) {
@@ -196,7 +207,88 @@ fn start_daemon() -> Result<String, String> {
             }
         }
     }
-    Err("Fandt ikke GoXLR Utility – er den installeret?".into())
+    Err("Fandt ingen GoXLR-motor".into())
+}
+
+/// Starts the built-in GoXLR engine (or an installed GoXLR Utility as fallback).
+#[tauri::command]
+async fn start_daemon() -> Result<String, String> {
+    blocking(|| if daemon_host::bundled() { daemon_host::start() } else { start_installed_utility() }).await
+}
+
+#[derive(serde::Serialize)]
+struct DaemonInfo {
+    bundled: bool,
+    version: String,
+    started_by_us: bool,
+    process_running: bool,
+}
+
+#[tauri::command]
+async fn daemon_info() -> Result<DaemonInfo, String> {
+    blocking(|| {
+        Ok(DaemonInfo {
+            bundled: daemon_host::bundled(),
+            version: daemon_host::DAEMON_VERSION.into(),
+            started_by_us: daemon_host::started_by_us(),
+            process_running: daemon_host::daemon_process_running(),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn migrate_scan() -> Result<migrate::Scan, String> {
+    blocking(|| Ok(migrate::scan())).await
+}
+
+#[tauri::command]
+async fn migrate_backup(stamp: String, goxlr_dirs: Vec<(String, String)>, studio_json: String) -> Result<migrate::BackupResult, String> {
+    blocking(move || migrate::backup(&stamp, goxlr_dirs, &studio_json)).await
+}
+
+#[tauri::command]
+async fn migrate_copy_profiles(files: Vec<String>, dest: String) -> Result<usize, String> {
+    blocking(move || migrate::copy_profiles(files, dest)).await
+}
+
+#[tauri::command]
+async fn migrate_disable_startup(entry: String) -> Result<String, String> {
+    blocking(move || migrate::disable_startup(entry)).await
+}
+
+#[tauri::command]
+async fn migrate_stop_ahk() -> Result<(), String> {
+    blocking(migrate::stop_ahk).await
+}
+
+#[tauri::command]
+async fn installed_apps() -> Result<Vec<migrate::InstalledApp>, String> {
+    blocking(|| Ok(migrate::installed_apps())).await
+}
+
+#[tauri::command]
+async fn run_uninstaller(key: String) -> Result<String, String> {
+    blocking(move || migrate::run_uninstaller(&key)).await
+}
+
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    migrate::open_path(path)
+}
+
+/// Opens a web link in the default browser (the webview itself never navigates away).
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") || url.contains(['"', '\n', '\r']) {
+        return Err("Kun https-links".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).creation_flags(0x0800_0000).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -308,6 +400,28 @@ fn rebuild_tray_menu(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Command-line modes that run without UI: the elevated engine helper, and engine removal
+/// requested by GoXLR Studio's uninstaller.
+pub fn helper_main(args: &[String]) -> Option<i32> {
+    match args.first().map(String::as_str) {
+        Some("--engine-task") => Some(engine::task_main(&args[1..])),
+        Some("--engine-uninstall") => {
+            if engine::info().kind != "builtin" {
+                return Some(0);
+            }
+            Some(match engine::run_elevated(&engine::Task::Uninstall) {
+                Ok(r) if r.ok => 0,
+                _ => 1,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn prefs_flag(app: &AppHandle, key: &str, default: bool) -> bool {
+    store::get(app, "prefs").ok().flatten().and_then(|v| v.get(key).and_then(Value::as_bool)).unwrap_or(default)
+}
+
 fn prefs_close_to_tray(app: &AppHandle) -> bool {
     store::get(app, "prefs")
         .ok()
@@ -347,6 +461,19 @@ pub fn run() {
             state.close_to_tray.store(prefs_close_to_tray(&handle), Ordering::SeqCst);
             state.daemon.clone().spawn(handle.clone(), DAEMON_URL.to_string());
             update::cleanup();
+            // Start the built-in GoXLR engine unless another daemon answers within a moment.
+            if prefs_flag(&handle, "autoStartDaemon", true) {
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(2500));
+                    if !h.state::<AppState>().daemon.connected() {
+                        let res = if daemon_host::bundled() { daemon_host::start() } else { start_installed_utility() };
+                        if let Err(e) = res {
+                            log::warn!("GoXLR-motor: {e}");
+                        }
+                    }
+                });
+            }
             if let Err(e) = osd::create(&handle) {
                 log::warn!("OSD: {e}");
             }
@@ -403,7 +530,18 @@ pub fn run() {
             set_hotkeys,
             app_sessions,
             set_app_device,
-            apo_open_configurator,
+            engine_info,
+            engine_task,
+            daemon_info,
+            migrate_scan,
+            migrate_backup,
+            migrate_copy_profiles,
+            migrate_disable_startup,
+            migrate_stop_ahk,
+            installed_apps,
+            run_uninstaller,
+            open_path,
+            open_url,
             show_osd,
             start_daemon,
             set_api,
@@ -412,6 +550,11 @@ pub fn run() {
             app_info,
             install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running GoXLR Studio");
+        .build(tauri::generate_context!())
+        .expect("error while building GoXLR Studio")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                daemon_host::stop();
+            }
+        });
 }

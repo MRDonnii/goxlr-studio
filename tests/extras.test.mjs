@@ -76,3 +76,48 @@ test('app triggers fire on start and exit, case-insensitively', () => {
   assert.deepEqual(x.triggerActions(t, new Set(['cod.exe']), new Set(['cod.exe'])), []);
   assert.deepEqual(x.triggerActions(t, new Set(['cod.exe']), new Set()), ['scene:normal']);
 });
+
+test('AutoHotkey hotkeys map to accelerators', () => {
+  assert.equal(x.ahkHotkeyToAccel('F13'), 'F13');
+  assert.equal(x.ahkHotkeyToAccel('^PgUp'), 'Ctrl+PageUp');
+  assert.equal(x.ahkHotkeyToAccel('$^!m'), 'Ctrl+Alt+M');
+  assert.equal(x.ahkHotkeyToAccel('#Numpad1'), 'Super+Numpad1');
+  assert.equal(x.ahkHotkeyToAccel('a & b'), null);
+  assert.equal(x.ahkHotkeyToAccel('XButton1'), null);
+});
+
+test('AutoHotkey scripts calling goxlr-client become GoXLR Studio hotkeys', () => {
+  const v1 = [
+    '#NoEnv ; comment',
+    'F13::Run, "C:\\Program Files\\GoXLR Utility\\goxlr-client-quiet.exe" profiles device load Headset, , Hide',
+    'F14::',
+    '  Run, "C:\\Program Files\\GoXLR Utility\\goxlr-client-quiet.exe" profiles device load "Speakers",, Hide',
+    'return',
+    '^PgUp::Run "goxlr-client-quiet.exe profiles device load Headset"',
+    '^PgDn::',
+    '{',
+    '  Run("goxlr-client-quiet.exe profiles device load Speakers")',
+    '}',
+    '^!v::Run goxlr-client.exe volume music 40',
+    '^!x::Run goxlr-client.exe cough-button mute-state muted-to-x',
+    'F15::Run goxlr-client.exe lighting global 00FF00',
+    '^Up::Send {Volume_Up}',
+  ].join('\r\n');
+  const r = x.parseAhk(v1);
+  const map = Object.fromEntries(r.bindings.map((b) => [b.accel, b.action]));
+  assert.equal(map.F13, 'profile:Headset');
+  assert.equal(map.F14, 'profile:Speakers');
+  assert.equal(map['Ctrl+PageUp'], 'profile:Headset');
+  assert.equal(map['Ctrl+PageDown'], 'profile:Speakers');
+  assert.equal(map['Ctrl+Alt+V'], 'vol-set:Music|40');
+  assert.equal(map['Ctrl+Alt+X'], 'cough:MutedToX');
+  assert.equal(r.unknown.length, 1);
+  assert.equal(r.unknown[0].hotkey, 'F15');
+  assert.ok(!r.bindings.some((b) => b.accel === 'Ctrl+Up'));
+});
+
+test('A hotkey that alternates between two profiles becomes a toggle', () => {
+  const s = 'F16::\ntoggle := !toggle\nif toggle\n  Run goxlr-client-quiet.exe profiles device load Headset\nelse\n  Run goxlr-client-quiet.exe profiles device load Speakers\nreturn\n';
+  const r = x.parseAhk(s);
+  assert.deepEqual(r.bindings.map((b) => [b.accel, b.action]), [['F16', 'profile-toggle:Headset|Speakers']]);
+});

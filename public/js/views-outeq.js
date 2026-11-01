@@ -1,7 +1,7 @@
 import { h, toggle, toast, debounce } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, suggestedPreamp, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
-import { storeGet, storeSet, setOutputEqEngine, engineStatus, listAudioDevices, apoTakeover, apoReadConfig, apoListConfigs, apoOpenConfigurator, isNative } from './native.js';
+import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative } from './native.js';
 import { shortName } from './views-mixer.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl } from './extras.js';
@@ -165,7 +165,7 @@ export function outputEqView(ctx) {
 
   const persist = debounce(() => storeSet('output-eq', state), 400);
   const apply = debounce(() => {
-    ctx.applyOutputEq().then(() => refreshEngine()).catch((e) => toast(`Lydmotor: ${e}`));
+    ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`));
     preview.update();
   }, 60);
   const changed = (record = true) => {
@@ -335,66 +335,105 @@ export function outputEqView(ctx) {
     h('div', { class: 'hint' }, 'Dine gamle Equalizer APO-filer og AutoEQ-profiler til hovedtelefoner (ParametricEQ.txt) kan importeres direkte.'));
   renderPresets();
 
+  // ---- EQ engine: GoXLR Studio's built-in engine, or a separately installed Equalizer APO ----
   const engineBadge = h('span', { class: 'badge' });
   const engineText = h('div', { class: 'hint' });
-  const apoLine = h('div', { class: 'apo-devices' });
-  const configBtn = h('button', { class: 'btn sm', onclick: () => apoOpenConfigurator().then(() => toast('Configurator åbnes – vælg enheder og genstart bagefter', 'info')).catch((e) => toast(String(e))) }, 'Åbn APO Configurator');
-  const takeoverBtn = h('button', { class: 'btn sm primary' });
+  const engineLog = h('div', { class: 'engine-log' });
+  const devList = h('div', { class: 'engine-devices' });
+  const engineActions = h('div', { class: 'row', style: { flexWrap: 'wrap', marginTop: '10px' } });
+  const targetHint = h('div', { class: 'hint' });
   const importApoBtn = h('button', { class: 'btn sm', onclick: async () => {
     try {
       const text = await apoReadConfig();
       const parsed = parseApoConfig(text);
-      if (!parsed.bands.length) { toast('Fandt ingen filtre i din APO-opsætning.'); return; }
-      state.presets['Min APO-opsætning'] = parsed;
-      loadEq(parsed, 'Min APO-opsætning');
+      if (!parsed.bands.length) { toast('Fandt ingen filtre i din Peace/APO-opsætning.'); return; }
+      state.presets['Min Peace-opsætning'] = parsed;
+      loadEq(parsed, 'Min Peace-opsætning');
       ctx.onStateChanged?.('eq');
-      toast(`Importeret ${parsed.bands.length} filtre fra Equalizer APO`, 'info');
+      toast(`Importeret ${parsed.bands.length} filtre fra din Peace/APO-opsætning`, 'info');
     } catch (e) { toast(String(e)); }
-  } }, 'Importér min nuværende APO');
-  let engine = null;
-  takeoverBtn.addEventListener('click', async () => {
-    const enable = !engine?.taken_over;
-    if (enable && !confirm('GoXLR Studio overtager Equalizer APO. Din nuværende config.txt gemmes som backup og kan gendannes her. Windows beder om administrator-tilladelse én gang. Fortsæt?')) return;
-    try { await apoTakeover(enable); ctx.onApoChanged?.(enable); apply(); toast(enable ? 'GoXLR Studio styrer nu EQ’en' : 'Din gamle APO-opsætning er gendannet', 'info'); } catch (e) { toast(String(e)); }
+  } }, 'Importér nuværende Peace-opsætning');
+  const targetSel = h('select', { onchange: () => { state.target = targetSel.value || null; state.target_name = targetSel.selectedOptions[0]?.dataset.name || null; persist(); apply(); renderTarget(); } });
+  let info = { kind: 'none', devices: [] };
+  let chosen = null;
+  const isGoXLR = (n) => /goxlr|tc-helicon/i.test(n);
+  const installedIds = () => info.devices.filter((d) => d.installed).map((d) => d.id);
+  const selectionChanged = () => { const inst = new Set(installedIds()); return chosen.size !== inst.size || [...chosen].some((id) => !inst.has(id)); };
+  const run = async (task, busy) => {
+    engineActions.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    engineText.textContent = busy;
+    try {
+      const r = await engineTask(task);
+      engineLog.replaceChildren(...(r.log || []).map((l) => h('div', {}, '• ', l)));
+      if (!r.ok) throw new Error(r.error || 'Ukendt fejl');
+      ctx.onApoChanged?.(task.action !== 'uninstall' && task.action !== 'restore-external');
+      apply();
+      toast(r.reboot ? 'Færdig – genstart pc’en, så alle programmer bruger EQ’en' : 'Færdig', 'info');
+    } catch (e) { toast(String(e.message || e)); }
     refreshEngine();
-  });
-  const targetSel = h('select', { onchange: () => { state.target = targetSel.value || null; state.target_name = targetSel.selectedOptions[0]?.dataset.name || null; persist(); apply(); } });
-  const refreshEngine = async () => {
-    engine = await engineStatus().catch((e) => ({ available: false, reason: String(e) }));
-    engineBadge.textContent = engine.running ? 'Aktiv' : engine.available ? 'Klar' : 'Ikke aktiv';
-    engineBadge.className = `badge ${engine.running ? 'ok' : engine.available ? '' : 'warn'}`;
-    engineText.textContent = engine.reason || (engine.running ? 'EQ’en kører i Windows’ lydmotor – ændringer høres med det samme.' : '');
-    takeoverBtn.textContent = engine.taken_over ? 'Gendan gammel APO-opsætning' : 'Overtag APO';
-    takeoverBtn.className = `btn sm ${engine.taken_over ? '' : 'primary'}`;
-    takeoverBtn.style.display = engine.apo_installed ? '' : 'none';
-    importApoBtn.style.display = engine.apo_installed ? '' : 'none';
-    configBtn.style.display = isNative() && engine.apo_installed ? '' : 'none';
-    renderApo();
   };
-  // Equalizer APO only processes devices it was installed on (chosen in its Configurator).
-  const renderApo = () => {
-    const devices = engine?.devices || [];
-    if (!devices.length) { apoLine.replaceChildren(); return; }
-    const pill = (d) => h('span', { class: `badge ${d.apo ? 'ok' : 'warn'}`, title: d.name }, `${d.apo ? '✓' : '✕'} ${shortName(d.name)}`);
-    if (state.target) {
-      const d = devices.find((x) => x.id === state.target);
-      apoLine.replaceChildren(
-        d ? pill(d) : h('span', { class: 'badge warn' }, 'Udgangen findes ikke'),
-        h('span', { class: 'hint' }, d?.apo ? ' APO er installeret på denne udgang.' : ' APO er ikke installeret på denne udgang – EQ’en høres ikke. Tilføj den i Configurator.'));
-    } else {
-      apoLine.replaceChildren(h('div', { class: 'hint' }, 'APO på udgange:'), h('div', { class: 'fx-toggle' }, devices.map(pill)));
+  const needDevices = (fn) => () => (chosen.size ? fn() : toast('Markér mindst én udgang'));
+  const replaceExternal = async () => {
+    if (!confirm('GoXLR Studio erstatter Equalizer APO med sin indbyggede EQ-motor:\n\n1. Dine Peace/APO-presets importeres og gemmes.\n2. Equalizer APO afinstalleres (Peace virker derefter ikke længere og kan fjernes).\n3. GoXLR Studios motor sættes på de markerede udgange.\n\nWindows beder om administrator-adgang én gang, og lyden afbrydes et øjeblik. Fortsæt?')) return;
+    try { const { names } = await importPeacePresets(ctx); if (names.length) toast(`Importeret ${names.length} Peace-presets`, 'info'); } catch { /* no presets */ }
+    await run({ action: 'install', devices: [...chosen] }, 'Erstatter Equalizer APO med den indbyggede motor…');
+  };
+  const btn = (text, cls, fn) => h('button', { class: `btn sm ${cls}`, onclick: fn }, text);
+  const renderActions = () => {
+    const list = [];
+    if (info.kind === 'none') {
+      list.push(info.bundled
+        ? btn('Installér EQ-motor', 'primary', needDevices(() => run({ action: 'install', devices: [...chosen] }, 'Installerer EQ-motoren…')))
+        : h('span', { class: 'hint' }, 'Denne version indeholder ikke EQ-motoren.'));
     }
+    if (info.kind === 'external') {
+      if (info.bundled) list.push(btn('Erstat med indbygget motor', 'primary', needDevices(replaceExternal)));
+      if (!info.uses_our_config) list.push(btn('Brug den eksisterende motor', '', () => run({ action: 'use-external' }, 'Kobler Equalizer APO til GoXLR Studio…')));
+    }
+    if (info.kind === 'builtin') {
+      if (!info.uses_our_config) list.push(btn('Reparér', 'primary', needDevices(() => run({ action: 'install', devices: [...chosen] }, 'Reparerer EQ-motoren…'))));
+      else if (selectionChanged()) list.push(btn('Gem udgange', 'primary', () => run({ action: 'set-devices', devices: [...chosen] }, 'Opdaterer udgange…')));
+      list.push(btn('Fjern EQ-motor', '', () => { if (confirm('Fjern GoXLR Studios EQ-motor fra alle udgange?')) run({ action: 'uninstall' }, 'Fjerner EQ-motoren…'); }));
+    }
+    if (info.external_config) list.push(importApoBtn);
+    engineActions.replaceChildren(...list);
+  };
+  const renderDevices = () => {
+    devList.replaceChildren(...info.devices.map((d) => {
+      const cb = h('input', { type: 'checkbox', checked: chosen.has(d.id), onchange: () => { if (cb.checked) chosen.add(d.id); else chosen.delete(d.id); renderActions(); } });
+      return h('label', { class: 'engine-dev', title: d.name }, cb, h('span', {}, shortName(d.name)), d.installed ? h('span', { class: 'badge ok' }, 'aktiv') : null);
+    }));
+    if (!info.devices.length) devList.append(h('div', { class: 'hint' }, 'Fandt ingen udgange.'));
+  };
+  const renderTarget = () => {
+    const d = info.devices.find((x) => x.id === state.target);
+    targetHint.textContent = state.target && d && !d.installed ? 'EQ-motoren kører ikke på denne udgang endnu – markér den ovenfor.' : '';
+  };
+  const refreshEngine = async () => {
+    info = await engineInfo().catch((e) => ({ kind: 'none', bundled: false, devices: [], error: String(e) }));
+    const inst = installedIds();
+    if (!chosen) chosen = new Set(inst.length ? inst : info.devices.filter((d) => isGoXLR(d.name)).map((d) => d.id));
+    const running = info.kind !== 'none' && info.uses_our_config && inst.length > 0;
+    engineBadge.textContent = running ? 'Aktiv' : info.kind === 'none' ? 'Ikke installeret' : 'Ikke aktiv';
+    engineBadge.className = `badge ${running ? 'ok' : 'warn'}`;
+    const kind = {
+      builtin: `GoXLR Studios indbyggede EQ-motor${info.version ? ` (Equalizer APO ${info.version})` : ''}.`,
+      external: 'Equalizer APO er installeret som et separat program.',
+      none: 'EQ-motoren er ikke installeret endnu.',
+    }[info.kind] || '';
+    engineText.textContent = `${kind} ${running ? 'EQ’en virker på de markerede udgange, og ændringer høres med det samme.' : ''}${info.error ? ` (${info.error})` : ''}`;
+    renderDevices(); renderActions(); renderTarget();
   };
   listAudioDevices().then((devs) => {
-    targetSel.replaceChildren(h('option', { value: '' }, 'Alle udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id, 'data-name': d.name }, shortName(d.name))));
+    targetSel.replaceChildren(h('option', { value: '' }, 'Alle markerede udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id, 'data-name': d.name }, shortName(d.name))));
     targetSel.value = state.target || '';
   }).catch(() => {});
   refreshEngine();
-  const engineCard = h('div', { class: 'card' }, h('h2', {}, 'Lydmotor', engineBadge),
-    h('div', { class: 'row' }, h('label', {}, 'EQ på udgang'), targetSel),
-    apoLine,
-    isNative() ? h('div', { class: 'row', style: { flexWrap: 'wrap' } }, takeoverBtn, importApoBtn, configBtn) : null,
-    engineText);
+  const engineCard = h('div', { class: 'card' }, h('h2', {}, 'EQ-motor', engineBadge),
+    engineText,
+    h('div', { class: 'hint', style: { margin: '10px 0 4px' } }, 'Udgange med EQ-motor:'), devList,
+    engineActions, engineLog,
+    h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'EQ gælder for'), targetSel), targetHint);
 
   const preview = makePreview(eq);
   const previewCard = h('div', { class: 'card' }, h('h2', {}, 'Lyttetest'),

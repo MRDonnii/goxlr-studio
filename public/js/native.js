@@ -64,27 +64,62 @@ export async function setOutputEqEngine(eq) {
   return null;
 }
 
+// Browser demo of the EQ engine: starts as a separately installed Equalizer APO.
+const demoEngine = { kind: 'external', uses_our_config: false, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) };
+
+export async function engineInfo() {
+  if (isNative()) return invoke('engine_info');
+  return {
+    kind: demoEngine.kind,
+    bundled: true,
+    version: '1.4.2',
+    install_path: demoEngine.kind === 'none' ? null : demoEngine.kind === 'builtin' ? 'C:\\Program Files\\GoXLR Studio Engine' : 'C:\\Program Files\\EqualizerAPO',
+    config_path: null,
+    uses_our_config: demoEngine.uses_our_config,
+    external_config: demoEngine.kind === 'external' ? 'C:\\Program Files\\EqualizerAPO\\config' : null,
+    devices: demoDevices.filter((d) => d.flow === 'render').map((d) => ({ id: d.id, guid: d.id, name: d.name, installed: demoEngine.kind !== 'none' && demoEngine.installed.has(d.id) })),
+  };
+}
+
+// task: {action: 'install'|'set-devices', devices: [ids]} | {action: 'uninstall'|'use-external'|'restore-external'}
+export async function engineTask(task) {
+  if (isNative()) return invoke('engine_task', { task });
+  await new Promise((r) => setTimeout(r, 600));
+  const log = [];
+  if (task.action === 'install') {
+    if (demoEngine.kind === 'external') log.push('Equalizer APO’s config (inkl. Peace-presets) gemt', 'Den separate Equalizer APO er afinstalleret');
+    demoEngine.kind = 'builtin'; demoEngine.uses_our_config = true; demoEngine.installed = new Set(task.devices);
+    log.push('Motorfiler lagt i C:\\Program Files\\GoXLR Studio Engine', ...task.devices.map((d) => `EQ-motor sat på: ${demoDevices.find((x) => x.id === d)?.name || d}`), 'Windows-lydtjenesten er genstartet');
+  } else if (task.action === 'set-devices') {
+    demoEngine.installed = new Set(task.devices); log.push('Udgange opdateret', 'Windows-lydtjenesten er genstartet');
+  } else if (task.action === 'uninstall') {
+    demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); log.push('EQ-motoren er fjernet');
+  } else if (task.action === 'use-external') { demoEngine.uses_our_config = true; log.push('Equalizer APO læser nu GoXLR Studios EQ'); }
+  else if (task.action === 'restore-external') { demoEngine.uses_our_config = false; log.push('Equalizer APO bruger igen sin egen config-mappe'); }
+  return { ok: true, error: null, log, reboot: false };
+}
+
 export async function engineStatus() {
   if (isNative()) return invoke('output_eq_status');
+  const info = await engineInfo();
+  const on = info.devices.some((d) => d.installed);
   return {
-    available: false,
-    reason: 'Browser-tilstand – lydmotoren findes kun i Windows-appen.',
-    devices: demoDevices.filter((d) => d.flow === 'render').map((d) => ({ id: d.id, name: d.name, apo: /GoXLR/.test(d.name) })),
+    kind: info.kind, bundled: true, engine_version: info.version,
+    available: true, apo_installed: info.kind !== 'none', taken_over: info.uses_our_config,
+    running: info.kind !== 'none' && info.uses_our_config && on,
+    reason: 'Browser-demo – i Windows-appen styrer dette den rigtige lydmotor.',
+    devices: info.devices.map((d) => ({ id: d.id, name: d.name, apo: d.installed })),
   };
 }
 
 export async function apoTakeover(enable) {
-  if (!isNative()) throw new Error('Kun i Windows-appen');
+  if (!isNative()) { await engineTask({ action: enable ? 'use-external' : 'restore-external' }); return; }
   return invoke('apo_takeover', { enable });
 }
 
 export async function apoReadConfig() {
   if (!isNative()) throw new Error('Kun i Windows-appen');
   return invoke('apo_read_config');
-}
-
-export async function apoOpenConfigurator() {
-  return invoke('apo_open_configurator');
 }
 
 export async function apoListConfigs() {
@@ -127,6 +162,73 @@ export async function startDaemon() {
   return invoke('start_daemon');
 }
 
+export async function daemonInfo() {
+  if (isNative()) return invoke('daemon_info');
+  return { bundled: true, version: '1.2.4', started_by_us: false, process_running: true };
+}
+
+// ---------- moving over from the old programs ----------
+const DEMO_AHK = [
+  '; Eksempel på et gammelt AutoHotkey-script',
+  'F13::Run, "C:\\Program Files\\GoXLR Utility\\goxlr-client-quiet.exe" profiles device load Headset, , Hide',
+  'F14::Run, "C:\\Program Files\\GoXLR Utility\\goxlr-client-quiet.exe" profiles device load Speakers, , Hide',
+  '^PgUp::Run, "C:\\Program Files\\GoXLR Utility\\goxlr-client-quiet.exe" profiles device load Headset, , Hide',
+  '^PgDn::Run, "C:\\Program Files\\GoXLR Utility\\goxlr-client-quiet.exe" profiles device load Speakers, , Hide',
+].join('\r\n');
+
+export async function migrateScan() {
+  if (isNative()) return invoke('migrate_scan');
+  return {
+    ahk: [{ path: 'C:\\Users\\demo\\Documents\\GoXLR.ahk', text: DEMO_AHK, autostart: true, startup_entry: 'C:\\Users\\demo\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\GoXLR.lnk' }],
+    ahk_running: true,
+    tc_helicon: { installed: false, dir: null, profiles: [], mic_profiles: [] },
+    apo: { config_dir: demoEngine.kind === 'external' ? 'C:\\Program Files\\EqualizerAPO\\config' : null, peace_installed: demoEngine.kind === 'external', peace_txt: null, preset_files: 12 },
+    backup_root: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR Studio\\backup',
+  };
+}
+
+export async function migrateBackup(stamp, goxlrDirs, studioJson) {
+  if (isNative()) return invoke('migrate_backup', { stamp, goxlrDirs, studioJson });
+  return { path: `C:\\Users\\demo\\AppData\\Roaming\\GoXLR Studio\\backup\\${stamp}`, files: 42, bytes: 1234567 };
+}
+
+export async function migrateCopyProfiles(files, dest) {
+  if (isNative()) return invoke('migrate_copy_profiles', { files, dest });
+  return files.length;
+}
+
+export async function migrateDisableStartup(entry) {
+  if (isNative()) return invoke('migrate_disable_startup', { entry });
+  return 'backup\\autostart-slået-fra';
+}
+
+export async function migrateStopAhk() {
+  if (isNative()) return invoke('migrate_stop_ahk');
+}
+
+const demoApps = [
+  { key: 'demo-utility', name: 'GoXLR Utility', publisher: 'GoXLR on Linux', version: '1.2.4', category: 'replace', note: 'GoXLR Studio har sin egen GoXLR-motor. Dine profiler bliver liggende.' },
+  { key: 'demo-apo', name: 'Equalizer APO', publisher: 'Jonas Thedering', version: '1.4.2', category: 'engine', note: 'Erstattes af GoXLR Studios indbyggede EQ-motor (under Afspilnings-EQ).' },
+  { key: 'demo-peace', name: 'Peace Equalizer, interface Equalizer APO', publisher: 'P.E. Verbeek', version: '1.6', category: 'replace', note: 'GoXLR Studio har EQ, presets og genveje. Importér presets først.' },
+  { key: 'demo-ahk', name: 'AutoHotkey', publisher: 'AutoHotkey Foundation', version: '1.1.37', category: 'check', note: 'Genvejene er flyttet til GoXLR Studio. Afinstallér kun, hvis du ikke bruger andre AutoHotkey-scripts.' },
+  { key: 'demo-driver', name: 'TC-Helicon GoXLR Driver', publisher: 'TC-Helicon', version: '5.57', category: 'keep', note: 'Driveren får GoXLR’en til at virke som lydkort i Windows. Den skal blive.' },
+];
+export async function installedApps() {
+  if (isNative()) return invoke('installed_apps');
+  return demoApps.filter((a) => a.category !== 'engine' || demoEngine.kind === 'external');
+}
+
+export async function runUninstaller(key) {
+  if (isNative()) return invoke('run_uninstaller', { key });
+  const i = demoApps.findIndex((a) => a.key === key);
+  const [a] = demoApps.splice(i, 1);
+  return a.name;
+}
+
+export async function openPath(path) {
+  if (isNative()) return invoke('open_path', { path });
+}
+
 export async function setApi(config) {
   if (!isNative()) return null;
   return invoke('set_api', { config });
@@ -142,10 +244,15 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.2.0', installed: false, browser: true };
+  return { version: '0.3.0', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {
   if (!isNative()) throw new Error('Kun i Windows-appen');
   return invoke('install_update', { url, sha256 });
+}
+
+export async function openUrl(url) {
+  if (isNative()) return invoke('open_url', { url });
+  window.open(url, '_blank', 'noopener');
 }

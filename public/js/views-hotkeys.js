@@ -1,5 +1,5 @@
 import { h, toast } from './ui.js';
-import { actionCatalog } from './actions.js';
+import { actionCatalog, actionLabel } from './actions.js';
 import { isNative } from './native.js';
 
 const MOD_ORDER = ['Ctrl', 'Alt', 'Shift', 'Super'];
@@ -60,7 +60,8 @@ export function hotkeysView(ctx) {
         h('option', { value: '' }, 'Vælg handling…'),
         catalog.map((g) => h('optgroup', { label: g.title }, g.items.map((i) => h('option', { value: i.id, selected: i.id === b.action }, i.label)))));
       if (b.action && !catalog.some((g) => g.items.some((i) => i.id === b.action))) {
-        sel.append(h('option', { value: b.action, selected: true }, `(findes ikke længere) ${b.action}`));
+        const label = actionLabel(ctx, b.action);
+        sel.append(h('option', { value: b.action, selected: true }, label === b.action ? `(findes ikke længere) ${b.action}` : label));
       }
       return h('div', { class: 'item' },
         keyBtn, h('span', { class: 'hint' }, '→'), sel,

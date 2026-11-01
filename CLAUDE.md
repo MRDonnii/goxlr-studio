@@ -1,36 +1,40 @@
 # GoXLR Studio
 
-Windows-app (Tauri 2: Rust + vanilla JS) der erstatter TC-Helicons GoXLR-app, Equalizer APO/Peace og lyd-hotkey-værktøjer. Svar brugeren på dansk.
+Selvstændig Windows-app (Tauri 2: Rust + vanilla JS) der erstatter GoXLR Utility/TC-Helicons app, Equalizer APO, Peace og AutoHotkey – ét program. Kun TC-Helicons USB-driver skal være installeret. Svar brugeren på dansk.
 
 ## Arkitektur
-- `public/` – UI (ES-moduler, ingen build). `js/api.js` taler med GoXLR Utility-daemonen (via Tauri-kommandoen `daemon_request` eller WebSocket i browser) og falder tilbage til `js/demo.js` når der ingen daemon er.
-- `src-tauri/src/daemon.rs` – WebSocket-klient til GoXLR Utility (`ws://127.0.0.1:14564/api/websocket`), JSON-patches sendes som `daemon-patch`-events.
-- `src-tauri/src/audio.rs` – Windows Core Audio: list enheder + skift standardenhed (IPolicyConfig).
-- `src-tauri/src/apo.rs` – afspilnings-EQ: skriver filtre til `%ProgramData%\GoXLR Studio\GoXLR Studio.txt`; "Overtag APO" sætter én Include-linje i APO's config.txt (backup gemmes) via UAC.
-- `src-tauri/src/lib.rs` – kommandoer, bakke-ikon (rød prik ved mute), frie globale genveje (`set_hotkeys`), luk-til-bakke, autostart, `start_daemon`.
+- `public/` – UI (ES-moduler, ingen build). `js/api.js` taler med GoXLR-motoren (via Tauri-kommandoen `daemon_request` eller WebSocket i browser) og falder tilbage til `js/demo.js` når der ingen motor er.
+- `src-tauri/src/daemon_host.rs` – **indbygget GoXLR-motor**: GoXLR Utility's `goxlr-daemon.exe` (v1.2.4, MIT) bygges i CI og indlejres (build.rs, env `GOXLR_DAEMON_EXE`); pakkes ud til `%LOCALAPPDATA%\GoXLR Studio\engine\` og startes skjult (`--disable-tray true`) hvis ingen daemon svarer efter 2,5 s; stoppes ved Afslut. Samme profil-/indstillingsmapper som GoXLR Utility (`%APPDATA%\GoXLR-on-Linux\GoXLR-Utility`).
+- `src-tauri/src/daemon.rs` – WebSocket-klient til motoren (`ws://127.0.0.1:14564/api/websocket`), JSON-patches sendes som `daemon-patch`-events.
+- `src-tauri/src/engine.rs` – **indbygget EQ-motor**: Equalizer APO 1.4.2's motorfiler (GPL, uændrede, hentet + SHA-256-tjekket i CI, indlejret via env `ENGINE_DIR`) installeres i `C:\Program Files\GoXLR Studio Engine` og registreres (regsvr32 + port af Equalizer APO's `DeviceAPOInfo` install/uninstall: FxProperties, `Child APOs`, ejerskab). `ConfigPath` peger på `%ProgramData%\GoXLR Studio\engine` (overvåges af motoren → ændringer høres straks). Alt med admin kører i en elevated kopi af exe'en: `--engine-task <task.json> <result.json>` (`Task`: install/set-devices/uninstall/use-external/restore-external). En separat Equalizer APO tages backup af (`%ProgramData%\GoXLR Studio\apo-backup-*`) og afinstalleres stille før installation.
+- `src-tauri/src/apo.rs` – renderer EQ til APO-syntaks og skriver `config.txt` i motorens mappe; finder gamle Peace/APO-presets (separat installation eller backups).
+- `src-tauri/src/migrate.rs` – Overflytning: scanner AutoHotkey (inkl. Startup-genveje), TC-Helicon-profiler, APO/Peace; fuld backup til `%APPDATA%\GoXLR Studio\backup\<tid>`; liste over gamle programmer (Uninstall-nøgler) med kategori keep/replace/engine/check og start af deres afinstallation.
+- `src-tauri/src/audio.rs` – Windows Core Audio: list enheder + skift standardenhed (IPolicyConfig). `apps.rs` – lyd pr. app.
+- `src-tauri/src/lib.rs` – kommandoer, bakke-ikon (rød prik ved mute), frie globale genveje (`set_hotkeys`), luk-til-bakke, autostart, `helper_main` (CLI-tilstande).
 - `src-tauri/src/osd.rs` – OSD-vindue (`public/osd.html`), vises uden at tage fokus; springes over når hovedvinduet har fokus.
 - `src-tauri/src/api.rs` – lokalt HTTP-API (token påkrævet): `/state`, `/actions`, `/action/<id>` → event `api-action`.
 - `src-tauri/src/update.rs` – auto-opdatering fra GitHub-releases (kun URL'er under repoets releases/download, SHA-256 fra GitHubs `digest`), installer `/S` eller udskift portable exe.
-- `public/js/extras.js` – rene hjælpere (enhed-navne-fallback, crossfeed/loudness, AutoEQ, versioner, app-triggers) med tests i `tests/extras.test.mjs`.
+- `public/js/extras.js` – rene hjælpere (enhed-navne-fallback, crossfeed/loudness, AutoEQ, versioner, app-triggers, AutoHotkey-parser `parseAhk`) med tests i `tests/extras.test.mjs`.
+- `THIRD-PARTY-NOTICES.md` + `licenses/` – licenser for de indlejrede motorer; release vedlægger `EqualizerAPO-src-1.4.2.zip`.
 - Kommando-/statusformater kommer fra GoXLR Utility: `ipc/src/lib.rs` og `ipc/src/device.rs` i github.com/GoXLR-on-Linux/goxlr-utility.
 
 ## Test
-- `node --test tests/*.test.mjs` – EQ-matematik, APO-parser, JSON-patch.
-- `STUDIO_PORT=14600 node server.js` – UI i browser (demo-tilstand uden daemon; proxier til daemon hvis den kører).
-- Rust: `cd src-tauri && cargo check --target x86_64-pc-windows-msvc`. Fuldt byg sker i GitHub Actions (`.github/workflows/build.yml`) → artifact med installer + portable .exe; tag `v*` laver en release.
+- `node --test tests/*.test.mjs` – EQ-matematik, APO-parser, JSON-patch, extras (AHK-import, AutoEQ, opdatering m.m.).
+- `cd src-tauri && cargo test --lib` (Linux kræver webkit2gtk/gtk-dev) – motor-registrering, migrering, API.
+- `STUDIO_PORT=14600 node server.js` – UI i browser (demo-tilstand uden daemon; `?mini` = GoXLR Mini; motorer og overflytning simuleres i `native.js`).
+- Rust: `cd src-tauri && cargo check --target x86_64-pc-windows-msvc`. Med indlejrede motorer: sæt `ENGINE_DIR` (mappe med de 8 motorfiler), `ENGINE_VERSION`, `GOXLR_DAEMON_EXE`. Fuldt byg sker i GitHub Actions (`.github/workflows/build.yml`).
 
 ## Regler
 - Ingen personlige data i repoet; commits med noreply-identitet.
 - Firmware til GoXLR'en røres ikke (lukket, risiko for brick).
 
 ## Status og næste skridt
-Version 0.2.0. Færdigt:
-- Genveje, lyd pr. app (regler, ret forældede, automatik når en app starter/lukker), bakkemenu, hurtig-skift i topbjælken, kommandopalet over `actionCatalog`.
-- Afspilnings-EQ: preset-chips med "ændret"-prik, Peace-import, AutoEQ-søgning, EQ følger GoXLR-profil (`outputEq.profileLinks`), crossfeed + loudness (`outputEq.extras`, sendes som `extra`-linjer/ekstra bånd), APO-status pr. udgang, APO-vagthund (banner når Peace har overskrevet config.txt).
-- Enheder huskes med navn (`*_name`) i scener, app-regler og EQ-udgang, så de findes igen efter driver-opdateringer.
-- OSD ovenpå spil, rød prik i bakke-ikonet ved mute, start af GoXLR Utility, lokalt API, backup/gendan, Diagnose-side, auto-opdatering (tjek hver 6. time, auto-installation når appen ligger i bakken).
-- Release: hæv `version` i `src-tauri/tauri.conf.json` (+ Cargo.toml/package.json) og push til main → bygget opretter selv tag `v<version>` og GitHub-release (tag-push er blokeret fra cloud-sessioner) med `*-setup.exe`, `.msi` og `GoXLR-Studio-portable.exe` (auto-opdatering vælger setup eller portable).
+Version 0.3.0 – selvstændig. Færdigt:
+- Indbygget GoXLR-motor og EQ-motor (se Arkitektur), siden **Overflytning** (backup, AHK→genveje, Peace-presets, TC-Helicon-profiler, "husk lyd pr. app", afinstallér gamle programmer; driveren markeres BEHOLD), EQ-motor-kort med valg af udgange.
+- Fra 0.2: genveje, lyd pr. app, bakkemenu, hurtig-skift, preset-chips, AutoEQ, EQ følger profil, crossfeed/loudness, OSD, API, backup, Diagnose, auto-opdatering.
+- Release: hæv `version` i `src-tauri/tauri.conf.json` (+ Cargo.toml/package.json) og push til main → bygget opretter selv tag `v<version>` og GitHub-release (tag-push er blokeret fra cloud-sessioner) med `*-setup.exe`, `.msi`, `GoXLR-Studio-portable.exe`, `THIRD-PARTY-NOTICES.md` og APO-kildekoden.
 
 Næste skridt:
-- Test hos brugeren på Windows: OSD i spil (fokus må ikke stjæles), genveje med AutoHotkey kørende, lyd pr. app, Peace-import, APO-vagthund, opdatering fra 0.2.0 → 0.2.1.
-- Mulige forbedringer: niveaumåler i bakken, MQTT, signerede opdateringer (tauri-plugin-updater kræver en hemmelig nøgle i repo-secrets).
+- Test hos brugeren på Windows: "Erstat med indbygget motor" (afinstallerer Equalizer APO efter backup), at EQ høres på GoXLR-udgangene, at den indbyggede GoXLR-motor overtager efter afinstallation af GoXLR Utility, AHK-import, OSD i spil.
+- GoXLR Studios egen afinstallation fjerner ikke EQ-motoren endnu (brug "Fjern EQ-motor" først). `goxlr-studio.exe --engine-uninstall` findes; mangler NSIS-hook der springer over ved opdatering.
+- Mulige forbedringer: niveaumåler i bakken, MQTT, signerede opdateringer.

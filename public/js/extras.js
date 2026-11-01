@@ -123,3 +123,110 @@ export function triggerActions(triggers, before, now) {
   }
   return out;
 }
+
+// ---------- AutoHotkey import ----------
+const AHK_KEYS = {
+  pgup: 'PageUp', pgdn: 'PageDown', ins: 'Insert', insert: 'Insert', del: 'Delete', delete: 'Delete', esc: 'Escape', escape: 'Escape',
+  enter: 'Enter', space: 'Space', tab: 'Tab', home: 'Home', end: 'End', up: 'Up', down: 'Down', left: 'Left', right: 'Right',
+  backspace: 'Backspace', bs: 'Backspace', pause: 'Pause', printscreen: 'PrintScreen', scrolllock: 'ScrollLock',
+  media_play_pause: 'MediaPlayPause', media_next: 'MediaTrackNext', media_prev: 'MediaTrackPrevious', media_stop: 'MediaStop',
+  volume_up: 'AudioVolumeUp', volume_down: 'AudioVolumeDown', volume_mute: 'AudioVolumeMute',
+};
+const AHK_CHANNELS = { mic: 'Mic', 'line-in': 'LineIn', console: 'Console', system: 'System', game: 'Game', chat: 'Chat', sample: 'Sample', music: 'Music', headphones: 'Headphones', 'mic-monitor': 'MicMonitor', 'line-out': 'LineOut' };
+const AHK_MUTE = { unmuted: 'Unmuted', 'muted-to-x': 'MutedToX', 'muted-to-all': 'MutedToAll' };
+
+// "^!PgUp" → "Ctrl+Alt+PageUp"; null for combos GoXLR Studio can't register (a & b, mouse buttons…).
+export function ahkHotkeyToAccel(hk) {
+  if (hk.includes(' & ') || /up$/i.test(hk.split(' ').pop()) && / up$/i.test(hk)) return null;
+  const m = hk.trim().match(/^([~*$<>^!+#]*)(.+)$/);
+  if (!m) return null;
+  const mods = [];
+  if (m[1].includes('^')) mods.push('Ctrl');
+  if (m[1].includes('!')) mods.push('Alt');
+  if (m[1].includes('+')) mods.push('Shift');
+  if (m[1].includes('#')) mods.push('Super');
+  const raw = m[2].trim();
+  const low = raw.toLowerCase();
+  let key;
+  if (/^f([1-9]|1\d|2[0-4])$/.test(low)) key = raw.toUpperCase();
+  else if (/^[a-z]$/.test(low)) key = low.toUpperCase();
+  else if (/^[0-9]$/.test(low)) key = low;
+  else if (/^numpad[0-9]$/.test(low)) key = `Numpad${low.slice(6)}`;
+  else if (AHK_KEYS[low]) key = AHK_KEYS[low];
+  else return null;
+  return [...mods, key].join('+');
+}
+
+// AHK v1 `Run, target, workdir, options`: the command ends at the first comma outside quotes.
+function cutAtComma(s) {
+  let q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) { if (c === q) q = null; } else if (c === '"' || c === "'") q = c; else if (c === ',') return s.slice(0, i);
+  }
+  return s;
+}
+
+function splitArgs(s) {
+  const out = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(s))) out.push(m[1] ?? m[2] ?? m[3]);
+  return out;
+}
+
+// Translates one goxlr-client argument list into a GoXLR Studio action id.
+export function goxlrClientAction(args) {
+  const a = args.map((x) => x.toLowerCase());
+  const at = (i) => args[i];
+  if (a[0] === 'profiles' && a[2] === 'load' && at(3)) {
+    if (a[1] === 'device') return `profile:${at(3)}`;
+    if (a[1] === 'microphone') return `micprofile:${at(3)}`;
+  }
+  if (a[0] === 'volume' && AHK_CHANNELS[a[1]] && /^\d+$/.test(a[2] || '')) return `vol-set:${AHK_CHANNELS[a[1]]}|${Math.min(100, Number(a[2]))}`;
+  if (a[0] === 'cough-button' && a[1] === 'mute-state' && AHK_MUTE[a[2]]) return `cough:${AHK_MUTE[a[2]]}`;
+  return null;
+}
+
+// Finds hotkeys in an AutoHotkey (v1 or v2) script that call goxlr-client and maps them to actions.
+export function parseAhk(text) {
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  let cur = null;
+  for (const raw of lines) {
+    const line = raw.replace(/(^|\s);.*$/, '').trim();
+    if (!line) continue;
+    const hk = line.match(/^([^\s:"'(]+?)::(.*)$/);
+    if (hk && !/^:/.test(line)) {
+      cur = { hotkey: hk[1], body: [] };
+      blocks.push(cur);
+      const rest = hk[2].trim();
+      if (rest && rest !== '{') { cur.body.push(rest); if (!rest.endsWith('{')) cur = null; }
+      continue;
+    }
+    if (!cur) continue;
+    if (/^return\b/i.test(line) || line === '}') { cur = null; continue; }
+    cur.body.push(line);
+  }
+  const bindings = [];
+  const unknown = [];
+  for (const b of blocks) {
+    const calls = [];
+    for (const l of b.body) {
+      const m = l.match(/goxlr-client(?:-quiet)?(?:\.exe)?["']?\s+(.*)$/i);
+      if (!m) continue;
+      const args = splitArgs(cutAtComma(m[1])).map((t) => t.replace(/^["'(]+|["')\],]+$/g, '')).filter(Boolean);
+      calls.push(goxlrClientAction(args) || `?${m[1].trim()}`);
+    }
+    if (!calls.length) continue;
+    const accel = ahkHotkeyToAccel(b.hotkey);
+    const known = calls.filter((c) => !c.startsWith('?'));
+    const profiles = [...new Set(known.filter((c) => c.startsWith('profile:')).map((c) => c.slice(8)))];
+    let action = null;
+    if (profiles.length === 2) action = `profile-toggle:${profiles[0]}|${profiles[1]}`;
+    else if (known.length) action = known[0];
+    if (accel && action) bindings.push({ hotkey: b.hotkey, accel, action, extra: known.length > 1 && profiles.length !== 2 ? known.slice(1) : [] });
+    else unknown.push({ hotkey: b.hotkey, reason: !accel ? 'Tasten kan ikke bruges som global genvej' : 'Kommandoen kendes ikke', text: b.body.join(' / ') });
+  }
+  return { bindings, unknown };
+}

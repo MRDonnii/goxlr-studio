@@ -1,5 +1,5 @@
 import { h, toggle, toast } from './ui.js';
-import { isNative, storeGet, storeSet, startDaemon, showOsd } from './native.js';
+import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo } from './native.js';
 
 export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'output-eq', 'ducking'];
 
@@ -22,11 +22,19 @@ export function systemSettings(ctx) {
     } }, 'Test')),
     h('div', { class: 'hint' }, 'En lille boks øverst på skærmen i ét sekund, når en genvej skifter profil, EQ, scene eller mute. Vises ikke, mens GoXLR Studio selv er i fokus. Spil i "eksklusiv fuldskærm" kan skjule den – brug "kantløs vindue".'));
 
-  // ---- daemon ----
-  const daemonCard = h('div', { class: 'card' }, h('h2', {}, 'GoXLR Utility'),
-    toggle(binder, { label: 'Start den automatisk, hvis den ikke kører', get: () => p.autoStartDaemon !== false, set: (v) => { p.autoStartDaemon = v; ctx.savePrefs(); } }),
-    h('div', { class: 'row' }, h('button', { class: 'btn sm', disabled: !isNative(), onclick: () => startDaemon().then((path) => toast(`Starter ${path.split('\\').pop()}`, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR Utility nu')),
-    h('div', { class: 'hint' }, 'GoXLR Studio taler med GoXLR’en gennem GoXLR Utility-tjenesten.'));
+  // ---- built-in GoXLR engine ----
+  const daemonState = h('div', { class: 'hint' }, '…');
+  daemonInfo().then((d) => {
+    daemonState.textContent = !d.bundled ? 'Denne version har ikke GoXLR-motoren indbygget – den bruger en installeret GoXLR Utility.'
+      : d.started_by_us ? `Den indbyggede GoXLR-motor kører (GoXLR Utility ${d.version}, MIT-licens).`
+        : d.process_running ? 'En installeret GoXLR Utility kører og bruges. Afinstallér den under Overflytning, så overtager den indbyggede motor.'
+          : 'GoXLR-motoren kører ikke.';
+  }).catch(() => {});
+  const daemonCard = h('div', { class: 'card' }, h('h2', {}, 'GoXLR-motor'),
+    daemonState,
+    toggle(binder, { label: 'Start automatisk med GoXLR Studio', get: () => p.autoStartDaemon !== false, set: (v) => { p.autoStartDaemon = v; ctx.savePrefs(); } }),
+    h('div', { class: 'row' }, h('button', { class: 'btn sm', disabled: !isNative(), onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start nu')),
+    h('div', { class: 'hint' }, 'Motoren taler med GoXLR’en over USB og bruger samme profiler og indstillinger som GoXLR Utility.'));
 
   // ---- updates ----
   const updInfo = h('div', { class: 'list' });
@@ -114,5 +122,18 @@ export function systemSettings(ctx) {
       h('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Importér backup…'), fileIn),
     h('div', { class: 'hint' }, 'Genveje, scener, app-regler, EQ-presets og indstillinger i én fil – til en ny pc eller før du eksperimenterer. GoXLR-profiler ligger i GoXLR Utility og er ikke med.'));
 
-  return h('div', { class: 'grid cols-2' }, osdCard, daemonCard, updCard, backupCard, apiCard);
+  // ---- about ----
+  const repo = 'https://github.com/MRDonnii/goxlr-studio';
+  const aboutCard = h('div', { class: 'card' }, h('h2', {}, 'Om GoXLR Studio'),
+    h('div', { class: 'list compact' },
+      h('div', { class: 'item' }, 'GoXLR Studio', h('div', { class: 'spacer' }), ctx.updateState?.current || '', h('span', { class: 'badge' }, 'MIT')),
+      h('div', { class: 'item' }, 'GoXLR-motor: GoXLR Utility 1.2.4', h('div', { class: 'spacer' }), h('span', { class: 'badge' }, 'MIT')),
+      h('div', { class: 'item' }, 'EQ-motor: Equalizer APO 1.4.2', h('div', { class: 'spacer' }), h('span', { class: 'badge' }, 'GPL v2')),
+      h('div', { class: 'item hint' }, 'FFTW (GPL), libsndfile (LGPL), Microsoft VC++ runtime')),
+    h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } },
+      h('a', { href: `${repo}/blob/main/THIRD-PARTY-NOTICES.md`, target: '_blank', rel: 'noopener' }, 'Licenser og kildekode'),
+      h('a', { href: `${repo}/releases`, target: '_blank', rel: 'noopener' }, 'Udgivelser')),
+    h('div', { class: 'hint' }, 'Motorerne er open source og indgår uændrede. Kildekoden til EQ-motoren ligger ved hver udgivelse.'));
+
+  return h('div', { class: 'grid cols-2' }, osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
 }

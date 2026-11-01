@@ -1,5 +1,5 @@
 import { h, toast, errorLog } from './ui.js';
-import { engineStatus, listAudioDevices, appSessions, appInfo, isNative } from './native.js';
+import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo } from './native.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { describeAction } from './actions.js';
 
@@ -8,11 +8,12 @@ const fmtFw = (fw) => (Array.isArray(fw) ? fw.join('.') : fw ? Object.values(fw)
 export async function collectDiagnostics(ctx) {
   const { conn } = ctx;
   const m = conn.mixer;
-  const [info, engine, devs, apps] = await Promise.all([
+  const [info, engine, devs, apps, daemon] = await Promise.all([
     appInfo().catch((e) => ({ error: String(e) })),
     engineStatus().catch((e) => ({ error: String(e) })),
     listAudioDevices().catch(() => []),
     appSessions().catch(() => []),
+    daemonInfo().catch((e) => ({ error: String(e) })),
   ]);
   const hotkeys = await Promise.all(ctx.hotkeys.map(async (b) => ({
     key: prettyAccel(b.accel),
@@ -30,9 +31,10 @@ export async function collectDiagnostics(ctx) {
       profile: m.profile_name,
       mic_profile: m.mic_profile_name,
       profiles: conn.status.files?.profiles || [],
-    } : { mode: conn.mode },
+      engine: daemon,
+    } : { mode: conn.mode, engine: daemon },
     eq: {
-      engine: { running: engine.running, available: engine.available, apo_installed: engine.apo_installed, taken_over: engine.taken_over, reason: engine.reason || engine.error || null },
+      engine: { kind: engine.kind, version: engine.engine_version, running: engine.running, available: engine.available, apo_installed: engine.apo_installed, taken_over: engine.taken_over, reason: engine.reason || engine.error || null },
       apo_devices: (engine.devices || []).map((d) => `${d.apo ? '✓' : '✕'} ${d.name}`),
       preset: ctx.outputEq?.presetName || null,
       enabled: !!ctx.outputEq?.slots[ctx.outputEq.active]?.enabled,
@@ -72,10 +74,12 @@ export function diagView(ctx) {
         section('App', [row('Version', r.app.version || '–'), row('Installation', r.app.browser ? 'Browser' : r.app.installed ? 'Installeret' : 'Portable'),
           row('API', r.api?.enabled ? (r.api.error ? 'Fejl' : `Port ${r.api.port}`) : 'Fra', r.api?.error ? 'warn' : null)]),
         section('GoXLR', [row('Forbindelse', g.mode === 'live' ? 'Live' : g.mode, g.mode === 'live' ? 'ok' : 'warn'),
+          row('GoXLR-motor', g.engine?.started_by_us ? `Indbygget ${g.engine.version}` : g.engine?.process_running ? 'GoXLR Utility' : 'Kører ikke', g.engine?.started_by_us ? 'ok' : null),
           g.model ? row('Model', g.model === 'Mini' ? 'GoXLR Mini' : 'GoXLR') : null, g.firmware ? row('Firmware', g.firmware) : null,
           g.daemon ? row('GoXLR Utility', g.daemon) : null, g.profile ? row('Profil', `${g.profile} / ${g.mic_profile}`) : null].filter(Boolean)),
-        section('Afspilnings-EQ', [row('Lydmotor', e.running ? 'Aktiv' : e.available ? 'Klar' : 'Ikke aktiv', e.running ? 'ok' : 'warn'),
-          row('APO overtaget', e.taken_over ? 'Ja' : 'Nej', e.taken_over ? 'ok' : null), row('Preset', r.eq.preset || 'Tilpasset'),
+        section('Afspilnings-EQ', [row('EQ-motor', e.running ? 'Aktiv' : e.available ? 'Klar' : 'Ikke aktiv', e.running ? 'ok' : 'warn'),
+          row('Type', { builtin: `Indbygget (${e.version || '?'})`, external: 'Separat Equalizer APO', none: 'Ingen' }[e.kind] || '–'),
+          row('Læser GoXLR Studios EQ', e.taken_over ? 'Ja' : 'Nej', e.taken_over ? 'ok' : null), row('Preset', r.eq.preset || 'Tilpasset'),
           ...r.eq.apo_devices.map((d) => h('div', { class: 'item hint' }, d))])),
       h('div', { class: 'grid cols-2' },
         section(`Genveje${bad.length ? ` – ${bad.length} virker ikke` : ''}`, r.hotkeys.map((x) => row(`${x.key} → ${x.action}`, x.status === 'aktiv' ? 'Aktiv' : x.status, x.status === 'aktiv' ? 'ok' : 'warn'))),

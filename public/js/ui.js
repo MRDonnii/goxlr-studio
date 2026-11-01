@@ -130,5 +130,6 @@ export const ICONS = {
   key: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
   apps: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/>',
   diag: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+  move: '<path d="M4 12h13M13 7l5 5-5 5"/><path d="M4 5v14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
 };

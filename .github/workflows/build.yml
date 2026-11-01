@@ -18,9 +18,50 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Built-in GoXLR engine: GoXLR Utility's daemon (MIT), built unchanged from its release tag.
+      - name: Check out GoXLR Utility
+        uses: actions/checkout@v4
+        with:
+          repository: GoXLR-on-Linux/goxlr-utility
+          ref: v1.2.4
+          path: goxlr-utility
+
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            goxlr-utility
+
+      - name: Build GoXLR engine
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --manifest-path goxlr-utility/Cargo.toml -p goxlr-daemon --release
+
+      # Built-in EQ engine: Equalizer APO's engine files (GPL), taken unchanged from the official
+      # installer, verified by SHA-256. The matching source code is attached to every release.
+      - name: Fetch EQ engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force engine-dl, engine | Out-Null
+          function Get-Verified($url, $out, $sha) {
+            for ($i = 1; $i -le 4; $i++) {
+              curl.exe -sSL --retry 3 -o $out $url
+              if ((Test-Path $out) -and ((Get-FileHash $out -Algorithm SHA256).Hash -eq $sha)) { return }
+              Start-Sleep -Seconds (10 * $i)
+            }
+            throw "Download failed or checksum mismatch: $url"
+          }
+          Get-Verified 'https://sourceforge.net/projects/equalizerapo/files/1.4.2/EqualizerAPO-x64-1.4.2.exe/download' 'engine-dl/apo.exe' '7403BE7427BBE1936A40DDED082829B6E217FC4F5990FEE5CBA501F0AE055AFA'
+          Get-Verified 'https://sourceforge.net/projects/equalizerapo/files/1.4.2/EqualizerAPO-src-1.4.2.zip/download' 'engine-dl/EqualizerAPO-src-1.4.2.zip' 'BACD5C78BE71F3AAAB010684AB39F0E5C1BBB45FCD75CBB92C103A145A731DC4'
+          7z x -y -oengine-dl/x engine-dl/apo.exe | Out-Null
+          foreach ($f in 'EqualizerAPO.dll','fftw3f.dll','sndfile.dll','msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll','vcruntime140.dll','vcruntime140_1.dll') {
+            Copy-Item "engine-dl/x/$f" engine/
+          }
+          "ENGINE_DIR=$((Resolve-Path engine).Path)" >> $env:GITHUB_ENV
+          "ENGINE_VERSION=1.4.2" >> $env:GITHUB_ENV
+          "GOXLR_DAEMON_EXE=$((Resolve-Path goxlr-utility/target/release/goxlr-daemon.exe).Path)" >> $env:GITHUB_ENV
+          "GOXLR_DAEMON_VERSION=1.2.4" >> $env:GITHUB_ENV
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
@@ -36,6 +77,8 @@ jobs:
           Copy-Item src-tauri/target/release/goxlr-studio.exe "dist/GoXLR-Studio-portable.exe"
           Copy-Item src-tauri/target/release/bundle/nsis/*.exe dist/
           Copy-Item src-tauri/target/release/bundle/msi/*.msi dist/
+          Copy-Item THIRD-PARTY-NOTICES.md dist/
+          Copy-Item engine-dl/EqualizerAPO-src-1.4.2.zip dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -67,6 +110,19 @@ jobs:
           name: GoXLR Studio ${{ steps.rel.outputs.tag }}
           files: dist/*
           generate_release_notes: true
+
+  rust-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Tauri's Linux libraries
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - name: Unit tests (engine registration logic, migration, API)
+        run: cargo test --lib --manifest-path src-tauri/Cargo.toml
 
   frontend:
     runs-on: ubuntu-latest

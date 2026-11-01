@@ -104,6 +104,12 @@ export async function runAction(ctx, id) {
     case 'output': await setDefaultDevice(arg, 'all'); ctx.refreshDevices?.(); return;
     case 'input': await setDefaultDevice(arg, 'all'); ctx.refreshDevices?.(); return;
     case 'output-next': return cycleOutput(ctx);
+    case 'vol-set': {
+      const [ch, pct] = arg.split('|');
+      if (m) ctx.conn.command('SetVolume', ch, Math.round(Math.min(100, Math.max(0, Number(pct))) * 2.55));
+      return notify(ctx, `${CHANNEL_LABEL[ch] || ch}: ${pct} %`);
+    }
+    case 'cough': if (m) ctx.conn.command('SetCoughMuteState', arg); return notify(ctx, arg === 'Unmuted' ? 'Mikrofon tændt' : 'Mikrofon muted', arg === 'Unmuted' ? 'ok' : 'mute');
     case 'vol-up': return nudgeVolume(ctx, arg, 13);
     case 'vol-down': return nudgeVolume(ctx, arg, -13);
     case 'fx-toggle': if (m?.effects) { ctx.conn.command('SetFXEnabled', !m.effects.is_enabled); notify(ctx, `Effekter ${m.effects.is_enabled ? 'fra' : 'til'}`); } return;
@@ -135,6 +141,8 @@ export async function actionCatalog(ctx) {
   g('Scener', ctx.scenes.map((s) => ({ id: `scene:${s.id}`, label: `Scene "${s.name}"` })));
   g('Mute', [
     { id: 'mute-mic', label: 'Mute/unmute mikrofon (cough)' },
+    { id: 'cough:MutedToX', label: 'Mute mikrofon' },
+    { id: 'cough:Unmuted', label: 'Unmute mikrofon' },
     ...['A', 'B', 'C', 'D'].map((f) => ({ id: `mute-fader:${f}`, label: `Mute fader ${f}${m ? ` (${m.fader_status[f].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[f].channel]})` : ''}` })),
   ]);
   const devs = await listAudioDevices().catch(() => []);
@@ -144,6 +152,7 @@ export async function actionCatalog(ctx) {
     ...devs.filter((d) => d.flow === 'capture').map((d) => ({ id: `input:${d.id}`, label: `Mikrofon → ${shortName(d.name)}` })),
   ]);
   g('Volumen', ['Headphones', 'Music', 'Game', 'Chat', 'System', 'LineOut'].flatMap((c) => [
+    ...[0, 25, 50, 75, 100].map((p) => ({ id: `vol-set:${c}|${p}`, label: `${CHANNEL_LABEL[c]} ${p} %` })),
     { id: `vol-up:${c}`, label: `${CHANNEL_LABEL[c]} op` },
     { id: `vol-down:${c}`, label: `${CHANNEL_LABEL[c]} ned` },
   ]));
@@ -160,4 +169,31 @@ export async function describeAction(ctx, id) {
     if (hit) return hit.label;
   }
   return id;
+}
+
+// Readable name for any action id, also ones the catalog doesn't list (e.g. imported from AutoHotkey).
+export function actionLabel(ctx, id) {
+  const [kind, ...rest] = id.split(':');
+  const arg = rest.join(':');
+  switch (kind) {
+    case 'profile': return `Indlæs profil "${arg}"`;
+    case 'profile-toggle': { const [a, b] = arg.split('|'); return `Skift mellem "${a}" ↔ "${b}"`; }
+    case 'micprofile': return `Indlæs mikrofonprofil "${arg}"`;
+    case 'vol-set': { const [c, p] = arg.split('|'); return `${CHANNEL_LABEL[c] || c} ${p} %`; }
+    case 'vol-up': return `${CHANNEL_LABEL[arg] || arg} op`;
+    case 'vol-down': return `${CHANNEL_LABEL[arg] || arg} ned`;
+    case 'cough': return arg === 'Unmuted' ? 'Unmute mikrofon' : 'Mute mikrofon';
+    case 'mute-mic': return 'Mute/unmute mikrofon';
+    case 'mute-fader': return `Mute fader ${arg}`;
+    case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;
+    case 'eq-preset': return `EQ-preset "${arg}"`;
+    case 'eq-toggle': return 'EQ til/fra';
+    case 'eq-next': return 'Næste EQ-preset';
+    case 'crossfeed-toggle': return 'Crossfeed til/fra';
+    case 'loudness-toggle': return 'Loudness til/fra';
+    case 'output-next': return 'Næste udgang';
+    case 'fx-toggle': return 'Effekter til/fra';
+    case 'ducking-toggle': return 'Auto-ducking til/fra';
+    default: return id;
+  }
 }

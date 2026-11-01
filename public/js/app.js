@@ -4,8 +4,9 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, apoTakeover, listAudioDevices } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, listAudioDevices, openUrl } from './native.js';
 import { diagView } from './views-diag.js';
+import { migrateView } from './views-migrate.js';
 import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
@@ -24,6 +25,7 @@ const PAGES = [
   { id: 'lighting', title: 'Lys', icon: 'light', view: lightingView },
   { id: 'profiles', title: 'Profiler', icon: 'profile', view: profilesView },
   { id: 'hotkeys', title: 'Genveje', icon: 'key', view: hotkeysView },
+  { id: 'migrate', title: 'Overflytning', icon: 'move', view: migrateView },
   { id: 'diag', title: 'Diagnose', icon: 'diag', view: diagView },
   { id: 'settings', title: 'Indstillinger', icon: 'settings', view: settingsView },
 ];
@@ -196,19 +198,19 @@ async function publishApi(force = false) {
   apiPublish(state, actions);
 }
 
-// ---------- banners (APO lost, daemon missing, update ready) ----------
+// ---------- banners (engine lost, GoXLR engine missing, update ready) ----------
 function renderBanners() {
   const el = document.getElementById('banners');
   if (!el) return;
   const items = [];
   if (isNative() && conn.mode === 'demo') {
-    items.push(h('div', { class: 'banner warn' }, 'GoXLR Utility kører ikke – du ser demo-data.',
-      h('button', { class: 'btn sm primary', onclick: () => startDaemon().then(() => toast('Starter GoXLR Utility…', 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR Utility')));
+    items.push(h('div', { class: 'banner warn' }, 'GoXLR-motoren kører ikke, eller mixeren er ikke tilsluttet – du ser demo-data.',
+      h('button', { class: 'btn sm primary', onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR-motoren')));
   }
   if (ctx.apoLost) {
-    items.push(h('div', { class: 'banner warn' }, 'Equalizer APO’s config.txt er blevet ændret (typisk af Peace) – GoXLR Studios EQ er ikke aktiv.',
-      h('button', { class: 'btn sm primary', onclick: async () => { try { await apoTakeover(true); await ctx.applyOutputEq(); ctx.apoLost = false; toast('EQ’en er aktiv igen', 'info'); } catch (e) { toast(String(e)); } renderBanners(); } }, 'Genopret'),
-      h('button', { class: 'btn sm', onclick: () => ctx.onApoChanged(false) }, 'Lad Peace styre')));
+    items.push(h('div', { class: 'banner warn' }, 'EQ-motoren læser ikke længere GoXLR Studios EQ (fx efter en geninstallation af Equalizer APO).',
+      h('button', { class: 'btn sm primary', onclick: () => navigate('outeq') }, 'Gå til EQ-motor'),
+      h('button', { class: 'btn sm', onclick: () => ctx.onApoChanged(false) }, 'Ignorér')));
   }
   const u = ctx.updateState;
   if (u.available) {
@@ -219,16 +221,23 @@ function renderBanners() {
   el.replaceChildren(...items);
 }
 
-// Peace rewrites config.txt when it is opened, which silently removes our Include line.
+// Something else (an Equalizer APO reinstall, a restored backup…) can point the engine away from our config.
 async function apoWatchdog() {
   if (!isNative()) return;
   const st = await engineStatus().catch(() => null);
   if (st?.apo_installed) {
     if (st.taken_over && !ctx.prefs.apoExpected) { ctx.prefs.apoExpected = true; ctx.savePrefs(); }
     const lost = !st.taken_over && !!ctx.prefs.apoExpected;
-    if (lost && !ctx.apoLost) ctx.notify('Afspilnings-EQ er slået fra af Peace/APO', 'mute');
+    if (lost && !ctx.apoLost) ctx.notify('Afspilnings-EQ er slået fra', 'mute');
     if (lost !== !!ctx.apoLost) { ctx.apoLost = lost; renderBanners(); }
   }
+}
+
+// The built-in GoXLR engine is started by the app at launch; restart it if it stops while we run.
+let daemonRetry = 0;
+function daemonWatchdog() {
+  if (!isNative() || ctx.prefs.autoStartDaemon === false || conn.mode !== 'demo') { daemonRetry = 0; return; }
+  if (daemonRetry++ < 3) startDaemon().catch(() => {});
 }
 
 // ---------- per-profile EQ + tray status ----------
@@ -462,6 +471,14 @@ async function openPalette() {
   input.focus();
 }
 
+// External links open in the default browser, not inside the app window.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[href^="https://"]');
+  if (!a || !isNative()) return;
+  e.preventDefault();
+  openUrl(a.href).catch((err) => toast(String(err)));
+});
+
 document.addEventListener('keydown', (e) => {
   if (ctx.capturingHotkey) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
@@ -506,9 +523,7 @@ async function boot() {
   // Background chores: APO watchdog, daemon autostart, update check.
   setInterval(apoWatchdog, 20000);
   setTimeout(apoWatchdog, 4000);
-  setTimeout(() => {
-    if (isNative() && conn.mode === 'demo' && ctx.prefs.autoStartDaemon !== false) startDaemon().catch(() => {});
-  }, 3000);
+  setInterval(daemonWatchdog, 15000);
   setTimeout(() => checkUpdate(), 15000);
   setInterval(() => checkUpdate(), 6 * 3600 * 1000);
   current = localStorage.getItem('studio.page') || 'mixer';
