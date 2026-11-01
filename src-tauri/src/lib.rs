@@ -565,13 +565,10 @@ pub fn run() {
     }
     let shortcuts = tauri_plugin_global_shortcut::Builder::new()
         .with_handler(|app, shortcut, event| {
-            if event.state() != ShortcutState::Pressed {
-                return;
-            }
             let id = app.state::<AppState>().hotkeys.lock().unwrap().get(&shortcut.id()).cloned();
-            if let Some(id) = id {
-                let _ = app.emit("hotkey", id);
-            }
+            let Some(id) = id else { return };
+            // Released too, for push-to-talk (held keys); the UI ignores it for other bindings.
+            let _ = app.emit(if event.state() == ShortcutState::Pressed { "hotkey" } else { "hotkey-release" }, id);
         })
         .build();
 

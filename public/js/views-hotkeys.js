@@ -24,6 +24,70 @@ export function prettyAccel(accel) {
   return accel.split('+').map((p) => ({ Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Super: 'Win', PageUp: 'PgUp', PageDown: 'PgDn', Up: '↑', Down: '↓', Left: '←', Right: '→' }[p] || p)).join(' + ');
 }
 
+// Push-to-talk / push-to-mute: a binding with the fixed id "ptt" and action hold:ptt / hold:ptm.
+function pttCard(ctx, onChange) {
+  const p = ctx.prefs;
+  p.ptt ??= { target: 'all' };
+  const binding = () => ctx.hotkeys.find((b) => b.id === 'ptt');
+  const mode = () => (binding()?.action === 'hold:ptt' ? 'ptt' : binding()?.action === 'hold:ptm' ? 'ptm' : 'off');
+  const keyBtn = h('button', { class: 'btn keycap', 'data-testid': 'ptt-key' });
+  const sel = h('select', { 'data-testid': 'ptt-mode' },
+    h('option', { value: 'off' }, 'Fra'),
+    h('option', { value: 'ptt' }, 'Push-to-talk – hold tasten for at tale'),
+    h('option', { value: 'ptm' }, 'Push-to-mute – hold tasten for at mute'));
+  const target = h('select', { 'data-testid': 'ptt-target' },
+    h('option', { value: 'all' }, 'Muter til alt (anbefalet)'),
+    h('option', { value: 'x' }, 'Som mute-knappen på GoXLR’en er sat op'));
+  const save = async () => {
+    const m = sel.value;
+    let b = binding();
+    if (m === 'off') ctx.hotkeys = ctx.hotkeys.filter((x) => x.id !== 'ptt');
+    else if (b) b.action = `hold:${m}`;
+    else { b = { id: 'ptt', accel: '', action: `hold:${m}` }; ctx.hotkeys.push(b); }
+    await ctx.saveHotkeys();
+    // Push-to-talk starts closed; switching it off opens the mic again.
+    if (ctx.conn.mixer) {
+      if (m === 'ptt') ctx.conn.command('SetCoughMuteState', p.ptt.target === 'x' ? 'MutedToX' : 'MutedToAll');
+      if (m === 'off') ctx.conn.command('SetCoughMuteState', 'Unmuted');
+    }
+    render(); onChange();
+  };
+  sel.addEventListener('change', save);
+  target.addEventListener('change', () => { p.ptt.target = target.value; ctx.savePrefs(); });
+  keyBtn.addEventListener('click', () => {
+    if (mode() === 'off') { toast('Vælg push-to-talk eller push-to-mute først'); return; }
+    keyBtn.textContent = 'Tryk tasten … (Esc = annullér)';
+    ctx.capturingHotkey = true;
+    ctx.pauseHotkeys?.();
+    const onKey = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === 'Escape') return done();
+      const a = accelFromEvent(e);
+      if (!a) return;
+      const clash = ctx.hotkeys.find((x) => x.id !== 'ptt' && x.accel === a);
+      if (clash) { toast(`${prettyAccel(a)} bruges allerede af en anden genvej`); return; }
+      binding().accel = a;
+      done();
+      await ctx.saveHotkeys();
+      onChange();
+    };
+    const done = () => { window.removeEventListener('keydown', onKey, true); ctx.capturingHotkey = false; ctx.resumeHotkeys?.(); render(); };
+    window.addEventListener('keydown', onKey, true);
+  });
+  const render = () => {
+    sel.value = mode();
+    target.value = p.ptt.target === 'x' ? 'x' : 'all';
+    keyBtn.textContent = prettyAccel(binding()?.accel);
+    keyBtn.disabled = mode() === 'off';
+  };
+  render();
+  return h('div', { class: 'card' }, h('h2', {}, 'Push-to-talk'),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, sel),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Tast'), keyBtn),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Mute'), target),
+    h('div', { class: 'hint' }, 'Virker overalt – også i spil. En sideknap på musen eller en G-tast kan bruges, hvis den i G HUB sender F13–F24. Med Discord-synk slået til følger Discords mute-ikon med, hver gang du trykker.'));
+}
+
 export function hotkeysView(ctx) {
   const list = h('div', { class: 'list' });
   let catalog = [];
@@ -53,7 +117,8 @@ export function hotkeysView(ctx) {
   };
 
   const render = () => {
-    list.replaceChildren(...ctx.hotkeys.map((b) => {
+    // Push-to-talk has its own card.
+    list.replaceChildren(...ctx.hotkeys.filter((b) => b.id !== 'ptt').map((b) => {
       const status = ctx.hotkeyStatus[b.id];
       const keyBtn = h('button', { class: 'btn keycap', onclick: () => capture(b, keyBtn) }, prettyAccel(b.accel));
       const sel = h('select', { onchange: () => { b.action = sel.value; save(); } },
@@ -70,7 +135,7 @@ export function hotkeysView(ctx) {
         h('button', { class: 'btn sm', title: 'Test handlingen', onclick: () => b.action && ctx.runAction(b.action, 'Test-knap under Genveje') }, 'Test'),
         h('button', { class: 'btn sm', onclick: () => { ctx.hotkeys.splice(ctx.hotkeys.indexOf(b), 1); save(); } }, '✕'));
     }));
-    if (!ctx.hotkeys.length) list.append(h('div', { class: 'hint' }, 'Ingen genveje endnu.'));
+    if (!ctx.hotkeys.some((b) => b.id !== 'ptt')) list.append(h('div', { class: 'hint' }, 'Ingen genveje endnu.'));
   };
 
   const add = (action = '', accel = '') => { ctx.hotkeys.push({ id: crypto.randomUUID(), accel, action }); save(); };
@@ -98,6 +163,7 @@ export function hotkeysView(ctx) {
   actionCatalog(ctx).then((c) => { catalog = c; render(); buildSuggestions(); });
 
   return h('div', { class: 'grid' },
+    pttCard(ctx, () => render()),
     h('div', { class: 'card' },
       h('h2', {}, 'Globale genveje', h('button', { class: 'btn sm primary', onclick: () => add() }, '+ Ny genvej')),
       list,

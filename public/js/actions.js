@@ -41,6 +41,16 @@ export function toggleEq(ctx) {
   notify(ctx, `EQ ${e.enabled ? 'til' : 'fra'}`, e.enabled ? 'ok' : 'mute');
 }
 
+// Push-to-talk mutes to everything unless the user chose the cough button's own setting.
+export const pttMuteState = (ctx) => (ctx.prefs.ptt?.target === 'x' ? 'MutedToX' : 'MutedToAll');
+
+/** A held key was let go (push-to-talk / push-to-mute). */
+export function releaseAction(ctx, id) {
+  if (!ctx.conn.mixer) return;
+  if (id === 'hold:ptt') ctx.conn.command('SetCoughMuteState', pttMuteState(ctx));
+  else if (id === 'hold:ptm') ctx.conn.command('SetCoughMuteState', 'Unmuted');
+}
+
 // "Gendan lyd": the EQ off at once (Equalizer APO's engine then passes the sound straight through),
 // and a banner with the next step if the sound is still gone (remove the EQ engine).
 export function restoreSound(ctx) {
@@ -106,6 +116,8 @@ export async function runAction(ctx, id, source = 'handling') {
     case 'discord-deafen': return ctx.discordDeafen?.();
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
+    // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
+    case 'hold': if (m) ctx.conn.command('SetCoughMuteState', arg === 'ptt' ? 'Unmuted' : pttMuteState(ctx)); return;
     case 'sound': return playSound(ctx, arg).then(() => notify(ctx, `▶ ${arg.replace(/\.[^.]+$/, '')}`)).catch((e) => notify(ctx, `Lyd: ${e.message || e}`, 'mute'));
     case 'sounds-stop': stopSounds(); return notify(ctx, 'Lyde stoppet');
     case 'crossfeed-toggle':
@@ -217,6 +229,7 @@ export function actionLabel(ctx, id) {
     case 'cough': return arg === 'Unmuted' ? 'Unmute mikrofon' : 'Mute mikrofon';
     case 'mute-mic': return 'Mute/unmute mikrofon';
     case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
+    case 'hold': return arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
     case 'sounds-stop': return 'Stop alle lyde';
     case 'mute-fader': return `Mute fader ${arg}`;
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;

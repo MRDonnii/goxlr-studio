@@ -14,7 +14,7 @@ import { applyStartLevels } from './startlevels.js';
 import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
-import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames } from './actions.js';
+import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 
 const PAGES = [
@@ -585,6 +585,8 @@ function maybeStartLevels() {
   if (startLevelsDone.has(key)) return;
   startLevelsDone.add(key);
   if (ctx.prefs.startLevels?.enabled) setTimeout(() => applyStartLevels(ctx), 1500);
+  // Push-to-talk: the mic is closed until the key is held – also right after a start.
+  if (ctx.hotkeys.some((b) => b.action === 'hold:ptt' && b.accel)) setTimeout(() => conn.command('SetCoughMuteState', pttMuteState(ctx)), 1600);
 }
 
 conn.addEventListener('change', () => {
@@ -699,6 +701,10 @@ async function registerNativeHooks() {
   await listen('hotkey', (ev) => {
     const b = ctx.hotkeys.find((x) => x.id === ev.payload);
     if (b?.action) ctx.runAction(b.action, `genvej ${prettyAccel(b.accel)}`);
+  });
+  await listen('hotkey-release', (ev) => {
+    const b = ctx.hotkeys.find((x) => x.id === ev.payload);
+    if (b?.action?.startsWith('hold:')) releaseAction(ctx, b.action);
   });
   // GoXLR Studio switched off an installed GoXLR Utility and started its own engine.
   await listen('engine-takeover', (ev) => {
