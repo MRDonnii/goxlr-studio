@@ -46,6 +46,7 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 - AutoEQ search that finds the correction for your exact headphones
 - Crossfeed, loudness, mono and balance for headphones
 - **Sounds wrong?** Pick e.g. "harsh" or "muddy", and the EQ is adjusted one small step. Export and import all presets
+- **EQ per channel:** its own preset on Game, Music, Chat and System. Apps follow their channel, so Spotify gets the music EQ and the game the footsteps EQ – and every GoXLR profile can have its own set
 - EQ that follows the GoXLR profile, e.g. one preset for "Headset" and another for "Speakers"
 - Listening test in the app, so you can hear the difference with and without EQ
 

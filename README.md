@@ -44,6 +44,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
 - Crossfeed, loudness, mono og balance til hovedtelefoner
 - **Lyder det forkert?** Vælg fx "skarp" eller "mudret", og EQ'en justeres et lille skridt. Eksport og import af alle presets
+- **EQ pr. kanal:** sit eget preset på Spil, Musik, Chat og System. Apps følger deres kanal, så Spotify får musik-EQ og spillet fodtrins-EQ – og hver GoXLR-profil kan have sit eget sæt
 - EQ der skifter med GoXLR-profilen, fx ét preset til "Headset" og et andet til "Speakers"
 - Lyttetest i appen, så du kan høre forskellen med og uden EQ
 
