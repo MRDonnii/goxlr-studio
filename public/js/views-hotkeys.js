@@ -67,7 +67,7 @@ export function hotkeysView(ctx) {
         keyBtn, h('span', { class: 'hint' }, '→'), sel,
         h('div', { class: 'spacer' }),
         status && !status.ok ? h('span', { class: 'badge warn', title: status.error }, status.error?.startsWith('Optaget') ? 'Optaget' : 'Fejl') : (b.accel && b.action ? h('span', { class: 'badge ok' }, 'Aktiv') : null),
-        h('button', { class: 'btn sm', title: 'Test handlingen', onclick: () => b.action && ctx.runAction(b.action) }, 'Test'),
+        h('button', { class: 'btn sm', title: 'Test handlingen', onclick: () => b.action && ctx.runAction(b.action, 'Test-knap under Genveje') }, 'Test'),
         h('button', { class: 'btn sm', onclick: () => { ctx.hotkeys.splice(ctx.hotkeys.indexOf(b), 1); save(); } }, '✕'));
     }));
     if (!ctx.hotkeys.length) list.append(h('div', { class: 'hint' }, 'Ingen genveje endnu.'));

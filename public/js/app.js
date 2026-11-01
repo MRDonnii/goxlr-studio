@@ -104,7 +104,7 @@ const ctx = {
   onApoChanged: (takenOver) => { ctx.prefs.apoExpected = takenOver; ctx.savePrefs(); ctx.apoLost = false; renderBanners(); },
   pauseHotkeys: () => setHotkeys([]).catch(() => {}),
   resumeHotkeys: () => registerHotkeys(),
-  runAction: (id) => Promise.resolve(runAction(ctx, id)).catch((e) => toast(String(e))),
+  runAction: (id, source) => Promise.resolve(runAction(ctx, id, source)).catch((e) => toast(String(e))),
   onStateChanged: (kind) => {
     syncTray();
     syncTrayStatus();
@@ -311,9 +311,17 @@ function followProfile() {
   const m = conn.mixer;
   if (!m) return;
   if (m.profile_name === lastProfile) return;
+  const first = lastProfile === undefined;
   lastProfile = m.profile_name;
+  // Mindre fejl 5: this ran on the first status after every app start and replaced the preset the
+  // user had chosen with the profile's linked one. At start, only follow the profile if it changed
+  // while the app was closed.
+  if (first && (!ctx.outputEq?.presetProfile || ctx.outputEq.presetProfile === m.profile_name)) return;
   const link = ctx.outputEq?.profileLinks?.[m.profile_name];
-  if (link && link !== ctx.outputEq.presetName && (ctx.outputEq.presets[link] || BUILTIN_PRESETS[link])) applyEqPreset(ctx, link);
+  if (link && link !== ctx.outputEq.presetName && (ctx.outputEq.presets[link] || BUILTIN_PRESETS[link])) {
+    applyEqPreset(ctx, link, first ? `GoXLR-profilen er "${m.profile_name}" – den skiftede, mens appen var lukket ("EQ følger GoXLR-profil")` : `GoXLR-profilen skiftede til "${m.profile_name}" ("EQ følger GoXLR-profil")`);
+    toast(`EQ: ${link} – fordi GoXLR-profilen er "${m.profile_name}" (EQ følger GoXLR-profil)`, 'info');
+  }
 }
 
 let trayStatusKey = '';
@@ -433,7 +441,7 @@ function renderTopActions() {
     const builtin = Object.keys(BUILTIN_PRESETS).filter((n) => !mine.includes(n));
     const active = ctx.outputEq.presetName;
     const opt = (n) => h('option', { value: n, selected: n === active }, n);
-    const sel = h('select', { class: 'quick', title: 'Afspilnings-EQ preset', onchange: () => applyEqPreset(ctx, sel.value) },
+    const sel = h('select', { class: 'quick', title: 'Afspilnings-EQ preset', onchange: () => applyEqPreset(ctx, sel.value, 'topbjælken') },
       !active || ![...mine, ...builtin].includes(active) ? h('option', { value: '', selected: true, disabled: true }, 'Tilpasset EQ') : null,
       mine.length ? h('optgroup', { label: 'Mine' }, mine.map(opt)) : null,
       h('optgroup', { label: 'Indbyggede' }, builtin.map(opt)));
@@ -504,7 +512,7 @@ async function paletteActions() {
   for (const g of await actionCatalog(ctx)) {
     for (const i of g.items) {
       const k = hotkeyFor(i.id);
-      acts.push({ label: `${g.title}: ${i.label}`, key: k ? prettyAccel(k) : null, run: () => ctx.runAction(i.id) });
+      acts.push({ label: `${g.title}: ${i.label}`, key: k ? prettyAccel(k) : null, run: () => ctx.runAction(i.id, 'kommandolinjen (Ctrl+K)') });
     }
   }
   return acts;
@@ -554,7 +562,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input, select, textarea') && !e.ctrlKey && !e.altKey) return;
   const accel = accelFromEvent(e);
   const b = accel && ctx.hotkeys.find((x) => x.accel === accel && x.action);
-  if (b) { e.preventDefault(); ctx.runAction(b.action); }
+  if (b) { e.preventDefault(); ctx.runAction(b.action, `genvej ${prettyAccel(b.accel)}`); }
 });
 
 // Mindre fejl 9: every elevated task is visible in the app while it runs, with what it changes.
@@ -573,7 +581,7 @@ async function registerNativeHooks() {
   const { listen } = window.__TAURI__.event;
   await listen('hotkey', (ev) => {
     const b = ctx.hotkeys.find((x) => x.id === ev.payload);
-    if (b?.action) ctx.runAction(b.action);
+    if (b?.action) ctx.runAction(b.action, `genvej ${prettyAccel(b.accel)}`);
   });
   // GoXLR Studio switched off an installed GoXLR Utility and started its own engine.
   await listen('engine-takeover', (ev) => {
@@ -586,8 +594,8 @@ async function registerNativeHooks() {
   // own app takes the GoXLR). The watchdog starts it again.
   await listen('engine-stopped', (ev) => { if (ev.payload) toast(`GoXLR-motoren stoppede: ${ev.payload}`); });
   // Tray ids are action ids: profile:…, eq-preset:…, eq-toggle, scene:…, mute-mic.
-  await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });
-  await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });
+  await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'bakke-menuen'); });
+  await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'lokalt API'); });
 }
 
 async function boot() {

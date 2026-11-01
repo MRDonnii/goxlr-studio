@@ -1,4 +1,4 @@
-import { toast } from './ui.js';
+import { toast, logActivity } from './ui.js';
 
 // Toast in the app, plus the on-screen display when the app is in the background.
 const notify = (ctx, text, kind = 'info') => (ctx.notify ? ctx.notify(text, kind) : toast(text, 'info'));
@@ -13,9 +13,14 @@ export function eqPresetNames(ctx) {
   return mine.length ? mine : Object.keys(BUILTIN_PRESETS);
 }
 
-export function applyEqPreset(ctx, name) {
+// `reason` says what switched the preset; it is logged (Diagnose → Seneste hændelser) so a switch
+// the user did not choose can be traced (mindre fejl 5).
+export function applyEqPreset(ctx, name, reason = 'valgt i appen') {
   const src = ctx.outputEq.presets[name] || BUILTIN_PRESETS[name];
   if (!src) { toast(`EQ-preset "${name}" findes ikke`); return; }
+  const before = ctx.outputEq.presetName || 'Tilpasset';
+  if (before !== name) logActivity(`EQ-preset: ${before} → ${name} (årsag: ${reason})`);
+  ctx.outputEq.presetProfile = ctx.conn?.mixer?.profile_name || ctx.outputEq.presetProfile || null;
   const copy = structuredClone(src);
   copy.bands = (copy.bands || []).map((b) => ({ enabled: true, ...b, id: crypto.randomUUID() }));
   ctx.outputEq.slots[ctx.outputEq.active] = { enabled: true, preamp: 0, ...copy };
@@ -59,7 +64,7 @@ function nudgeVolume(ctx, ch, delta) {
   ctx.conn.command('SetVolume', ch, Math.min(255, Math.max(0, m.levels.volumes[ch] + delta)));
 }
 
-export async function runAction(ctx, id) {
+export async function runAction(ctx, id, source = 'handling') {
   const [kind, ...rest] = id.split(':');
   const arg = rest.join(':');
   const m = ctx.conn.mixer;
@@ -95,12 +100,12 @@ export async function runAction(ctx, id) {
       ctx.onStateChanged?.('eq');
       return notify(ctx, `${k === 'crossfeed' ? 'Crossfeed' : 'Loudness'} ${x[k].enabled ? 'til' : 'fra'}`, x[k].enabled ? 'ok' : 'mute');
     }
-    case 'eq-preset': return applyEqPreset(ctx, arg);
+    case 'eq-preset': return applyEqPreset(ctx, arg, source);
     case 'eq-next': {
       const names = eqPresetNames(ctx);
       if (!names.length) return;
       const i = names.indexOf(ctx.outputEq.presetName);
-      return applyEqPreset(ctx, names[(i + 1) % names.length]);
+      return applyEqPreset(ctx, names[(i + 1) % names.length], `${source} (næste preset)`);
     }
     case 'output': await setDefaultDevice(arg, 'all'); ctx.refreshDevices?.(); return;
     case 'input': await setDefaultDevice(arg, 'all'); ctx.refreshDevices?.(); return;

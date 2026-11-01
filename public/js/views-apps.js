@@ -54,7 +54,7 @@ export async function enforceAppRules(ctx, { fixStale = ctx.prefs.fixStaleApps }
 let running = null;
 export function checkTriggers(ctx, sessions) {
   const now = new Set(sessions.map((s) => s.exe));
-  if (running) for (const id of triggerActions(ctx.appTriggers || [], running, now)) ctx.runAction(id);
+  if (running) for (const id of triggerActions(ctx.appTriggers || [], running, now)) ctx.runAction(id, 'automatik når en app starter/lukker');
   running = now;
 }
 

@@ -54,7 +54,7 @@ function profileLinksCard(ctx) {
     const sel = h('select', { onchange: () => {
       if (sel.value) state.profileLinks[p] = sel.value; else delete state.profileLinks[p];
       storeSet('output-eq', state);
-      if (sel.value && ctx.conn.mixer?.profile_name === p && state.presetName !== sel.value) applyEqPreset(ctx, sel.value);
+      if (sel.value && ctx.conn.mixer?.profile_name === p && state.presetName !== sel.value) applyEqPreset(ctx, sel.value, `knyttet til GoXLR-profilen "${p}"`);
     } },
       h('option', { value: '' }, '— uændret —'),
       names.map((n) => h('option', { value: n, selected: state.profileLinks[p] === n }, n)));
@@ -119,7 +119,7 @@ function autoEqCard(ctx) {
       const name = `AutoEQ: ${e.name}`;
       ctx.outputEq.presets[name] = parsed;
       await storeSet('output-eq', ctx.outputEq);
-      applyEqPreset(ctx, name);
+      applyEqPreset(ctx, name, 'AutoEQ');
     } catch (err) { toast(String(err.message || err)); }
   };
   const search = debounce(async () => {
@@ -146,7 +146,7 @@ function presetBar(ctx) {
   const chip = (n, builtin) => h('button', {
     class: `chip ${state.presetName === n ? 'on' : ''} ${builtin ? 'ghost' : ''}`,
     title: state.presetName === n && modified ? 'Ændret siden det blev indlæst – klik for at nulstille' : key(n) ? `Genvej: ${key(n)}` : (builtin ? 'Indbygget preset' : 'Klik for at bruge'),
-    onclick: () => applyEqPreset(ctx, n),
+    onclick: () => applyEqPreset(ctx, n, 'preset-knap på EQ-siden'),
   }, n, state.presetName === n && modified ? h('span', { class: 'chip-mod' }, ' ●') : null);
   const importBtn = h('button', { class: 'btn sm', onclick: async () => {
     if (!isNative()) { toast('Peace-presets kan kun importeres i Windows-appen.'); return; }

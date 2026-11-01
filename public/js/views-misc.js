@@ -1,4 +1,4 @@
-import { h, slider, selectBox, toggle, toast, segmented, confirmDialog, promptDialog } from './ui.js';
+import { h, slider, selectBox, toggle, toast, segmented, confirmDialog, promptDialog, logActivity } from './ui.js';
 import { CHANNELS } from './demo.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
 import { listAudioDevices, setDefaultDevice, storeSet, isNative } from './native.js';
@@ -157,6 +157,7 @@ export async function applyScene(ctx, scene) {
   }
   if (scene.lighting) jobs.push(...applyLighting(conn, scene.lighting));
   if (scene.eqSlot) {
+    logActivity(`EQ ændret af scenen "${scene.name}"`);
     ctx.outputEq.slots[ctx.outputEq.active] = structuredClone(scene.eqSlot);
     storeSet('output-eq', ctx.outputEq);
     ctx.applyOutputEq?.();
