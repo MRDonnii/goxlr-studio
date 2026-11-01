@@ -62,6 +62,8 @@ Mikrofon-EQ'en kører i GoXLR'ens egen chip, så den bruger hverken CPU eller gi
 
 Send hver app til sin kanal på GoXLR'en, fx Spotify → Music, Discord → Chat og spil → System. Reglerne bliver holdt, også når appen genstarter. Apps, der efter en driveropdatering peger på en GoXLR-enhed, som ikke findes længere, bliver rettet. Du kan også lade ting ske automatisk, når en bestemt app starter.
 
+**Automatik når en enhed tilsluttes** (siden Lydenheder): sæt et USB- eller Bluetooth-headset til, og GoXLR Studio skifter fx til profilen "Headset" og sender lyden til headsettet. Tag det ud, og den skifter tilbage til "Speakers". Det kan også ske, når appen starter.
+
 ### Genveje, kommandolinje og besked over spil
 
 ![Genveje](docs/screenshots/genveje.png)
@@ -121,7 +123,8 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - Auto-ducking, der skruer ned for musik og spil, mens du taler
 - Start med Windows og luk til bakke-ikonet
 - Automatiske opdateringer
-- Lokalt API til fx Stream Deck og Home Assistant
+- **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
+- Lokalt API til fx Stream Deck
 - Backup og en side med **Diagnose**, hvor du kan kopiere en rapport, hvis noget driller
 - Effekter på den store GoXLR: reverb, echo, pitch, gender, megafon, robot og hardtune
 
