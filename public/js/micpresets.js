@@ -7,9 +7,9 @@
 // rooms, voices and distance differ, so listen and adjust.
 import { coefficients, magnitudeDb } from './eq.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
-import { MIC_MODELS } from './micmodels.js';
+import { MIC_MODELS, USB_ONLY } from './micmodels.js';
 
-export { MIC_MODELS };
+export { MIC_MODELS, USB_ONLY };
 
 export const FULL_CENTERS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 // The Mini's lowest band can sit anywhere from 30 to 90 Hz: at 60 Hz it takes rumble, not the voice.
@@ -82,13 +82,16 @@ export function wantedEq(model) {
 /** Everything the preset sets, for the full GoXLR or the Mini. */
 export function micSettings(model, mini = false) {
   const condenser = model.type === 'condenser';
+  // +48 V: condensers, and dynamics with a built-in preamp (SM7dB) – the GoXLR's "Condenser" type.
+  const phantom = condenser || !!model.phantom;
   const centers = mini ? MINI_CENTERS : FULL_CENTERS;
-  // Bands above 8 kHz never more than +3 dB, also when the fit leans on them for their neighbours.
-  const gains = fitBands(wantedEq(model), centers).map((g, i) => (centers[i] > 8000 ? Math.min(g, 3) : g));
+  // Bands above 8 kHz never more than +2 dB, also when the fit leans on them for their neighbours:
+  // up there a mic has little to give, and a dynamic at 50+ dB gain mostly gives hiss.
+  const gains = fitBands(wantedEq(model), centers).map((g, i) => (centers[i] > 8000 ? Math.min(g, 2) : g));
   const bright = (model.features || []).some((x) => (x.kind === 'peak' || x.kind === 'highshelf') && x.freq >= 4000 && x.db >= 3);
   const sens = Number.isFinite(model.sensitivity_dbv) ? model.sensitivity_dbv : condenser ? -34 : -55;
   return {
-    type: condenser ? 'Condenser' : 'Dynamic',
+    type: phantom ? 'Condenser' : 'Dynamic',
     // Roughly: a quiet mic needs more gain. GoXLR's mic gain goes to 72 dB.
     gain: Math.max(10, Math.min(68, Math.round(-sens - 2))),
     eq: centers.map((freq, i) => ({ band: (mini ? MINI_EQ_BANDS : EQ_BANDS)[i], freq, gain: gains[i] })),
@@ -136,6 +139,6 @@ export function describeMic(model) {
     else if (x.kind === 'highshelf') parts.push(x.db > 0 ? `lys top over ${hz(x.freq)}` : `mørkere top over ${hz(x.freq)}`);
     else if (x.kind === 'highcut') parts.push(`aftagende top over ${hz(x.freq)}`);
   }
-  const kind = model.type === 'condenser' ? 'Kondensator (+48V)' : 'Dynamisk';
+  const kind = model.type === 'condenser' ? 'Kondensator (+48V)' : model.phantom ? 'Dynamisk med indbygget forforstærker (+48V)' : 'Dynamisk';
   return parts.length ? `${kind}: ${parts.join(', ')}.` : `${kind}: neutral.`;
 }

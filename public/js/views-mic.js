@@ -1,5 +1,5 @@
 import { h, slider, segmented, selectBox, toggle, throttle, promptDialog, confirmDialog, toast, logActivity } from './ui.js';
-import { MIC_MODELS, micSettings, micPresetCommands, describeMic } from './micpresets.js';
+import { MIC_MODELS, USB_ONLY, micSettings, micPresetCommands, describeMic } from './micpresets.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { coefficients, magnitudeDb, formatFreq } from './eq.js';
@@ -36,8 +36,9 @@ function micPresetCard(ctx) {
   const byName = (a, b) => a.name.localeCompare(b.name, 'da');
   const sel = h('select', { 'data-testid': 'mic-model', onchange: () => render() },
     h('option', { value: '' }, 'Vælg din mikrofon …'),
-    h('optgroup', { label: 'Dynamiske' }, MIC_MODELS.filter((m) => m.type === 'dynamic').sort(byName).map((m) => h('option', { value: m.id }, m.name))),
-    h('optgroup', { label: 'Kondensator (+48V)' }, MIC_MODELS.filter((m) => m.type === 'condenser').sort(byName).map((m) => h('option', { value: m.id }, m.name))));
+    h('optgroup', { label: 'Dynamiske' }, MIC_MODELS.filter((m) => m.type === 'dynamic' && m.brand).sort(byName).map((m) => h('option', { value: m.id }, m.name))),
+    h('optgroup', { label: 'Kondensator (+48V)' }, MIC_MODELS.filter((m) => m.type === 'condenser' && m.brand).sort(byName).map((m) => h('option', { value: m.id }, m.name))),
+    h('optgroup', { label: 'Andre' }, MIC_MODELS.filter((m) => !m.brand).map((m) => h('option', { value: m.id }, m.name))));
   sel.value = MIC_MODELS.some((m) => m.id === p.micModel) ? p.micModel : '';
   const body = h('div', { class: 'mic-preset' });
   const model = () => MIC_MODELS.find((m) => m.id === sel.value);
@@ -65,7 +66,7 @@ function micPresetCard(ctx) {
   const render = () => {
     const m = model();
     if (!m) {
-      body.replaceChildren(h('div', { class: 'hint' }, `Vælg din mikrofon blandt ${MIC_MODELS.length} modeller. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve.`));
+      body.replaceChildren(h('div', { class: 'hint' }, `Vælg din mikrofon blandt ${MIC_MODELS.length - 2} modeller. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. Står din ikke på listen, så vælg "Anden dynamisk" eller "Anden kondensator" nederst. ${USB_ONLY.length > 1 ? `${USB_ONLY.slice(0, -1).join(', ')} og ${USB_ONLY.at(-1)}` : USB_ONLY[0] || ''} er kun USB og kan ikke sluttes til GoXLR’en.`));
       return;
     }
     const s = micSettings(m, isMini());
@@ -74,7 +75,7 @@ function micPresetCard(ctx) {
       h('div', { class: 'hint', 'data-testid': 'mic-preset-eq' }, `EQ (${isMini() ? 'GoXLR Mini' : 'GoXLR'}): ${s.eq.map((b) => `${fmtHz(b.freq)} ${b.gain > 0 ? '+' : ''}${b.gain}`).join(' · ')} dB`),
       h('div', { class: 'mic-preset-parts' },
         check('eq', 'EQ'),
-        check('type', s.type === 'Condenser' ? 'Type: kondensator (tænder +48V)' : 'Type: dynamisk (+48V fra)'),
+        check('type', s.type === 'Condenser' ? (m.type === 'dynamic' ? 'Type: kondensator (+48V til forforstærkeren)' : 'Type: kondensator (tænder +48V)') : 'Type: dynamisk (+48V fra)'),
         check('gate', `Noise gate (${s.gate.threshold} dB)`),
         check('comp', `Kompressor (${s.comp.threshold} dB, 3,2:1)`),
         check('deess', `De-esser ${s.deess} %`),
