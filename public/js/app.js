@@ -138,7 +138,14 @@ async function checkUpdate(manual = false) {
     u.current = info.version;
     u.installed = info.installed;
     const r = await fetch(RELEASES, { headers: { Accept: 'application/vnd.github+json' } });
-    if (r.status === 404) { Object.assign(u, { latest: null, available: false, error: null, checkedAt: Date.now() }); if (manual) toast('Der er ingen udgivelser endnu', 'info'); return; }
+    // GitHub answers 404 both when there are no releases and when the repository is private (the
+    // update check is not logged in) – say so instead of "kan ikke finde nyeste".
+    if (r.status === 404) {
+      const why = 'GitHub viser ingen udgivelser for GoXLR Studio. Er repoet privat, kan hverken appen eller andre se dem – gør det offentligt på GitHub (Settings → Danger Zone → Change repository visibility).';
+      Object.assign(u, { latest: null, available: false, error: why, checkedAt: Date.now() });
+      if (manual) toast(why);
+      return;
+    }
     if (!r.ok) throw new Error(`GitHub svarede ${r.status}`);
     const rel = await r.json();
     const asset = pickUpdateAsset(rel, info.installed);
