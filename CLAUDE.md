@@ -29,7 +29,7 @@ Version 0.2.0. Færdigt:
 - Afspilnings-EQ: preset-chips med "ændret"-prik, Peace-import, AutoEQ-søgning, EQ følger GoXLR-profil (`outputEq.profileLinks`), crossfeed + loudness (`outputEq.extras`, sendes som `extra`-linjer/ekstra bånd), APO-status pr. udgang, APO-vagthund (banner når Peace har overskrevet config.txt).
 - Enheder huskes med navn (`*_name`) i scener, app-regler og EQ-udgang, så de findes igen efter driver-opdateringer.
 - OSD ovenpå spil, rød prik i bakke-ikonet ved mute, start af GoXLR Utility, lokalt API, backup/gendan, Diagnose-side, auto-opdatering (tjek hver 6. time, auto-installation når appen ligger i bakken).
-- Release: tag `v*` → GitHub-release med `*-setup.exe`, `.msi` og `GoXLR-Studio-portable.exe` (auto-opdatering vælger setup eller portable).
+- Release: hæv `version` i `src-tauri/tauri.conf.json` (+ Cargo.toml/package.json) og push til main → bygget opretter selv tag `v<version>` og GitHub-release (tag-push er blokeret fra cloud-sessioner) med `*-setup.exe`, `.msi` og `GoXLR-Studio-portable.exe` (auto-opdatering vælger setup eller portable).
 
 Næste skridt:
 - Test hos brugeren på Windows: OSD i spil (fokus må ikke stjæles), genveje med AutoHotkey kørende, lyd pr. app, Peace-import, APO-vagthund, opdatering fra 0.2.0 → 0.2.1.

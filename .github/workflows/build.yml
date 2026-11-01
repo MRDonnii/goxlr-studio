@@ -42,10 +42,29 @@ jobs:
           name: GoXLR-Studio-windows
           path: dist/*
 
+      # A new version in tauri.conf.json on main publishes a release (tag v<version>) automatically;
+      # pushing a v* tag still works too. The app's auto-update picks the release up.
+      - name: Decide release
+        id: rel
+        shell: pwsh
+        run: |
+          $v = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = "v$v"
+          $exists = git ls-remote --tags origin "refs/tags/$tag"
+          $isTag = "${{ github.ref }}".StartsWith('refs/tags/v')
+          $isMain = "${{ github.ref }}" -eq 'refs/heads/main' -and "${{ github.event_name }}" -ne 'pull_request'
+          $publish = $isTag -or ($isMain -and -not $exists)
+          if ($isTag) { $tag = "${{ github.ref_name }}" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "publish=$($publish.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.rel.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: GoXLR Studio ${{ steps.rel.outputs.tag }}
           files: dist/*
           generate_release_notes: true
 
