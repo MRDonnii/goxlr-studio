@@ -44,6 +44,16 @@ const DEMO_DEVICES = [
   { id: 'in-webcam', name: 'Mikrofon (Logitech BRIO)', flow: 'capture', default: false, default_comm: false },
 ];
 let demoDevices = structuredClone(DEMO_DEVICES);
+// Browser demo: a USB headset (?usbheadset), and window.studioDemo.plug()/unplug() to test the
+// device automatik.
+const DEMO_HEADSET = { id: 'out-usb-arctis', name: 'Arctis 7 Game (SteelSeries Arctis 7)', flow: 'render', default: false, default_comm: false };
+if (typeof window !== 'undefined' && !isNative()) {
+  if (new URLSearchParams(location.search).has('usbheadset')) demoDevices.push({ ...DEMO_HEADSET });
+  window.studioDemo = {
+    plug: () => { if (!demoDevices.some((d) => d.id === DEMO_HEADSET.id)) demoDevices.push({ ...DEMO_HEADSET }); },
+    unplug: () => { demoDevices = demoDevices.filter((d) => d.id !== DEMO_HEADSET.id); },
+  };
+}
 
 export async function listAudioDevices() {
   if (isNative()) return invoke('audio_devices');

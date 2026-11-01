@@ -4,7 +4,7 @@ import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo, daemonT
 import { DEFAULT_DISCORD_KEY, DEFAULT_DISCORD_DEAF_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
 
-export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'output-eq', 'ducking'];
+export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking'];
 
 export function newToken() {
   const b = new Uint8Array(18);

@@ -15,6 +15,7 @@ import { playbackOffset } from './eqchain.js';
 import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
+import { startDeviceTriggers } from './devicetriggers.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 
@@ -88,6 +89,7 @@ const ctx = {
   hotkeyStatus: {},
   appRules: [],
   appTriggers: [],
+  deviceTriggers: [],
   updateState: {},
   apiError: null,
   capturingHotkey: false,
@@ -736,9 +738,10 @@ async function registerNativeHooks() {
 }
 
 async function boot() {
-  const [prefs, scenes, outputEq, hotkeys, appRules, appTriggers] = await Promise.all([
-    storeGet('prefs', {}), storeGet('scenes', []), loadOutputEqState(), storeGet('hotkeys', null), storeGet('app-rules', []), storeGet('app-triggers', []), ctx.ducker.load()]);
+  const [prefs, scenes, outputEq, hotkeys, appRules, appTriggers, deviceTriggers] = await Promise.all([
+    storeGet('prefs', {}), storeGet('scenes', []), loadOutputEqState(), storeGet('hotkeys', null), storeGet('app-rules', []), storeGet('app-triggers', []), storeGet('device-triggers', []), ctx.ducker.load()]);
   ctx.appTriggers = appTriggers;
+  ctx.deviceTriggers = deviceTriggers || [];
   Object.assign(ctx.prefs, prefs);
   ctx.scenes = scenes;
   ctx.outputEq = outputEq;
@@ -752,6 +755,7 @@ async function boot() {
   registerHotkeys();
   syncTray();
   startAppRules(ctx);
+  startDeviceTriggers(ctx);
   startDiscordSync(ctx);
   ctx.applyOutputEq().catch(() => {});
   if (ctx.prefs.api?.enabled) applyApi();

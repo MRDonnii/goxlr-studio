@@ -3,6 +3,7 @@ import { h, slider, segmented, selectBox, toggle, throttle, toast } from './ui.j
 import { CHANNELS, INPUTS, OUTPUTS } from './demo.js';
 import { listAudioDevices, setDefaultDevice } from './native.js';
 import { startLevelsCard } from './startlevels.js';
+import { deviceTriggersCard } from './devicetriggers.js';
 
 export const CHANNEL_LABEL = {
   Mic: 'Mikrofon', LineIn: 'Line In', Console: 'Konsol', System: 'System', Game: 'Spil', Chat: 'Chat',
@@ -329,5 +330,6 @@ export function devicesView(ctx) {
   render();
   return h('div', { class: 'grid' },
     h('div', { class: 'hint' }, 'Fastgjorte enheder vises som hurtigknapper på Mixer-siden og kan bruges i scener. "Standard" bruges af spil og musik, "Kommunikation" af Discord/Teams.'),
-    list);
+    list,
+    deviceTriggersCard(ctx));
 }

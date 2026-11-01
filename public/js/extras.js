@@ -160,6 +160,42 @@ export function triggerActions(triggers, before, now) {
   return out;
 }
 
+// ---------- device triggers ----------
+// "When the USB headset is connected → profile Headset; removed → Speakers". Devices are known by
+// id, or by name (ids change after driver updates).
+export const triggerDevicePresent = (t, devs) => devs.some((d) => (t.device && d.id === t.device) || (t.name && d.name === t.name));
+
+/** One look at the active devices. A device must be seen the same way twice in a row before it
+ *  counts – when Windows' audio service restarts (e.g. the EQ-motor test), everything vanishes
+ *  for a moment. The first settled look after the app started runs the rule for the current state
+ *  (if the rule says "også når appen starter"); a rule made later starts quietly. */
+export function deviceTriggerStep(triggers, devs, memo, { starting = false, need = 2 } = {}) {
+  const out = [];
+  for (const t of triggers) {
+    if (!t.device && !t.name) continue;
+    const is = triggerDevicePresent(t, devs);
+    const m = memo.get(t.id) || { stable: undefined, seen: is, count: 0 };
+    m.count = m.seen === is ? m.count + 1 : 1;
+    m.seen = is;
+    if (m.count >= need && m.stable !== is) {
+      const first = m.stable === undefined;
+      m.stable = is;
+      const actions = (is ? t.onConnect : t.onDisconnect) || [];
+      if (actions.length && (!first || (starting && t.atStart !== false))) out.push({ trigger: t, connected: is, first, actions: [...actions] });
+    }
+    memo.set(t.id, m);
+  }
+  return out;
+}
+
+/** Suggested actions for a new rule, from the GoXLR profile names ("Headset" / "Speakers"). */
+export function suggestDeviceActions(profiles = []) {
+  const find = (re) => profiles.find((p) => re.test(p));
+  const on = find(/headset|hovedtelefon|headphone/i);
+  const off = find(/speaker|højttaler/i);
+  return { onConnect: on ? [`profile:${on}`] : [], onDisconnect: off ? [`profile:${off}`] : [] };
+}
+
 // ---------- AutoHotkey import ----------
 const AHK_KEYS = {
   pgup: 'PageUp', pgdn: 'PageDown', ins: 'Insert', insert: 'Insert', del: 'Delete', delete: 'Delete', esc: 'Escape', escape: 'Escape',

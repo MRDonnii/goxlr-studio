@@ -183,6 +183,7 @@ export async function actionCatalog(ctx) {
     ...['A', 'B', 'C', 'D'].map((f) => ({ id: `mute-fader:${f}`, label: `Mute fader ${f}${m ? ` (${m.fader_status[f].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[f].channel]})` : ''}` })),
   ]);
   const devs = await listAudioDevices().catch(() => []);
+  rememberDeviceNames(devs);
   g('Windows-lyd', [
     { id: 'output-next', label: 'Næste udgang (fastgjorte)' },
     ...devs.filter((d) => d.flow === 'render').map((d) => ({ id: `output:${d.id}`, label: `Udgang → ${shortName(d.name)}` })),
@@ -216,6 +217,10 @@ export async function describeAction(ctx, id) {
 }
 
 // Readable name for any action id, also ones the catalog doesn't list (e.g. imported from AutoHotkey).
+// Names of Windows' audio devices, for "Udgang → …" labels (filled wherever the list is read).
+const deviceNames = new Map();
+export function rememberDeviceNames(devs) { for (const d of devs || []) deviceNames.set(d.id, d.name); }
+
 export function actionLabel(ctx, id) {
   const [kind, ...rest] = id.split(':');
   const arg = rest.join(':');
@@ -240,6 +245,8 @@ export function actionLabel(ctx, id) {
     case 'crossfeed-toggle': return 'Crossfeed til/fra';
     case 'loudness-toggle': return 'Loudness til/fra';
     case 'output-next': return 'Næste udgang';
+    case 'output': return `Udgang → ${deviceNames.has(arg) ? shortName(deviceNames.get(arg)) : 'en enhed, der ikke er tilsluttet'}`;
+    case 'input': return `Mikrofon → ${deviceNames.has(arg) ? shortName(deviceNames.get(arg)) : 'en enhed, der ikke er tilsluttet'}`;
     case 'fx-toggle': return 'Effekter til/fra';
     case 'ducking-toggle': return 'Auto-ducking til/fra';
     case 'discord-toggle': return 'Skift Discord-mute';

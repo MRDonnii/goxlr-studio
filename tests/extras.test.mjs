@@ -244,3 +244,42 @@ test('muted reminder: muted by the cough button or the Mic fader; speech thresho
   assert.equal(x.mutedSpeechThreshold({ mic_status: { noise_gate: { enabled: true, threshold: -59 } } }), -50);
   assert.equal(x.mutedSpeechThreshold({ mic_status: { noise_gate: { enabled: false, threshold: -20 } } }), -40);
 });
+
+test('device triggers: connect and disconnect after two looks, not on a brief vanish', () => {
+  const t = { id: 'r1', device: 'usb-arctis', name: 'Arctis 7 Game', onConnect: ['profile:Headset'], onDisconnect: ['profile:Speakers'], atStart: true };
+  const gox = { id: 'gox', name: 'System (GoXLR)' };
+  const arctis = { id: 'usb-arctis', name: 'Arctis 7 Game' };
+  const memo = new Map();
+  // App start, headset present: settles on the second look and runs the "connected" actions.
+  assert.deepEqual(x.deviceTriggerStep([t], [gox, arctis], memo, { starting: true }), []);
+  const first = x.deviceTriggerStep([t], [gox, arctis], memo, { starting: true });
+  assert.equal(first.length, 1);
+  assert.deepEqual(first[0].actions, ['profile:Headset']);
+  assert.equal(first[0].first, true);
+  // Gone for one look only (audio service restart): nothing happens.
+  assert.deepEqual(x.deviceTriggerStep([t], [gox], memo), []);
+  assert.deepEqual(x.deviceTriggerStep([t], [gox, arctis], memo), []);
+  assert.deepEqual(x.deviceTriggerStep([t], [gox, arctis], memo), []);
+  // Really unplugged.
+  x.deviceTriggerStep([t], [gox], memo);
+  const off = x.deviceTriggerStep([t], [gox], memo);
+  assert.deepEqual(off.map((o) => [o.connected, o.actions]), [[false, ['profile:Speakers']]]);
+  // Found by name when Windows gave it a new id.
+  x.deviceTriggerStep([t], [gox, { id: 'new-id', name: 'Arctis 7 Game' }], memo);
+  assert.equal(x.deviceTriggerStep([t], [gox, { id: 'new-id', name: 'Arctis 7 Game' }], memo)[0].connected, true);
+});
+
+test('device triggers: a rule made later starts quietly; atStart can be turned off', () => {
+  const t = { id: 'r2', device: 'bt', name: 'Buds', onConnect: ['output:bt'], onDisconnect: [], atStart: false };
+  const memo = new Map();
+  x.deviceTriggerStep([t], [{ id: 'bt', name: 'Buds' }], memo, { starting: true });
+  assert.deepEqual(x.deviceTriggerStep([t], [{ id: 'bt', name: 'Buds' }], memo, { starting: true }), []);
+  const later = { ...t, id: 'r3', atStart: true };
+  x.deviceTriggerStep([later], [], memo);
+  assert.deepEqual(x.deviceTriggerStep([later], [], memo), []);
+});
+
+test('device triggers: suggestions from the GoXLR profile names', () => {
+  assert.deepEqual(x.suggestDeviceActions(['Headset', 'Speakers', 'Stream']), { onConnect: ['profile:Headset'], onDisconnect: ['profile:Speakers'] });
+  assert.deepEqual(x.suggestDeviceActions(['Default']), { onConnect: [], onDisconnect: [] });
+});
