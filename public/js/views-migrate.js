@@ -56,6 +56,18 @@ export function migrateView(ctx) {
       out);
   };
 
+  // Mindre fejl 6: "Genveje flyttet" must agree with what the scripts show (not just "imported once").
+  const ahkState = () => {
+    const scripts = scan.ahk.map((x) => parseAhk(x.text));
+    const total = scripts.reduce((n, x) => n + x.bindings.length, 0);
+    const unknown = scripts.reduce((n, x) => n + x.unknown.length, 0);
+    const missing = scripts.flatMap((x) => x.bindings).filter((b) => !ctx.hotkeys.some((y) => y.accel === b.accel && y.action === b.action)).length;
+    if (!scan.ahk.length) return { ok: true, text: 'Ingen AutoHotkey-genveje at flytte' };
+    if (total && !missing) return { ok: true, text: `Genveje flyttet (${total})` };
+    if (!total && !unknown) return { ok: null, text: 'AutoHotkey-scripts fundet, men ingen genveje kunne læses' };
+    return { ok: false, text: missing ? `${missing} genveje mangler at blive flyttet` : `${unknown} genveje kunne ikke læses` };
+  };
+
   // ---------- 2. AutoHotkey ----------
   const ahkCard = () => {
     const scripts = scan.ahk.map((s) => ({ ...s, parsed: parseAhk(s.text) }));
@@ -89,7 +101,9 @@ export function migrateView(ctx) {
           s.parsed.bindings.map((b) => h('div', { class: 'item' }, h('span', { class: 'kbd' }, prettyAccel(b.accel)), '→', actionLabel(ctx, b.action),
             ctx.hotkeys.some((x) => x.accel === b.accel && x.action === b.action) ? h('span', { class: 'badge ok' }, 'importeret') : null)),
           s.parsed.unknown.map((u) => h('div', { class: 'item hint' }, h('span', { class: 'kbd' }, u.hotkey), `${u.reason}: ${u.text.slice(0, 80)}`))),
-        !s.parsed.bindings.length && !s.parsed.unknown.length ? h('div', { class: 'hint' }, 'Ingen GoXLR-genveje i dette script.') : null))
+        !s.parsed.bindings.length && !s.parsed.unknown.length ? h('div', { class: 'hint' }, /goxlr/i.test(s.text || '')
+          ? 'Scriptet nævner GoXLR, men genvejene kunne ikke læses automatisk – opret dem selv under Genveje.'
+          : 'Ingen GoXLR-genveje i dette script.') : null))
         : h('div', { class: 'hint' }, 'Fandt ingen AutoHotkey-scripts, der styrer GoXLR’en.'),
       h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap' } }, importBtn, scan.ahk_running ? stopBtn : null),
       h('div', { class: 'hint', style: { marginTop: '6px' } }, scan.ahk_running ? 'AutoHotkey kører stadig og optager tasterne. Importér først, luk så AutoHotkey.' : 'AutoHotkey kører ikke.'));
@@ -140,7 +154,8 @@ export function migrateView(ctx) {
     } }, `Kopiér ${tc.profiles.length + tc.mic_profiles.length} TC-Helicon-profiler`) : null;
     const state = daemon.foreign?.length ? [false, 'GoXLR Utility styrer stadig GoXLR’en. Lad GoXLR Studio overtage – GoXLR Utility stoppes og starter ikke længere med Windows.']
       : daemon.started_by_us ? [true, 'GoXLR-motoren kører inde i GoXLR Studio. GoXLR Utility kan afinstalleres.']
-        : [false, `Ingen GoXLR-motor kører.${daemon.last_error ? ` ${daemon.last_error}` : ''}`];
+        : daemon.last_error ? [false, `GoXLR-motoren kører ikke: ${daemon.last_error}`]
+          : [null, 'GoXLR-motoren starter …'];
     const takeBtn = daemon.bundled && daemon.foreign?.length ? h('button', { class: 'btn sm primary', onclick: async () => {
       takeBtn.disabled = true;
       try { const t = await daemonTakeover(); toast(`${t.started} – GoXLR Utility er koblet fra`, 'info'); } catch (e) { toast(String(e)); }
@@ -181,7 +196,7 @@ export function migrateView(ctx) {
 
   // ---------- 6. uninstall ----------
   const uninstallCard = () => {
-    const ready = { 'GoXLR Utility': daemon.bundled && !daemon.foreign?.length, AutoHotkey: !!done.hotkeys || !scan.ahk.length };
+    const ready = { 'GoXLR Utility': daemon.bundled && !daemon.foreign?.length, AutoHotkey: ahkState().ok === true };
     return h('div', { class: 'card' }, h('h2', {}, '6 · Afinstallér de gamle programmer'),
       h('div', { class: 'hint' }, 'Hvert program åbner sin egen afinstallation, så du bekræfter selv. Tag backup først (trin 1).'),
       h('div', { class: 'list', style: { marginTop: '10px' } }, apps.length ? apps.map((a) => {
@@ -209,7 +224,7 @@ export function migrateView(ctx) {
       h('div', { class: 'hint' }, 'GoXLR Studio har sin egen GoXLR-motor og EQ-motor og erstatter GoXLR Utility, Equalizer APO, Peace og AutoHotkey. Kun TC-Helicons USB-driver skal blive – den gør GoXLR’en til et lydkort i Windows.'),
       h('div', { class: 'checks' },
         check(!!done.backup, 'Backup taget'),
-        check(!!done.hotkeys || !scan.ahk.length, 'Genveje flyttet'),
+        (() => { const a = ahkState(); return check(a.ok, a.text); })(),
         check(!!done.presets || !scan.apo.config_dir, 'Peace-presets importeret'),
         check(engine.kind === 'builtin' && engine.registration?.ok !== false, engine.kind === 'builtin' && engine.registration?.ok === false ? 'Indbygget EQ-motor skal repareres' : 'Indbygget EQ-motor'),
         check(!daemon.foreign?.length && (daemon.started_by_us || daemon.bundled), 'Indbygget GoXLR-motor'),
@@ -230,5 +245,14 @@ export function migrateView(ctx) {
     }
   }
   reload();
+  // Mindre fejl 6: right after startup the engine may still be starting – check again until it
+  // runs (or has failed), instead of showing "Ingen GoXLR-motor kører" until the page is reopened.
+  let tries = 0;
+  const poll = setInterval(async () => {
+    if (!root.isConnected || ++tries > 20) { clearInterval(poll); return; }
+    if (!scan) return; // first scan not done yet
+    if (daemon && (daemon.started_by_us || daemon.last_error || daemon.foreign?.length)) { clearInterval(poll); return; }
+    try { daemon = await daemonInfo(); render(); } catch { /* keep the last state */ }
+  }, 1500);
   return root;
 }
