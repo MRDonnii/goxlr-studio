@@ -1,4 +1,5 @@
 import { playSound, stopSounds, soundNames } from './soundboard.js';
+import { obsScene, streamSafeMusic } from './obs.js';
 import { toast, logActivity } from './ui.js';
 
 // Toast in the app, plus the on-screen display when the app is in the background.
@@ -114,6 +115,12 @@ export async function runAction(ctx, id, source = 'handling') {
     }
     case 'discord-toggle': return ctx.discordToggle?.();
     case 'discord-deafen': return ctx.discordDeafen?.();
+    case 'obs-scene': return obsScene(ctx, arg, source).then(() => notify(ctx, `OBS: ${arg}`)).catch((e) => toast(String(e.message || e)));
+    case 'stream-safe-music': {
+      const safe = streamSafeMusic(ctx);
+      if (safe == null) return;
+      return notify(ctx, safe ? 'Stream-sikker musik: musikken er ude af streamen' : 'Musikken er med i streamen igen', safe ? 'ok' : 'info');
+    }
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
     // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
@@ -204,7 +211,9 @@ export async function actionCatalog(ctx) {
     { id: 'ducking-toggle', label: 'Auto-ducking til/fra' },
     { id: 'discord-toggle', label: 'Skift Discord-mute (uden at røre GoXLR’en)' },
     { id: 'discord-deafen', label: 'Skift Discord-døv (uden at røre GoXLR’en)' },
+    { id: 'stream-safe-music', label: 'Stream-sikker musik til/fra (Music ud af streamen)' },
   ].filter(Boolean));
+  g('OBS', (ctx.prefs.obs?.scenes || []).map((s) => ({ id: `obs-scene:${s}`, label: `OBS-scene "${s}"` })));
   return groups;
 }
 
@@ -251,6 +260,8 @@ export function actionLabel(ctx, id) {
     case 'ducking-toggle': return 'Auto-ducking til/fra';
     case 'discord-toggle': return 'Skift Discord-mute';
     case 'discord-deafen': return 'Skift Discord-døv';
+    case 'obs-scene': return `OBS-scene "${arg}"`;
+    case 'stream-safe-music': return 'Stream-sikker musik til/fra';
     default: return id;
   }
 }

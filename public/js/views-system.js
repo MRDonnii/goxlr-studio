@@ -5,6 +5,7 @@ import { DEFAULT_DISCORD_KEY, DEFAULT_DISCORD_DEAF_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { mqttCard } from './mqtt.js';
 import { hearingCard } from './hearing.js';
+import { obsCard } from './obs.js';
 
 export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking'];
 
@@ -222,5 +223,5 @@ export function systemSettings(ctx) {
       h('a', { href: `${repo}/releases`, target: '_blank', rel: 'noopener' }, 'Udgivelser')),
     h('div', { class: 'hint' }, 'Motorerne er open source og indgår uændrede. Kildekoden til EQ-motoren ligger ved hver udgivelse.'));
 
-  return h('div', { class: 'grid cols-2' }, discordCard, micSafetyCard, hearingCard(ctx), mqttCard(ctx), osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
+  return h('div', { class: 'grid cols-2' }, discordCard, micSafetyCard, hearingCard(ctx), mqttCard(ctx), obsCard(ctx), osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
 }

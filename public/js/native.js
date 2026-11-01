@@ -460,6 +460,15 @@ export async function discordRunning() {
   return true;
 }
 
+// OBS (obs.rs). The demo pretends OBS runs with four scenes.
+let demoObsScene = 'Gaming';
+export async function obsRequest(config, requestType, data = {}) {
+  if (isNative()) return invoke('obs_request', { config, requestType, data });
+  if (requestType === 'GetSceneList') return { currentProgramSceneName: demoObsScene, scenes: ['BRB', 'Just Chatting', 'Gaming', 'Starter snart'].map((sceneName) => ({ sceneName })) };
+  if (requestType === 'SetCurrentProgramScene') { demoObsScene = data.sceneName; return null; }
+  throw new Error(`OBS: ${requestType} findes ikke i demoen`);
+}
+
 // Profilhistorik (history.rs). The demo keeps two versions of each profile in memory.
 const demoHistory = new Map();
 export async function historySnapshot(profiles, mics) {

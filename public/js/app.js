@@ -19,6 +19,7 @@ import { appsView, startAppRules } from './views-apps.js';
 import { startDeviceTriggers } from './devicetriggers.js';
 import { startMqtt } from './mqtt.js';
 import { startHearing } from './hearing.js';
+import { obsFollowProfile } from './obs.js';
 import { setLanguage, resolveLanguage, t, language } from './i18n.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
@@ -490,6 +491,7 @@ function followProfile() {
   // user had chosen with the profile's linked one. At start, only follow the profile if it changed
   // while the app was closed.
   if (first && (!ctx.outputEq?.presetProfile || ctx.outputEq.presetProfile === m.profile_name)) return;
+  if (!first) obsFollowProfile(ctx, m.profile_name);
   const link = ctx.outputEq?.profileLinks?.[m.profile_name];
   if (link && link !== ctx.outputEq.presetName && (ctx.outputEq.presets[link] || BUILTIN_PRESETS[link])) {
     applyEqPreset(ctx, link, first ? `GoXLR-profilen er "${m.profile_name}" – den skiftede, mens appen var lukket ("EQ følger GoXLR-profil")` : `GoXLR-profilen skiftede til "${m.profile_name}" ("EQ følger GoXLR-profil")`);

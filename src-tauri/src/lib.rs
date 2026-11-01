@@ -12,6 +12,7 @@ mod keys;
 mod meters;
 mod migrate;
 mod mqtt;
+mod obs;
 mod osd;
 mod session;
 mod soundcheck;
@@ -342,6 +343,12 @@ fn mqtt_stop() {
 #[tauri::command]
 fn mqtt_status() -> mqtt::Status {
     mqtt::status()
+}
+
+/// One request to OBS Studio's WebSocket server (obs.rs), e.g. SetCurrentProgramScene.
+#[tauri::command]
+async fn obs_request(config: obs::Config, request_type: String, data: Option<Value>) -> Result<Value, String> {
+    obs::request(config, request_type, data.unwrap_or(Value::Null)).await
 }
 
 /// Profilhistorik (history.rs).
@@ -827,6 +834,7 @@ pub fn run() {
             send_keys,
             audio_levels,
             spectrum_read,
+            obs_request,
             history_snapshot,
             history_list,
             history_restore,
