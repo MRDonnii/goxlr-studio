@@ -338,8 +338,8 @@ export function outputEqView(ctx) {
         if (k !== 'u' || !(await confirmDialog(`Slet "${n}"?`, { ok: 'Slet', danger: true }))) return;
         delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); ctx.onStateChanged?.('eq');
       } }, 'Slet')),
-    h('div', { class: 'row' },
-      h('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Importér APO / AutoEQ…'),
+    h('div', { class: 'row wrap' },
+      h('button', { class: 'btn sm', 'data-testid': 'preset-import-file', onclick: () => fileIn.click() }, 'Importér APO / AutoEQ…'),
       h('button', { class: 'btn sm', onclick: async () => {
         const txt = await promptDialog('Indsæt Equalizer APO-konfiguration (Preamp/Filter-linjer):', '', { ok: 'Indsæt', input: { multiline: true, placeholder: 'Preamp: -6 dB\nFilter 1: ON PK Fc 100 Hz Gain 3 dB Q 1.41' } });
         if (!txt) return;

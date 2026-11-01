@@ -405,18 +405,27 @@ pub fn devices() -> Vec<EngineDevice> {
         let props = format!(r"{key}\Properties");
         let dev = reg::read_str(&props, DEVICE_VALUE).unwrap_or_default();
         let conn = reg::read_str(&props, CONNECTION_VALUE).unwrap_or_default();
-        let name = match (dev.is_empty(), conn.is_empty()) {
-            (false, false) => format!("{dev} ({conn})"),
-            (false, true) => dev,
-            (true, false) => conn,
-            _ => guid.clone(),
-        };
+        // Windows' own form "System (TC-HELICON GoXLR Mini)": the output first, then the
+        // adapter – the other way round every GoXLR output was shown as "TC-HELICON GoXLR Mini".
+        let name = output_label(&dev, &conn, &guid);
         let installed = device_installed(&guid);
         let mode = if installed { load_device(&guid).ok().map(|d| d.mode.as_str().to_string()) } else { None };
         out.push(EngineDevice { id: endpoint_id(&guid), installed, mode, guid, name });
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    // GoXLR outputs first, then the rest alphabetically.
+    out.sort_by_key(|d| (!d.name.to_lowercase().contains("goxlr"), d.name.to_lowercase()));
     out
+}
+
+/// Pure: an output's name as Windows shows it, e.g. "System (TC-HELICON GoXLR Mini)".
+/// `dev` = adapter ({b3f8fa53-…},6), `conn` = output ({a45c254e-…},2).
+pub fn output_label(dev: &str, conn: &str, guid: &str) -> String {
+    match (conn.trim().is_empty(), dev.trim().is_empty()) {
+        (false, false) => format!("{} ({})", conn.trim(), dev.trim()),
+        (false, true) => conn.trim().to_string(),
+        (true, false) => dev.trim().to_string(),
+        _ => guid.to_string(),
+    }
 }
 
 pub fn info() -> EngineInfo {
@@ -807,11 +816,7 @@ fn uninstall_device(d: &DeviceState) -> Result<(), String> {
 fn output_name(id: &str) -> String {
     let guid = id.rfind('{').map(|i| &id[i..]).unwrap_or(id);
     let props = format!(r"{RENDER_KEY}\{guid}\Properties");
-    match (reg::read_str(&props, DEVICE_VALUE), reg::read_str(&props, CONNECTION_VALUE)) {
-        (Some(d), Some(c)) => format!("{d} ({c})"),
-        (Some(n), None) | (None, Some(n)) => n,
-        _ => id.to_string(),
-    }
+    output_label(&reg::read_str(&props, DEVICE_VALUE).unwrap_or_default(), &reg::read_str(&props, CONNECTION_VALUE).unwrap_or_default(), id)
 }
 
 /// Outputs asked for that are not among the present ones (pure, see tests).
@@ -1815,6 +1820,14 @@ mod tests {
         assert_eq!(codes(&f), ["wrong-path-post-mix", "protected-audiodg"]);
         let f = RegFacts { dll_exists: false, ..facts_ok() };
         assert_eq!(codes(&f), ["missing-dll"]);
+    }
+
+    #[test]
+    fn outputs_are_named_like_windows() {
+        assert_eq!(output_label("TC-HELICON GoXLR Mini", "System", "{g}"), "System (TC-HELICON GoXLR Mini)");
+        assert_eq!(output_label("", "Steam Streaming Speakers", "{g}"), "Steam Streaming Speakers");
+        assert_eq!(output_label("Realtek", "", "{g}"), "Realtek");
+        assert_eq!(output_label("", "", "{g}"), "{g}");
     }
 
     #[test]
