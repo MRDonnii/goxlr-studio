@@ -58,7 +58,8 @@ pub fn studio_dir() -> PathBuf {
 }
 
 pub fn render(eq: &OutputEq, device_name: Option<&str>) -> String {
-    let mut out = String::from("# Skrevet af GoXLR Studio – rediger i appen, ikke her.\n");
+    // ASCII only: Equalizer APO's editor and other tools may read the file as ANSI (fejl: "â€“").
+    let mut out = String::from("# Skrevet af GoXLR Studio - rediger i appen, ikke her.\n");
     match (eq.target.as_deref(), device_name) {
         (Some(id), _) if id.contains('{') => {
             // Endpoint ids end in the device GUID, which APO's Device: selector matches.
@@ -229,4 +230,25 @@ pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
     }
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_is_ascii() {
+        // Read as ANSI by some tools, so "–" turned into "â€“" (mindre fejl 4).
+        let eq = OutputEq {
+            enabled: true,
+            preamp: -4.0,
+            bands: vec![Band { enabled: true, kind: "PK".into(), freq: 2500.0, gain: 4.0, q: 1.2 }],
+            target: Some("{0.0.0.00000000}.{58a6a695-a61b-4549-8340-5b88409d9be5}".into()),
+            extra: vec![],
+        };
+        let text = render(&eq, None);
+        assert!(text.is_ascii(), "{text}");
+        assert!(text.contains("Device: {58a6a695-a61b-4549-8340-5b88409d9be5}"));
+        assert!(render(&OutputEq { target: None, ..eq }, None).contains("Device: all"));
+    }
 }
