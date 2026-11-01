@@ -287,3 +287,13 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .mic-assist-status { min-height: 1.3em; font-weight: 600; }
 .warn-text { color: #fbbf24; }
 .mic-undo:not(:empty) { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* Lydbank */
+.sound-pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.sound-pad { display: flex; flex-direction: column; gap: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+.sound-play { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; min-height: 64px; border-radius: 9px; background: linear-gradient(135deg, #1f2b45, #2a1f45); text-align: center; padding: 6px; }
+.sound-play:hover { filter: brightness(1.25); }
+.sound-play:active { transform: scale(.97); }
+.sound-name { font-weight: 600; overflow-wrap: anywhere; }
+.sound-key { font: 11px ui-monospace, Consolas, monospace; opacity: .7; }
+.sound-tools { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }

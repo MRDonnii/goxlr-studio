@@ -1,3 +1,4 @@
+import { playSound, stopSounds, soundNames } from './soundboard.js';
 import { toast, logActivity } from './ui.js';
 
 // Toast in the app, plus the on-screen display when the app is in the background.
@@ -105,6 +106,8 @@ export async function runAction(ctx, id, source = 'handling') {
     case 'discord-deafen': return ctx.discordDeafen?.();
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
+    case 'sound': return playSound(ctx, arg).then(() => notify(ctx, `▶ ${arg.replace(/\.[^.]+$/, '')}`)).catch((e) => notify(ctx, `Lyd: ${e.message || e}`, 'mute'));
+    case 'sounds-stop': stopSounds(); return notify(ctx, 'Lyde stoppet');
     case 'crossfeed-toggle':
     case 'loudness-toggle': {
       const k = kind === 'crossfeed-toggle' ? 'crossfeed' : 'loudness';
@@ -178,6 +181,11 @@ export async function actionCatalog(ctx) {
     { id: `vol-up:${c}`, label: `${CHANNEL_LABEL[c]} op` },
     { id: `vol-down:${c}`, label: `${CHANNEL_LABEL[c]} ned` },
   ]));
+  const sounds = await soundNames();
+  g('Lydbank', sounds.length ? [
+    ...sounds.map((x) => ({ id: `sound:${x.file}`, label: `Afspil "${x.name}"` })),
+    { id: 'sounds-stop', label: 'Stop alle lyde' },
+  ] : []);
   g('Andet', [
     m?.effects ? { id: 'fx-toggle', label: 'Effekter til/fra' } : null,
     { id: 'ducking-toggle', label: 'Auto-ducking til/fra' },
@@ -208,6 +216,8 @@ export function actionLabel(ctx, id) {
     case 'vol-down': return `${CHANNEL_LABEL[arg] || arg} ned`;
     case 'cough': return arg === 'Unmuted' ? 'Unmute mikrofon' : 'Mute mikrofon';
     case 'mute-mic': return 'Mute/unmute mikrofon';
+    case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
+    case 'sounds-stop': return 'Stop alle lyde';
     case 'mute-fader': return `Mute fader ${arg}`;
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;
     case 'eq-preset': return `EQ-preset "${arg}"`;

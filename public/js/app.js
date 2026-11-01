@@ -7,6 +7,7 @@ import { effectsView, scenesView, lightingView, profilesView, settingsView, appl
 import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { deckView } from './views-deck.js';
+import { soundsView } from './views-sounds.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
@@ -25,6 +26,7 @@ const PAGES = [
   { id: 'apps', title: 'Lyd pr. app', icon: 'apps', view: appsView },
   { id: 'effects', title: 'Effekter', icon: 'fx', view: effectsView, hidden: (m) => m?.hardware?.device_type === 'Mini' },
   { id: 'scenes', title: 'Scener', icon: 'scenes', view: scenesView },
+  { id: 'sounds', title: 'Lydbank', icon: 'sound', view: soundsView },
   { id: 'lighting', title: 'Lys', icon: 'light', view: lightingView },
   { id: 'profiles', title: 'Profiler', icon: 'profile', view: profilesView },
   { id: 'hotkeys', title: 'Genveje', icon: 'key', view: hotkeysView },

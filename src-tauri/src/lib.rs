@@ -11,6 +11,7 @@ mod keys;
 mod meters;
 mod migrate;
 mod osd;
+mod sounds;
 mod store;
 mod update;
 
@@ -405,6 +406,40 @@ fn take_launch_action(state: State<'_, AppState>) -> Option<String> {
     state.launch_action.lock().unwrap().take()
 }
 
+#[tauri::command]
+fn sounds_list() -> Vec<sounds::SoundFile> {
+    sounds::list()
+}
+
+#[tauri::command]
+async fn sounds_save(name: String, data: String) -> Result<String, String> {
+    blocking(move || sounds::save(&name, &data)).await
+}
+
+#[tauri::command]
+async fn sounds_read(file: String) -> Result<String, String> {
+    blocking(move || sounds::read(&file)).await
+}
+
+#[tauri::command]
+fn sounds_delete(file: String) -> Result<(), String> {
+    sounds::delete(&file)
+}
+
+#[tauri::command]
+fn sounds_rename(file: String, name: String) -> Result<String, String> {
+    sounds::rename(&file, &name)
+}
+
+#[tauri::command]
+fn sounds_open_dir() -> Result<(), String> {
+    let d = sounds::dir();
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    std::process::Command::new("explorer").arg(&d).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// TC-Helicon's GoXLR driver: installed or not, and where to get it (it is never touched).
 #[tauri::command]
 fn driver_info() -> driver::DriverInfo {
@@ -548,6 +583,15 @@ pub fn run() {
             None => show_main(app),
         }))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
+        // The app's own page may use the microphone without asking: "Optag og lyt", and the
+        // device names the sound board needs to play on the GoXLR's "Sample" output.
+        .on_permission_request(|webview, kind| {
+            let ours = webview.url().map(|u| u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost")).unwrap_or(false);
+            match kind {
+                tauri::webview::PermissionKind::Microphone if ours => tauri::webview::PermissionResponse::Allow,
+                _ => tauri::webview::PermissionResponse::Default,
+            }
+        })
         .plugin(shortcuts)
         .manage(AppState {
             daemon: daemon::Daemon::default(),
@@ -690,6 +734,12 @@ pub fn run() {
             take_launch_action,
             deck_info,
             driver_info,
+            sounds_list,
+            sounds_save,
+            sounds_read,
+            sounds_delete,
+            sounds_rename,
+            sounds_open_dir,
         ])
         .build(tauri::generate_context!())
         .expect("error while building GoXLR Studio")

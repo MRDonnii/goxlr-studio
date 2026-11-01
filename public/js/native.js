@@ -376,6 +376,40 @@ export async function takeLaunchAction() {
   return new URLSearchParams(location.search).get('action');
 }
 
+// ---------- Lydbank (sound files in %APPDATA%\GoXLR Studio\sounds) ----------
+const demoSounds = new Map(); // browser demo: file -> base64
+export async function soundsList() {
+  if (isNative()) return invoke('sounds_list');
+  return [...demoSounds.keys()].sort().map((file) => ({ file, name: file.replace(/\.[^.]+$/, ''), size: demoSounds.get(file).length }));
+}
+export async function soundsSave(name, data) {
+  if (isNative()) return invoke('sounds_save', { name, data });
+  let file = name.split(/[\\/]/).pop();
+  for (let n = 2; demoSounds.has(file); n++) file = name.replace(/(\.[^.]+)$/, ` (${n})$1`);
+  demoSounds.set(file, data);
+  return file;
+}
+export async function soundsRead(file) {
+  if (isNative()) return invoke('sounds_read', { file });
+  if (!demoSounds.has(file)) throw new Error('Lyden findes ikke længere');
+  return demoSounds.get(file);
+}
+export async function soundsDelete(file) {
+  if (isNative()) return invoke('sounds_delete', { file });
+  demoSounds.delete(file);
+}
+export async function soundsRename(file, name) {
+  if (isNative()) return invoke('sounds_rename', { file, name });
+  const ext = file.match(/\.[^.]+$/)?.[0] || '';
+  const target = `${name.trim()}${ext}`;
+  if (target !== file && demoSounds.has(target)) throw new Error('Der findes allerede en lyd med det navn');
+  demoSounds.set(target, demoSounds.get(file)); if (target !== file) demoSounds.delete(file);
+  return target;
+}
+export async function soundsOpenDir() {
+  if (isNative()) return invoke('sounds_open_dir');
+}
+
 // TC-Helicon's GoXLR driver: { installed, api, download_mini, download_full } (only read, never changed).
 export async function driverInfo() {
   if (isNative()) return invoke('driver_info');
