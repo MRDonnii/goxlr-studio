@@ -351,7 +351,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.4.6', installed: false, browser: true };
+  return { version: '0.4.7', installed: false, browser: true };
 }
 
 // The newest release (GitHub's API shape). The app reads latest.json from the release – no hourly

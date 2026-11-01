@@ -51,6 +51,8 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 
 Mikrofon-EQ'en kører i GoXLR'ens egen chip, så den bruger hverken CPU eller giver forsinkelse. Her finder du også gain, noise gate, kompressor og mikrofonprofiler.
 
+**Vælg din mikrofon** blandt 51 modeller, fx Røde NT1, Shure SM7B, Fifine K688 og Audio-Technica AT2020. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. EQ'en er en klar talestemme minus mikrofonens egen klang, tilpasset GoXLR'ens bånd.
+
 ### Lyd pr. app
 
 ![Lyd pr. app](docs/screenshots/lyd-pr-app.png)
