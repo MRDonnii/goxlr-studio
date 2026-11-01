@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f17">
+<title>GoXLR Studio</title>
+<style>
+  :root { --bg: #0b0f17; --panel: #131a28; --line: #233049; --text: #e6ebf5; --muted: #8a96b0; --ok: #34d399; --bad: #f43f5e; --accent: #22d3ee; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 16px; padding-bottom: 40px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 14px 10px; font: inherit; font-weight: 600; min-height: 52px; touch-action: manipulation; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  button:active { transform: scale(.97); }
+  .mute { width: 100%; min-height: 72px; font-size: 18px; }
+  .mute.muted { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .mute.open { background: rgba(52,211,153,.15); border-color: var(--ok); color: var(--ok); }
+  .vol { display: grid; grid-template-columns: 1fr 64px 64px; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .vol span { color: var(--muted); }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+<h1>GoXLR Studio</h1>
+<div class="sub" id="status">…</div>
+<button class="mute" id="mute">…</button>
+<h2 data-t="profiles">Profil</h2><div class="grid" id="profiles"></div>
+<h2 data-t="scenes">Scener</h2><div class="grid" id="scenes"></div>
+<h2 data-t="eq">EQ</h2><div class="grid" id="eq"></div>
+<h2 data-t="volume">Lydstyrke</h2><div id="volumes"></div>
+<script>
+(() => {
+  const en = !/^da\b/i.test(navigator.language || '');
+  const T = en
+    ? { profiles: 'Profile', scenes: 'Scenes', eq: 'EQ', volume: 'Volume', muted: 'Mic muted – tap to open', open: 'Mic open – tap to mute', on: 'EQ on', off: 'EQ off', offline: 'GoXLR not connected', lost: 'No contact with GoXLR Studio', Headphones: 'Headphones', Music: 'Music', Game: 'Game', Chat: 'Chat', System: 'System' }
+    : { profiles: 'Profil', scenes: 'Scener', eq: 'EQ', volume: 'Lydstyrke', muted: 'Mikrofon muted – tryk for at åbne', open: 'Mikrofon åben – tryk for at mute', on: 'EQ til', off: 'EQ fra', offline: 'GoXLR ikke forbundet', lost: 'Ingen forbindelse til GoXLR Studio', Headphones: 'Hovedtelefoner', Music: 'Musik', Game: 'Spil', Chat: 'Chat', System: 'System' };
+  document.documentElement.lang = en ? 'en' : 'da';
+  document.querySelectorAll('[data-t]').forEach((e) => { e.textContent = T[e.dataset.t]; });
+  const token = new URLSearchParams(location.search).get('token') || '';
+  const q = `?token=${encodeURIComponent(token)}`;
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props, text) => { const e = document.createElement(tag); Object.assign(e, props || {}); if (text != null) e.textContent = text; return e; };
+  const act = async (id) => { await fetch(`/action/${encodeURIComponent(id)}${q}`, { method: 'POST' }).catch(() => {}); setTimeout(load, 250); };
+  let last = '';
+  async function load() {
+    let s;
+    try { const r = await fetch(`/state${q}`, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); s = await r.json(); }
+    catch { $('status').textContent = T.lost; $('status').className = 'sub err'; return; }
+    const key = JSON.stringify(s);
+    if (key === last) return;
+    last = key;
+    $('status').className = 'sub';
+    $('status').textContent = s.profile ? `${s.profile}${s.mic_profile ? ' · ' + s.mic_profile : ''}` : T.offline;
+    const mute = $('mute');
+    mute.textContent = s.mic_muted ? T.muted : T.open;
+    mute.className = `mute ${s.mic_muted ? 'muted' : 'open'}`;
+    mute.onclick = () => act(s.mic_muted ? 'cough:Unmuted' : 'cough:MutedToX');
+    $('profiles').replaceChildren(...(s.profiles || []).map((p) => el('button', { className: p === s.profile ? 'on' : '', onclick: () => act(`profile:${p}`) }, p)));
+    $('scenes').replaceChildren(...(s.scenes || []).map((x) => el('button', { onclick: () => act(`scene:${x.id}`) }, x.name)));
+    const eq = s.eq || {};
+    $('eq').replaceChildren(el('button', { className: eq.enabled ? 'on' : '', onclick: () => act('eq-toggle') }, eq.enabled ? T.on : T.off),
+      ...(eq.presets || []).map((p) => el('button', { className: p === eq.preset ? 'on' : '', onclick: () => act(`eq-preset:${p}`) }, p)));
+    $('volumes').replaceChildren(...['Headphones', 'Music', 'Game', 'Chat', 'System'].filter((c) => (s.volumes || {})[c] != null).map((c) => {
+      const row = el('div', { className: 'vol' });
+      row.append(el('span', {}, `${T[c]} · ${Math.round(s.volumes[c] / 2.55)} %`), el('button', { onclick: () => act(`vol-down:${c}`) }, '−'), el('button', { onclick: () => act(`vol-up:${c}`) }, '+'));
+      return row;
+    }));
+  }
+  load();
+  setInterval(() => { if (!document.hidden) load(); }, 1500);
+})();
+</script>
+</body>
+</html>

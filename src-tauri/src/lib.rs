@@ -345,6 +345,12 @@ fn mqtt_status() -> mqtt::Status {
     mqtt::status()
 }
 
+/// This PC's address on the home network, for the phone remote's link.
+#[tauri::command]
+fn lan_ip() -> Option<String> {
+    api::lan_ip()
+}
+
 /// One request to OBS Studio's WebSocket server (obs.rs), e.g. SetCurrentProgramScene.
 #[tauri::command]
 async fn obs_request(config: obs::Config, request_type: String, data: Option<Value>) -> Result<Value, String> {
@@ -835,6 +841,7 @@ pub fn run() {
             audio_levels,
             spectrum_read,
             obs_request,
+            lan_ip,
             history_snapshot,
             history_list,
             history_restore,

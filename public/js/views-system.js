@@ -105,8 +105,20 @@ export function systemSettings(ctx) {
     ctx.savePrefs();
     await ctx.applyApi();
     renderApi();
+    renderRemote();
   };
   const port = h('input', { type: 'number', min: 1024, max: 65535, value: api.port, style: { width: '100px' }, onchange: () => { api.port = Number(port.value) || 14610; saveApi(); } });
+  // Mobil-fjernbetjening: the API's phone page (GET /remote) – mute, profiles, scenes, EQ and volume.
+  const remoteBox = h('div', { class: 'remote-box', 'data-testid': 'remote-box' });
+  const renderRemote = async () => {
+    const ip = api.lan ? (isNative() ? await window.__TAURI__.core.invoke('lan_ip').catch(() => null) : '192.168.1.20') : null;
+    const url = ip ? `http://${ip}:${api.port}/remote?token=${encodeURIComponent(api.token)}` : null;
+    remoteBox.replaceChildren(h('div', { class: 'hint', style: { marginTop: '10px' } }, 'Fjernbetjening på mobilen:'),
+      api.enabled && url
+        ? h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('code', { 'data-no-i18n': '', 'data-testid': 'remote-url' }, url),
+          h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(url).then(() => toast('Linket er kopieret – send det til din telefon', 'info')) }, 'Kopiér link'))
+        : h('div', { class: 'hint' }, 'Slå API til og "Tillad fra andre enheder på netværket", så får du et link, du kan åbne på telefonen (samme wifi). Gem det på hjemmeskærmen.'));
+  };
   const apiCard = h('div', { class: 'card' }, h('h2', {}, 'Lokalt API (Stream Deck / Home Assistant)', apiStatus),
     toggle(binder, { label: 'Slå API til', get: () => api.enabled, set: (v) => { api.enabled = v; saveApi(); } }),
     toggle(binder, { label: 'Tillad fra andre enheder på netværket', get: () => api.lan, set: (v) => { api.lan = v; saveApi(); } }),
@@ -114,8 +126,10 @@ export function systemSettings(ctx) {
       h('button', { class: 'btn sm', 'data-testid': 'api-new-token', onclick: async () => { if (await confirmDialog('Lav en ny token? Gamle links holder op med at virke.', { ok: 'Ny token' })) { api.token = newToken(); saveApi(); } } }, 'Ny token'),
       h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(api.token).then(() => toast('Token kopieret', 'info')) }, 'Kopiér token')),
     examples,
+    remoteBox,
     h('div', { class: 'hint' }, isNative() ? 'Alle handlinger fra Genveje kan kaldes – se listen på /actions. Windows Firewall spørger første gang, hvis netværksadgang er slået til.' : 'API’et findes kun i Windows-appen.'));
   renderApi();
+  renderRemote();
 
   // ---- backup ----
   const fileIn = h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' } });

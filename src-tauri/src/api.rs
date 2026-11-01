@@ -1,5 +1,6 @@
 //! Tiny local HTTP API so Stream Deck, Home Assistant or a phone can trigger actions.
-//! GET /state, GET /actions, GET|POST /action/<id>; every request needs the token.
+//! GET /state, GET /actions, GET|POST /action/<id>, GET /remote (the phone page); every request
+//! needs the token.
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{Read, Write};
@@ -62,6 +63,25 @@ fn respond(mut s: TcpStream, status: &str, body: &Value) {
     );
 }
 
+/// The phone remote (remote.html): it reads /state and sends /action with the same token.
+const REMOTE_HTML: &str = include_str!("remote.html");
+
+fn respond_html(mut s: TcpStream, html: &str) {
+    let _ = write!(
+        s,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{html}",
+        html.len()
+    );
+}
+
+/// This PC's address on the home network (for the phone link); no packet is sent.
+pub fn lan_ip() -> Option<String> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("192.0.2.1:9").ok()?;
+    let ip = sock.local_addr().ok()?.ip();
+    (!ip.is_loopback() && !ip.is_unspecified()).then(|| ip.to_string())
+}
+
 fn handle(app: &AppHandle, api: &Api, cfg: &ApiConfig, mut s: TcpStream) {
     let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
     let mut buf = [0u8; 8192];
@@ -84,7 +104,8 @@ fn handle(app: &AppHandle, api: &Api, cfg: &ApiConfig, mut s: TcpStream) {
         return respond(s, "401 Unauthorized", &json!({ "error": "token mangler eller er forkert" }));
     }
     match (method, path) {
-        ("GET", "/" | "") => respond(s, "200 OK", &json!({ "endpoints": ["GET /state", "GET /actions", "GET|POST /action/<id>"] })),
+        ("GET", "/" | "") => respond(s, "200 OK", &json!({ "endpoints": ["GET /state", "GET /actions", "GET|POST /action/<id>", "GET /remote"] })),
+        ("GET", "/remote") => respond_html(s, REMOTE_HTML),
         ("GET", "/state") => respond(s, "200 OK", &api.state.lock().unwrap().clone()),
         ("GET", "/actions") => respond(s, "200 OK", &api.actions.lock().unwrap().clone()),
         ("GET" | "POST", p) if p.starts_with("/action/") => {
