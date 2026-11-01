@@ -1,4 +1,5 @@
-import { h, slider, segmented, selectBox, toggle, throttle, promptDialog } from './ui.js';
+import { h, slider, segmented, selectBox, toggle, throttle, promptDialog, confirmDialog, toast, logActivity } from './ui.js';
+import { MIC_MODELS, micSettings, micPresetCommands, describeMic } from './micpresets.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { coefficients, magnitudeDb, formatFreq } from './eq.js';
@@ -22,6 +23,70 @@ function enumSlider(binder, { label, list, get, set, fmt }) {
     set: (i) => set(list[i]),
     fmt: (i) => fmt(list[i]),
   });
+}
+
+const fmtHz = (f) => (f >= 1000 ? `${f / 1000}k` : `${f}`).replace('.', ',');
+
+// "Din mikrofon": EQ, type, gate, compressor and de-esser from the mic's frequency response.
+function micPresetCard(ctx) {
+  const { conn } = ctx;
+  const p = ctx.prefs;
+  const isMini = () => conn.mixer?.hardware?.device_type === 'Mini';
+  const parts = { eq: true, type: true, gate: true, comp: true, deess: true, gain: false };
+  const byName = (a, b) => a.name.localeCompare(b.name, 'da');
+  const sel = h('select', { 'data-testid': 'mic-model', onchange: () => render() },
+    h('option', { value: '' }, 'Vælg din mikrofon …'),
+    h('optgroup', { label: 'Dynamiske' }, MIC_MODELS.filter((m) => m.type === 'dynamic').sort(byName).map((m) => h('option', { value: m.id }, m.name))),
+    h('optgroup', { label: 'Kondensator (+48V)' }, MIC_MODELS.filter((m) => m.type === 'condenser').sort(byName).map((m) => h('option', { value: m.id }, m.name))));
+  sel.value = MIC_MODELS.some((m) => m.id === p.micModel) ? p.micModel : '';
+  const body = h('div', { class: 'mic-preset' });
+  const model = () => MIC_MODELS.find((m) => m.id === sel.value);
+  const check = (key, text) => {
+    const cb = h('input', { type: 'checkbox', checked: parts[key], onchange: () => { parts[key] = cb.checked; } });
+    return h('label', { class: 'engine-dev', 'data-testid': `mic-part-${key}` }, cb, h('span', {}, text));
+  };
+  const apply = async () => {
+    const m = model();
+    if (!m || !conn.mixer) return;
+    const cmds = micPresetCommands(m, isMini(), parts);
+    const what = [parts.eq && 'EQ', parts.type && 'mikrofontype', parts.gain && 'gain', parts.gate && 'noise gate', parts.comp && 'kompressor', parts.deess && 'de-esser'].filter(Boolean);
+    if (!what.length) { toast('Vælg mindst én ting, der skal indstilles'); return; }
+    if (!(await confirmDialog(`Indstil ${what.join(', ')} til ${m.name}?\n\nDet overskriver de nuværende indstillinger i mikrofonprofilen "${conn.mixer.mic_profile_name}". Gem den bagefter (eller som en ny profil), så det huskes.`, { ok: 'Indstil' }))) return;
+    for (const c of cmds) await conn.command(...c);
+    p.micModel = m.id; ctx.savePrefs();
+    logActivity(`Mikrofon indstillet til ${m.name} (${what.join(', ')})`);
+    toast(`Indstillet til ${m.name}. Lyt efter, og justér – gem så mikrofonprofilen.`, 'info');
+  };
+  const saveAs = async () => {
+    const m = model();
+    const n = await promptDialog('Navn på ny mikrofonprofil', m ? m.name.replace(/[^\p{L}\p{N} ._-]/gu, '') : '');
+    if (n) conn.command('SaveMicProfileAs', n);
+  };
+  const render = () => {
+    const m = model();
+    if (!m) {
+      body.replaceChildren(h('div', { class: 'hint' }, `Vælg din mikrofon blandt ${MIC_MODELS.length} modeller. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve.`));
+      return;
+    }
+    const s = micSettings(m, isMini());
+    body.replaceChildren(
+      h('div', {}, describeMic(m)),
+      h('div', { class: 'hint', 'data-testid': 'mic-preset-eq' }, `EQ (${isMini() ? 'GoXLR Mini' : 'GoXLR'}): ${s.eq.map((b) => `${fmtHz(b.freq)} ${b.gain > 0 ? '+' : ''}${b.gain}`).join(' · ')} dB`),
+      h('div', { class: 'mic-preset-parts' },
+        check('eq', 'EQ'),
+        check('type', s.type === 'Condenser' ? 'Type: kondensator (tænder +48V)' : 'Type: dynamisk (+48V fra)'),
+        check('gate', `Noise gate (${s.gate.threshold} dB)`),
+        check('comp', `Kompressor (${s.comp.threshold} dB, 3,2:1)`),
+        check('deess', `De-esser ${s.deess} %`),
+        check('gain', `Gain ${s.gain} dB (kun et forslag)`)),
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } },
+        h('button', { class: 'btn sm primary', 'data-testid': 'mic-preset-apply', disabled: !conn.mixer, onclick: apply }, 'Indstil til min mikrofon'),
+        h('button', { class: 'btn sm', onclick: saveAs }, 'Gem som mikrofonprofil …'),
+        m.source ? h('a', { href: m.source, target: '_blank', rel: 'noopener' }, 'Frekvenskurve') : null),
+      h('div', { class: 'hint' }, 'Et udgangspunkt ud fra producentens frekvenskurve: EQ = en klar talestemme minus mikrofonens egen klang. Rum, stemme og afstand er forskellige, så lyt og finjustér. Gain står fra, fordi den afhænger af, hvor tæt og hvor højt du taler.'));
+  };
+  render();
+  return h('div', { class: 'card' }, h('h2', {}, 'Din mikrofon'), h('div', { class: 'row', style: { flexWrap: 'wrap' } }, sel), body);
 }
 
 export function micView(ctx) {
@@ -142,5 +207,5 @@ export function micView(ctx) {
     h('button', { class: 'btn sm', onclick: () => conn.command('SaveMicProfile') }, 'Gem'),
     h('button', { class: 'btn sm', 'data-testid': 'mic-profile-save-as', onclick: async () => { const n = await promptDialog('Navn på ny mikrofonprofil'); if (n) conn.command('SaveMicProfileAs', n); } }, 'Gem som…')));
 
-  return h('div', { class: 'grid' }, eqCard, h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp));
+  return h('div', { class: 'grid' }, micPresetCard(ctx), eqCard, h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp));
 }
