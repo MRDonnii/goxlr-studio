@@ -97,6 +97,13 @@ export function selectBox(binder, { options, get, set }) {
 
 // Recent errors for the diagnostics page.
 export const errorLog = [];
+// What the app did by itself or on request (preset switches and why, admin tasks …) – shown on
+// Diagnose and included in "Kopiér rapport".
+export const activityLog = [];
+export function logActivity(msg) {
+  activityLog.push({ at: new Date().toISOString(), msg: String(msg) });
+  if (activityLog.length > 100) activityLog.shift();
+}
 
 export function toast(msg, kind = 'error') {
   if (kind === 'error') { errorLog.push({ at: new Date().toISOString(), msg: String(msg) }); if (errorLog.length > 50) errorLog.shift(); }

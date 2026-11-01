@@ -117,7 +117,33 @@ function demoTest(log, autoAdjust = true) {
 }
 let demoSound = [];
 
+// What each elevated task changes – shown in the app while it runs (mindre fejl 9: with UAC set
+// to approve silently there was no sign that the audio service was restarted).
+export const ADMIN_TASKS = {
+  install: 'Installerer EQ-motoren: kopierer motorfiler til C:\\Program Files\\GoXLR Studio Engine, registrerer den i Windows, sætter den på de valgte udgange (FxProperties i registreringsdatabasen) og genstarter Windows’ lydtjeneste. En separat Equalizer APO tages backup af og afinstalleres.',
+  'set-devices': 'Ændrer hvilke udgange EQ-motoren sidder på (FxProperties i registreringsdatabasen) og genstarter Windows’ lydtjeneste.',
+  test: 'Tjekker og retter EQ-motorens registrering i Windows, genstarter Windows’ lydtjeneste og åbner hver udgang et øjeblik for at teste motoren.',
+  uninstall: 'Fjerner EQ-motoren fra alle udgange, afregistrerer den og sletter motorfilerne. Windows’ lydtjeneste genstartes.',
+  'use-external': 'Peger Equalizer APO’s config-mappe (ConfigPath) på GoXLR Studios EQ og genstarter Windows’ lydtjeneste.',
+  'restore-external': 'Giver Equalizer APO sin egen config-mappe tilbage og genstarter Windows’ lydtjeneste.',
+};
+function adminEvent(phase, task, extra = {}) {
+  try { window.dispatchEvent(new CustomEvent('admin-task', { detail: { phase, action: task.action, text: ADMIN_TASKS[task.action] || task.action, ...extra } })); } catch { /* no window */ }
+}
+
 export async function engineTask(task) {
+  adminEvent('start', task);
+  try {
+    const r = await engineTaskRaw(task);
+    adminEvent('end', task, { ok: !!r?.ok });
+    return r;
+  } catch (e) {
+    adminEvent('end', task, { ok: false, error: String(e?.message || e) });
+    throw e;
+  }
+}
+
+async function engineTaskRaw(task) {
   if (isNative()) return invoke('engine_task', { task });
   await new Promise((r) => setTimeout(r, 600));
   const log = [];
@@ -159,7 +185,9 @@ export async function engineStatus() {
 
 export async function apoTakeover(enable) {
   if (!isNative()) { await engineTask({ action: enable ? 'use-external' : 'restore-external' }); return; }
-  return invoke('apo_takeover', { enable });
+  const task = { action: enable ? 'use-external' : 'restore-external' };
+  adminEvent('start', task);
+  try { const r = await invoke('apo_takeover', { enable }); adminEvent('end', task, { ok: true }); return r; } catch (e) { adminEvent('end', task, { ok: false }); throw e; }
 }
 
 export async function apoReadConfig() {

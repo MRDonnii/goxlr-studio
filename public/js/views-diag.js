@@ -1,4 +1,4 @@
-import { h, toast, errorLog } from './ui.js';
+import { h, toast, errorLog, activityLog } from './ui.js';
 import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo } from './native.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { describeAction } from './actions.js';
@@ -48,6 +48,7 @@ export async function collectDiagnostics(ctx) {
     app_triggers: ctx.appTriggers?.length || 0,
     api: ctx.prefs.api ? { enabled: ctx.prefs.api.enabled, port: ctx.prefs.api.port, lan: ctx.prefs.api.lan, error: ctx.apiError || null } : null,
     errors: errorLog.slice(-20),
+    activity: activityLog.slice(-40),
   };
 }
 
@@ -84,6 +85,7 @@ export function diagView(ctx) {
       h('div', { class: 'grid cols-2' },
         section(`Genveje${bad.length ? ` – ${bad.length} virker ikke` : ''}`, r.hotkeys.map((x) => row(`${x.key} → ${x.action}`, x.status === 'aktiv' ? 'Aktiv' : x.status, x.status === 'aktiv' ? 'ok' : 'warn'))),
         section('Seneste fejl', r.errors.slice().reverse().map((x) => h('div', { class: 'item' }, h('span', { class: 'hint' }, new Date(x.at).toLocaleTimeString('da-DK')), x.msg)))),
+      section('Seneste hændelser (presetskift, administrator-opgaver …)', (r.activity || []).slice().reverse().map((x) => h('div', { class: 'item', 'data-testid': 'activity-item' }, h('span', { class: 'hint' }, new Date(x.at).toLocaleTimeString('da-DK')), x.msg))),
       h('div', { class: 'grid cols-2' },
         section('Lydenheder', r.devices.map((d) => h('div', { class: 'item' }, d))),
         section('Apps', r.apps.map((a) => h('div', { class: `item ${a.includes('FORÆLDET') ? 'stale' : ''}` }, a)))));

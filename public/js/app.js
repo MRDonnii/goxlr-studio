@@ -1,5 +1,5 @@
 import { GoXLRConnection } from './api.js';
-import { h, Binder, toast, icon, ICONS } from './ui.js';
+import { h, Binder, toast, icon, ICONS, logActivity } from './ui.js';
 import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
@@ -208,6 +208,10 @@ function renderBanners() {
   if (isNative() && conn.mode === 'demo') {
     items.push(h('div', { class: 'banner warn' }, 'GoXLR-motoren kører ikke, eller mixeren er ikke tilsluttet – du ser demo-data.',
       h('button', { class: 'btn sm primary', onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR-motoren')));
+  }
+  if (ctx.adminTask) {
+    items.push(h('div', { class: 'banner admin', 'data-testid': 'banner-admin-task' },
+      h('strong', {}, 'Kører med administrator-adgang: '), ctx.adminTask.text));
   }
   if (ctx.eqTargetNotice && ctx.outputEq?.target) {
     const name = ctx.outputEq.target_name || 'én udgang';
@@ -551,6 +555,17 @@ document.addEventListener('keydown', (e) => {
   const accel = accelFromEvent(e);
   const b = accel && ctx.hotkeys.find((x) => x.accel === accel && x.action);
   if (b) { e.preventDefault(); ctx.runAction(b.action); }
+});
+
+// Mindre fejl 9: every elevated task is visible in the app while it runs, with what it changes.
+window.addEventListener('admin-task', (ev) => {
+  const d = ev.detail || {};
+  if (d.phase === 'start') { ctx.adminTask = { action: d.action, text: d.text }; logActivity(`Administrator-opgave "${d.action}" startet: ${d.text}`); }
+  else {
+    ctx.adminTask = null;
+    logActivity(`Administrator-opgave "${d.action}" ${d.ok ? 'færdig' : `fejlede${d.error ? `: ${d.error}` : ''}`}`);
+  }
+  renderBanners();
 });
 
 async function registerNativeHooks() {
