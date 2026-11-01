@@ -1,4 +1,5 @@
 mod apo;
+mod apps;
 mod audio;
 mod daemon;
 mod store;
@@ -11,23 +12,45 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use std::collections::HashMap;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 const DAEMON_URL: &str = "ws://127.0.0.1:14564/api/websocket";
-const SCENE_KEYS: [Code; 9] = [
-    Code::Digit1, Code::Digit2, Code::Digit3, Code::Digit4, Code::Digit5, Code::Digit6, Code::Digit7, Code::Digit8, Code::Digit9,
-];
 
 #[derive(Deserialize, Clone)]
+struct HotkeyBinding {
+    id: String,
+    accel: String,
+}
+
+#[derive(serde::Serialize)]
+struct HotkeyResult {
+    id: String,
+    ok: bool,
+    error: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Default)]
 struct SceneRef {
     id: String,
     name: String,
 }
 
+#[derive(Deserialize, Clone, Default)]
+struct TrayModel {
+    scenes: Vec<SceneRef>,
+    profiles: Vec<String>,
+    active_profile: Option<String>,
+    eq_presets: Vec<String>,
+    active_eq: Option<String>,
+    eq_enabled: bool,
+}
+
 struct AppState {
     daemon: daemon::Daemon,
     close_to_tray: AtomicBool,
-    scenes: Mutex<Vec<SceneRef>>,
+    tray: Mutex<TrayModel>,
+    hotkeys: Mutex<HashMap<u32, String>>,
 }
 
 #[tauri::command]
@@ -85,6 +108,44 @@ async fn apo_read_config() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn set_hotkeys(app: AppHandle, state: State<'_, AppState>, bindings: Vec<HotkeyBinding>) -> Vec<HotkeyResult> {
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let mut map = state.hotkeys.lock().unwrap();
+    map.clear();
+    bindings
+        .into_iter()
+        .map(|b| {
+            let res = b
+                .accel
+                .parse::<Shortcut>()
+                .map_err(|e| format!("Ugyldig tast: {e}"))
+                .and_then(|sc| {
+                    gs.register(sc).map_err(|e| format!("Optaget af et andet program: {e}"))?;
+                    map.insert(sc.id(), b.id.clone());
+                    Ok(())
+                });
+            HotkeyResult { id: b.id, ok: res.is_ok(), error: res.err() }
+        })
+        .collect()
+}
+
+#[tauri::command]
+async fn app_sessions() -> Result<Vec<apps::AppSession>, String> {
+    blocking(apps::sessions).await
+}
+
+#[tauri::command]
+async fn set_app_device(pid: u32, flow: String, id: Option<String>) -> Result<(), String> {
+    blocking(move || apps::set(pid, &flow, id.as_deref())).await
+}
+
+#[tauri::command]
+async fn apo_open_configurator() -> Result<(), String> {
+    blocking(apo::open_configurator).await
+}
+
+#[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     let al = app.autolaunch();
     if enabled { al.enable() } else { al.disable() }.map_err(|e| e.to_string())
@@ -96,9 +157,14 @@ fn set_close_to_tray(state: State<'_, AppState>, enabled: bool) {
 }
 
 #[tauri::command]
-fn set_scenes(app: AppHandle, state: State<'_, AppState>, scenes: Vec<SceneRef>) -> Result<(), String> {
-    *state.scenes.lock().unwrap() = scenes;
+fn set_tray(app: AppHandle, state: State<'_, AppState>, model: TrayModel) -> Result<(), String> {
+    *state.tray.lock().unwrap() = model;
     rebuild_tray_menu(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn apo_list_configs() -> Result<Vec<apo::ConfigFile>, String> {
+    blocking(apo::list_configs).await
 }
 
 fn show_main(app: &AppHandle) {
@@ -110,19 +176,37 @@ fn show_main(app: &AppHandle) {
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let state = app.state::<AppState>();
-    let scenes = state.scenes.lock().unwrap().clone();
+    use tauri::menu::CheckMenuItem;
+    let model = app.state::<AppState>().tray.lock().unwrap().clone();
     let menu = Menu::new(app)?;
     menu.append(&MenuItem::with_id(app, "show", "Åbn GoXLR Studio", true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "mute-mic", "Mute / unmute mikrofon", true, None::<&str>)?)?;
-    if !scenes.is_empty() {
-        let sub = Submenu::with_id(app, "scenes", "Scener", true)?;
-        for (i, s) in scenes.iter().enumerate() {
-            let accel = (i < 9).then(|| format!("Ctrl+Alt+{}", i + 1));
-            sub.append(&MenuItem::with_id(app, format!("scene:{}", s.id), &s.name, true, accel.as_deref())?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    if !model.profiles.is_empty() {
+        let sub = Submenu::with_id(app, "profiles", "GoXLR-profil", true)?;
+        for p in &model.profiles {
+            let on = model.active_profile.as_deref() == Some(p.as_str());
+            sub.append(&CheckMenuItem::with_id(app, format!("profile:{p}"), p, true, on, None::<&str>)?)?;
         }
         menu.append(&sub)?;
     }
+    if !model.eq_presets.is_empty() {
+        let sub = Submenu::with_id(app, "eq", "EQ-preset", true)?;
+        sub.append(&CheckMenuItem::with_id(app, "eq-toggle", "EQ aktiv", true, model.eq_enabled, None::<&str>)?)?;
+        sub.append(&PredefinedMenuItem::separator(app)?)?;
+        for p in &model.eq_presets {
+            let on = model.active_eq.as_deref() == Some(p.as_str());
+            sub.append(&CheckMenuItem::with_id(app, format!("eq-preset:{p}"), p, true, on, None::<&str>)?)?;
+        }
+        menu.append(&sub)?;
+    }
+    if !model.scenes.is_empty() {
+        let sub = Submenu::with_id(app, "scenes", "Scener", true)?;
+        for s in &model.scenes {
+            sub.append(&MenuItem::with_id(app, format!("scene:{}", s.id), &s.name, true, None::<&str>)?)?;
+        }
+        menu.append(&sub)?;
+    }
+    menu.append(&MenuItem::with_id(app, "mute-mic", "Mute / unmute mikrofon", true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, "quit", "Afslut", true, None::<&str>)?)?;
     Ok(menu)
@@ -150,10 +234,9 @@ pub fn run() {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            if let Some(i) = SCENE_KEYS.iter().position(|c| shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, *c)) {
-                let _ = app.emit("scene-hotkey", i);
-            } else if shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, Code::KeyM) {
-                let _ = app.emit("tray-action", "mute-mic");
+            let id = app.state::<AppState>().hotkeys.lock().unwrap().get(&shortcut.id()).cloned();
+            if let Some(id) = id {
+                let _ = app.emit("hotkey", id);
             }
         })
         .build();
@@ -162,19 +245,17 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(shortcuts)
-        .manage(AppState { daemon: daemon::Daemon::default(), close_to_tray: AtomicBool::new(true), scenes: Mutex::new(Vec::new()) })
+        .manage(AppState {
+            daemon: daemon::Daemon::default(),
+            close_to_tray: AtomicBool::new(true),
+            tray: Mutex::new(TrayModel::default()),
+            hotkeys: Mutex::new(HashMap::new()),
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             let state = app.state::<AppState>();
             state.close_to_tray.store(prefs_close_to_tray(&handle), Ordering::SeqCst);
             state.daemon.clone().spawn(handle.clone(), DAEMON_URL.to_string());
-
-            let gs = app.global_shortcut();
-            for code in SCENE_KEYS.iter().copied().chain([Code::KeyM]) {
-                if let Err(e) = gs.register(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), code)) {
-                    log::warn!("Kunne ikke registrere genvej {code:?}: {e}");
-                }
-            }
 
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
@@ -223,7 +304,12 @@ pub fn run() {
             apo_read_config,
             set_autostart,
             set_close_to_tray,
-            set_scenes,
+            set_tray,
+            apo_list_configs,
+            set_hotkeys,
+            app_sessions,
+            set_app_device,
+            apo_open_configurator,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GoXLR Studio");

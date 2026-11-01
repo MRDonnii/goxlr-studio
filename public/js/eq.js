@@ -114,6 +114,8 @@ export function parseApoConfig(text) {
     const line = rawLine.replace(/#.*/, '').trim();
     const pre = line.match(/^Preamp:\s*(-?[\d.]+)\s*dB/i);
     if (pre) { eq.preamp += Number(pre[1]); continue; }
+    const geq = line.match(/^GraphicEQ:\s*(.*)$/i);
+    if (geq) { eq.bands.push(...graphicEqToBands(geq[1])); continue; }
     const m = line.match(/^Filter\s*\d*:\s*(ON|OFF)\s+(\w+)(.*)$/i);
     if (!m) continue;
     const type = APO_TYPE_ALIASES[m[2].toUpperCase()];
@@ -137,6 +139,23 @@ export function parseApoConfig(text) {
   return eq;
 }
 
+// GraphicEQ lists "freq gain" points; approximate each non-flat point with a peak sized to its neighbours.
+function graphicEqToBands(spec) {
+  const pts = spec.split(';').map((p) => p.trim().split(/\s+/).map(Number)).filter((p) => p.length >= 2 && p.every(Number.isFinite));
+  const out = [];
+  pts.forEach(([f, g], i) => {
+    if (Math.abs(g) < 0.05 || f < 15 || f > 22000) return;
+    const lo = pts[i - 1]?.[0] ?? f / 2;
+    const hi = pts[i + 1]?.[0] ?? f * 2;
+    const n = Math.max(Math.log2(hi / lo) / 2, 0.1);
+    const band = newBand(f, 'PK');
+    band.gain = g;
+    band.q = Math.round((Math.sqrt(Math.pow(2, n)) / (Math.pow(2, n) - 1)) * 1000) / 1000;
+    out.push(band);
+  });
+  return out;
+}
+
 export function toApoConfig(eq) {
   const fmt = (n, d = 2) => Number(n.toFixed(d)).toString();
   const lines = [`Preamp: ${fmt(eq.preamp, 1)} dB`];
@@ -152,3 +171,11 @@ export function toApoConfig(eq) {
 export function formatFreq(f) {
   return f >= 1000 ? `${Number((f / 1000).toFixed(f >= 10000 ? 1 : 2))} kHz` : `${Math.round(f)} Hz`;
 }
+
+export const BUILTIN_PRESETS = {
+  'Flad': { enabled: true, preamp: 0, bands: [] },
+  'Bas-boost': { enabled: true, preamp: -4, bands: [{ type: 'LSC', freq: 105, gain: 4, q: 0.7 }] },
+  'Tale / podcast': { enabled: true, preamp: -2, bands: [{ type: 'HP', freq: 80, gain: 0, q: 0.707 }, { type: 'PK', freq: 250, gain: -2, q: 1 }, { type: 'PK', freq: 3000, gain: 2, q: 1 }] },
+  'Fodtrin (FPS)': { enabled: true, preamp: -4, bands: [{ type: 'LSC', freq: 120, gain: -4, q: 0.7 }, { type: 'PK', freq: 2500, gain: 4, q: 1.2 }, { type: 'PK', freq: 5000, gain: 2, q: 1.5 }] },
+  'Mindre skarp': { enabled: true, preamp: 0, bands: [{ type: 'PK', freq: 6500, gain: -3, q: 2 }, { type: 'HSC', freq: 10000, gain: -2, q: 0.7 }] },
+};

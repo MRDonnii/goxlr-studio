@@ -21,8 +21,16 @@ pub struct OutputEq {
     pub target: Option<String>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct DeviceApo {
+    pub id: String,
+    pub name: String,
+    pub apo: bool,
+}
+
 #[derive(Serialize, Default)]
 pub struct EngineStatus {
+    pub devices: Vec<DeviceApo>,
     pub available: bool,
     pub running: bool,
     pub apo_installed: bool,
@@ -124,6 +132,55 @@ pub fn apply(eq: &OutputEq) -> Result<(), String> {
     std::fs::rename(tmp, eq_file()).map_err(|e| e.to_string())
 }
 
+fn hidden_command(program: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd
+}
+
+fn reg_query(key: &str) -> String {
+    hidden_command("reg")
+        .args(["query", key, "/s"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase())
+        .unwrap_or_default()
+}
+
+// Equalizer APO's effect CLSID as written into an endpoint's FxProperties by its Configurator.
+const APO_CLSIDS: [&str; 2] = ["eacd2258-fcac-4ff4-b36d-419e924a6d79", "ec1cc9ce-faed-4822-828a-82a81a6f018f"];
+
+/// Which active output devices Equalizer APO is attached to.
+pub fn device_apo_status() -> Vec<DeviceApo> {
+    let child = reg_query(r"HKLM\SOFTWARE\EqualizerAPO\Child APOs");
+    crate::audio::list()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|d| d.flow == "render")
+        .map(|d| {
+            let guid = d.id[d.id.rfind('{').unwrap_or(0)..].to_lowercase();
+            let fx = reg_query(&format!(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\{guid}\FxProperties"));
+            let apo = APO_CLSIDS.iter().any(|c| fx.contains(c)) || child.contains(&guid);
+            DeviceApo { id: d.id, name: d.name, apo }
+        })
+        .collect()
+}
+
+pub fn open_configurator() -> Result<(), String> {
+    let dir = apo_config_dir().ok_or("Equalizer APO er ikke installeret")?;
+    let exe = dir.parent().unwrap_or(&dir).join("Configurator.exe");
+    if !exe.exists() {
+        return Err(format!("Fandt ikke {}", exe.display()));
+    }
+    let arg = format!("Start-Process -Verb RunAs -FilePath '{}'", exe.display().to_string().replace('\'', "''"));
+    hidden_command("powershell").args(["-NoProfile", "-Command", &arg]).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn status() -> EngineStatus {
     let Some(dir) = apo_config_dir() else {
         return EngineStatus {
@@ -133,6 +190,7 @@ pub fn status() -> EngineStatus {
     };
     let taken = is_taken_over(&dir);
     EngineStatus {
+        devices: device_apo_status(),
         available: true,
         apo_installed: true,
         taken_over: taken,
@@ -200,7 +258,7 @@ pub fn takeover(enable: bool) -> Result<(), String> {
     let outer = format!(
         "Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand','{encoded}'"
     );
-    let status = std::process::Command::new("powershell")
+    let status = hidden_command("powershell")
         .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &outer])
         .status()
         .map_err(|e| e.to_string())?;
@@ -216,4 +274,40 @@ pub fn takeover(enable: bool) -> Result<(), String> {
 #[cfg(not(windows))]
 pub fn takeover(_enable: bool) -> Result<(), String> {
     Err("Kun på Windows".into())
+}
+
+#[derive(Serialize)]
+pub struct ConfigFile {
+    pub name: String,
+    pub text: String,
+}
+
+/// Every Peace/APO preset file in the config folder (Peace saves presets as .txt there).
+pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
+    let dir = apo_config_dir().ok_or("Equalizer APO er ikke installeret")?;
+    let mut out = Vec::new();
+    let mut stack = vec![dir.clone()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if stack.len() < 32 {
+                    stack.push(p);
+                }
+                continue;
+            }
+            let is_txt = p.extension().map(|x| x.eq_ignore_ascii_case("txt")).unwrap_or(false);
+            let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            if !is_txt || name.eq_ignore_ascii_case("config") || p.metadata().map(|m| m.len() > 512 * 1024).unwrap_or(true) {
+                continue;
+            }
+            let rel = p.strip_prefix(&dir).unwrap_or(&p).with_extension("");
+            if let Ok(text) = std::fs::read_to_string(&p) {
+                out.push(ConfigFile { name: rel.display().to_string(), text });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
 }

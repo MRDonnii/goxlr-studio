@@ -55,3 +55,9 @@ test('JSON patch applies daemon updates', () => {
   assert.deepEqual(doc.mixers.S1.list, [2, 3]);
   assert.equal(doc.mixers['S1/x'], true);
 });
+
+test('Peace GraphicEQ lines become peaking bands', () => {
+  const eq = parseApoConfig('Preamp: -3 dB\nGraphicEQ: 25 0; 40 0; 63 4; 100 2; 160 0; 250 -2; 400 0');
+  assert.deepEqual(eq.bands.map((b) => [b.freq, b.gain]), [[63, 4], [100, 2], [250, -2]]);
+  assert.ok(eq.bands.every((b) => b.q > 0.5 && b.q < 10));
+});

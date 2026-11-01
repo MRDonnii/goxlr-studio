@@ -78,3 +78,38 @@ export async function apoReadConfig() {
   if (!isNative()) throw new Error('Kun i Windows-appen');
   return invoke('apo_read_config');
 }
+
+export async function apoOpenConfigurator() {
+  return invoke('apo_open_configurator');
+}
+
+export async function apoListConfigs() {
+  if (!isNative()) return [];
+  return invoke('apo_list_configs');
+}
+
+export async function setHotkeys(bindings) {
+  if (!isNative()) return bindings.map((b) => ({ id: b.id, ok: true, error: null }));
+  return invoke('set_hotkeys', { bindings });
+}
+
+const DEMO_APPS = [
+  { pid: 101, exe: 'Spotify.exe', path: 'C:\\Spotify\\Spotify.exe', output: 'out-goxlr-music', input: null },
+  { pid: 102, exe: 'Discord.exe', path: 'C:\\Discord\\Discord.exe', output: 'out-goxlr-chat', input: 'in-goxlr-chat' },
+  { pid: 103, exe: 'chrome.exe', path: 'C:\\Chrome\\chrome.exe', output: 'out-goxlr-old', input: null },
+  { pid: 104, exe: 'cod.exe', path: 'C:\\Games\\cod.exe', output: 'out-goxlr-system', input: 'in-goxlr-chat' },
+];
+export async function appSessions() {
+  if (isNative()) return invoke('app_sessions');
+  return structuredClone(DEMO_APPS);
+}
+
+export async function setAppDevice(pid, flow, id) {
+  if (isNative()) return invoke('set_app_device', { pid, flow, id });
+  const a = DEMO_APPS.find((x) => x.pid === pid);
+  if (a) a[flow === 'capture' ? 'input' : 'output'] = id;
+}
+
+export async function setTray(model) {
+  if (isNative()) return invoke('set_tray', { model }).catch(() => {});
+}
