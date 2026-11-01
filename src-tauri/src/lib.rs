@@ -5,6 +5,7 @@ mod audio;
 mod daemon;
 mod daemon_host;
 mod deck;
+mod driver;
 mod engine;
 mod keys;
 mod meters;
@@ -404,6 +405,12 @@ fn take_launch_action(state: State<'_, AppState>) -> Option<String> {
     state.launch_action.lock().unwrap().take()
 }
 
+/// TC-Helicon's GoXLR driver: installed or not, and where to get it (it is never touched).
+#[tauri::command]
+fn driver_info() -> driver::DriverInfo {
+    driver::info()
+}
+
 /// For the Stream Deck page: the app's exe ("Åbn program") and whether goxlr-studio:// links
 /// reach it (the installer registers them; the portable exe cannot).
 #[tauri::command]
@@ -671,6 +678,7 @@ pub fn run() {
             update_log,
             take_launch_action,
             deck_info,
+            driver_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building GoXLR Studio")

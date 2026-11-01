@@ -46,27 +46,71 @@ pub fn link_points_to(command: &str, exe: &str) -> bool {
 
 /// The command Windows runs for goxlr-studio:// links (HKEY_CLASSES_ROOT merges the user's
 /// registration from the installer with a machine-wide one), if the link type is registered.
-#[cfg(windows)]
 pub fn registered_command() -> Option<String> {
+    hkcr_default(&format!(r"{SCHEME}\shell\open\command"))
+}
+
+/// The default value of a key under HKEY_CLASSES_ROOT, read-only (REG_SZ, or REG_EXPAND_SZ with
+/// %VARIABLES% expanded).
+#[cfg(windows)]
+pub fn hkcr_default(path: &str) -> Option<String> {
     use windows::core::PCWSTR;
-    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CLASSES_ROOT, RRF_RT_REG_SZ};
-    let path: Vec<u16> = format!(r"{SCHEME}\shell\open\command").encode_utf16().chain(Some(0)).collect();
+    use windows::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CLASSES_ROOT, KEY_QUERY_VALUE, REG_EXPAND_SZ, REG_SZ, REG_VALUE_TYPE};
+    let wpath: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+    let mut key = HKEY::default();
+    unsafe { RegOpenKeyExW(HKEY_CLASSES_ROOT, PCWSTR(wpath.as_ptr()), 0, KEY_QUERY_VALUE, &mut key) }.ok().ok()?;
+    let mut ty = REG_VALUE_TYPE::default();
     let mut size = 0u32;
-    unsafe { RegGetValueW(HKEY_CLASSES_ROOT, PCWSTR(path.as_ptr()), PCWSTR::null(), RRF_RT_REG_SZ, None, None, Some(&mut size)) }
-        .ok()
-        .ok()?;
-    let mut buf = vec![0u16; (size as usize).div_ceil(2) + 1];
+    let mut read = |buf: Option<*mut u8>, size: &mut u32| unsafe { RegQueryValueExW(key, PCWSTR::null(), None, Some(&mut ty), buf, Some(size)) };
+    let value = (|| {
+        read(None, &mut size).ok().ok()?;
+        let mut buf = vec![0u8; size as usize + 2];
+        read(Some(buf.as_mut_ptr()), &mut size).ok().ok()?;
+        buf.truncate(size as usize);
+        let units: Vec<u16> = buf.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let end = units.iter().position(|&c| c == 0).unwrap_or(units.len());
+        Some(String::from_utf16_lossy(&units[..end]))
+    })();
     unsafe {
-        RegGetValueW(HKEY_CLASSES_ROOT, PCWSTR(path.as_ptr()), PCWSTR::null(), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr().cast()), Some(&mut size))
+        let _ = RegCloseKey(key);
     }
-    .ok()
-    .ok()?;
-    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    Some(String::from_utf16_lossy(&buf[..end]))
+    match ty {
+        REG_SZ => value,
+        REG_EXPAND_SZ => value.map(|v| expand_env(&v, |n| std::env::var(n).ok())),
+        _ => None,
+    }
+}
+
+/// %NAME% → its value (unknown names stay as they are).
+pub fn expand_env(s: &str, var: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find('%') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        match after.find('%') {
+            Some(j) if j > 0 => match var(&after[..j]) {
+                Some(v) => {
+                    out.push_str(&v);
+                    rest = &after[j + 1..];
+                }
+                None => {
+                    out.push('%');
+                    rest = after;
+                }
+            },
+            _ => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(not(windows))]
-pub fn registered_command() -> Option<String> {
+pub fn hkcr_default(_path: &str) -> Option<String> {
     None
 }
 
@@ -98,6 +142,13 @@ mod tests {
         assert_eq!(launch_action(&args(&[exe, "goxlr-studio://settings"])), None);
         assert_eq!(launch_action(&args(&[exe, "--action"])), None);
         assert_eq!(launch_action(&args(&[exe, "goxlr-studio://action/a%0Ab"])), None);
+    }
+
+    #[test]
+    fn expands_environment_variables() {
+        let var = |n: &str| (n == "ProgramFiles").then(|| r"C:\Program Files".to_string());
+        assert_eq!(expand_env(r"%ProgramFiles%\TC\api.dll", var), r"C:\Program Files\TC\api.dll");
+        assert_eq!(expand_env(r"%Nope%\a %% 50%", var), r"%Nope%\a %% 50%");
     }
 
     #[test]

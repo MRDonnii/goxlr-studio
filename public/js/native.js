@@ -373,6 +373,14 @@ export async function takeLaunchAction() {
   return new URLSearchParams(location.search).get('action');
 }
 
+// TC-Helicon's GoXLR driver: { installed, api, download_mini, download_full } (only read, never changed).
+export async function driverInfo() {
+  if (isNative()) return invoke('driver_info');
+  const missing = new URLSearchParams(location.search).has('nodriver');
+  return { installed: !missing, api: missing ? null : 'C:\\Program Files\\TC-HELICON\\GoXLR_Audio_Driver\\W10_x64\\goxlr_audioapi_x64.dll',
+    download_mini: 'https://www.tchelicon.com/en/products/0803-AAB', download_full: 'https://www.tchelicon.com/en/products/0803-AAA' };
+}
+
 // { exe, link_registered, link_here, link_command } – for the Stream Deck page.
 export async function deckInfo() {
   if (isNative()) return invoke('deck_info');

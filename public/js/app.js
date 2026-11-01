@@ -4,7 +4,7 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { deckView } from './views-deck.js';
 import { migrateView } from './views-migrate.js';
@@ -165,6 +165,14 @@ async function doInstallUpdate(background = false) {
   try { await installUpdate(u.asset.url, u.asset.sha256, u.latest, background); } catch (e) { u.installing = false; toast(`Opdatering fejlede: ${e}`); renderBanners(); }
 }
 
+// TC-Helicon's driver makes the GoXLR a sound card and carries the engine's USB talk; GoXLR Studio
+// may not install it, so say so – with TC-Helicon's download – when it is missing.
+async function checkDriver() {
+  const d = await driverInfo().catch(() => null);
+  ctx.driverMissing = d && !d.installed ? d : null;
+  renderBanners();
+}
+
 // GoXLR Studio was started by a Stream Deck button: run that action once the GoXLR is there
 // (most actions need it), or after 15 s anyway.
 async function runLaunchAction() {
@@ -240,6 +248,14 @@ function renderBanners() {
   if (isNative() && conn.mode === 'demo') {
     items.push(h('div', { class: 'banner warn' }, 'GoXLR-motoren kører ikke, eller mixeren er ikke tilsluttet – du ser demo-data.',
       h('button', { class: 'btn sm primary', onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR-motoren')));
+  }
+  if (ctx.driverMissing) {
+    const d = ctx.driverMissing;
+    items.push(h('div', { class: 'banner warn', 'data-testid': 'banner-driver-missing' },
+      'TC-Helicons GoXLR-driver er ikke installeret. Den gør GoXLR’en til et lydkort i Windows, og uden den kan GoXLR Studio ikke tale med GoXLR’en. Driveren er gratis, men den må kun hentes hos TC-Helicon:',
+      h('button', { class: 'btn sm primary', onclick: () => openUrl(d.download_mini) }, 'Hent til GoXLR Mini'),
+      h('button', { class: 'btn sm', onclick: () => openUrl(d.download_full) }, 'Hent til GoXLR'),
+      h('button', { class: 'btn sm', onclick: () => checkDriver().then(() => toast(ctx.driverMissing ? 'Driveren mangler stadig' : 'Driveren er fundet – start GoXLR-motoren', ctx.driverMissing ? undefined : 'info')) }, 'Tjek igen')));
   }
   if (ctx.adminTask) {
     items.push(h('div', { class: 'banner admin', 'data-testid': 'banner-admin-task' },
@@ -679,6 +695,7 @@ async function boot() {
   setTimeout(checkEngineRegistration, 3000);
   setInterval(daemonWatchdog, 15000);
   setTimeout(() => reportUpdateResult(), 2000);
+  setTimeout(() => checkDriver(), 2500);
   runLaunchAction();
   setTimeout(() => checkUpdate(), 15000);
   setInterval(() => checkUpdate(), 6 * 3600 * 1000);

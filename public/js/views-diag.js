@@ -1,5 +1,5 @@
 import { h, toast, errorLog, activityLog } from './ui.js';
-import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo, updateLog } from './native.js';
+import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo, updateLog, driverInfo } from './native.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { describeAction } from './actions.js';
 
@@ -16,6 +16,7 @@ export async function collectDiagnostics(ctx) {
     daemonInfo().catch((e) => ({ error: String(e) })),
     updateLog().catch(() => []),
   ]);
+  const driver = await driverInfo().catch((e) => ({ error: String(e) }));
   const hotkeys = await Promise.all(ctx.hotkeys.map(async (b) => ({
     key: prettyAccel(b.accel),
     action: b.action ? await describeAction(ctx, b.action) : '–',
@@ -33,7 +34,8 @@ export async function collectDiagnostics(ctx) {
       mic_profile: m.mic_profile_name,
       profiles: conn.status.files?.profiles || [],
       engine: daemon,
-    } : { mode: conn.mode, engine: daemon },
+      driver: { installed: driver.installed, api: driver.api || null, version: conn.status.config?.driver_interface?.version || null },
+    } : { mode: conn.mode, engine: daemon, driver: { installed: driver.installed, api: driver.api || null } },
     eq: {
       engine: { kind: engine.kind, version: engine.engine_version, running: engine.running, available: engine.available, apo_installed: engine.apo_installed, taken_over: engine.taken_over, reason: engine.reason || engine.error || null },
       apo_devices: (engine.devices || []).map((d) => `${d.apo ? '✓' : '✕'} ${d.name}`),
@@ -78,6 +80,7 @@ export function diagView(ctx) {
           row('API', r.api?.enabled ? (r.api.error ? 'Fejl' : `Port ${r.api.port}`) : 'Fra', r.api?.error ? 'warn' : null)]),
         section('GoXLR', [row('Forbindelse', g.mode === 'live' ? 'Live' : g.mode, g.mode === 'live' ? 'ok' : 'warn'),
           row('GoXLR-motor', g.engine?.started_by_us ? `I appen (${g.engine.version})` : g.engine?.foreign?.length ? 'GoXLR Utility' : g.engine?.last_error ? `Stoppet: ${g.engine.last_error}` : 'Kører ikke', g.engine?.started_by_us ? 'ok' : 'warn'),
+          row('TC-Helicon-driver', g.driver?.installed === false ? 'Mangler' : g.driver?.installed ? `Installeret${Array.isArray(g.driver.version) ? ` (${g.driver.version.filter((x) => x != null).join('.')})` : ''}` : '–', g.driver?.installed === false ? 'warn' : g.driver?.installed ? 'ok' : null),
           g.model ? row('Model', g.model === 'Mini' ? 'GoXLR Mini' : 'GoXLR') : null, g.firmware ? row('Firmware', g.firmware) : null,
           g.daemon ? row('Motor-version', g.daemon) : null, g.profile ? row('Profil', `${g.profile} / ${g.mic_profile}`) : null].filter(Boolean)),
         section('Afspilnings-EQ', [row('EQ-motor', e.running ? 'Aktiv' : e.available ? 'Klar' : 'Ikke aktiv', e.running ? 'ok' : 'warn'),

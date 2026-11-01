@@ -1,6 +1,6 @@
 import { h, toast, confirmDialog } from './ui.js';
 import {
-  isNative, migrateScan, migrateBackup, migrateCopyProfiles, migrateDisableStartup, migrateStopAhk, installedApps, runUninstaller, openPath, engineInfo, daemonInfo, daemonTakeover, appSessions, listAudioDevices, storeGet, migrateAutostarts, engineTask,
+  isNative, migrateScan, migrateBackup, migrateCopyProfiles, migrateDisableStartup, migrateStopAhk, installedApps, runUninstaller, openPath, engineInfo, daemonInfo, daemonTakeover, appSessions, listAudioDevices, storeGet, migrateAutostarts, engineTask, driverInfo, openUrl,
 } from './native.js';
 import { parseAhk, deviceName, takeoverMessage } from './extras.js';
 import { importPeacePresets } from './views-outeq.js';
@@ -26,7 +26,7 @@ export function migrateView(ctx) {
   const done = (ctx.prefs.migrate ??= {});
   const save = () => ctx.savePrefs();
   const root = h('div', { class: 'grid' }, h('div', { class: 'card hint' }, 'Leder efter din gamle opsætning…'));
-  let scan = null, apps = [], engine = null, daemon = null, autostarts = [];
+  let scan = null, apps = [], engine = null, daemon = null, autostarts = [], driver = null;
 
   const check = (ok, text, sub) => h('div', { class: `check-row ${ok === true ? 'ok' : ok === false ? 'todo' : 'info'}` },
     h('span', { class: 'check-icon' }, ok === true ? '✓' : ok === false ? '•' : 'i'), h('div', {}, h('div', {}, text), sub ? h('div', { class: 'hint' }, sub) : null));
@@ -160,10 +160,13 @@ export function migrateView(ctx) {
       try { const t = await daemonTakeover(); const m = takeoverMessage(t); toast(m.text, m.ok ? 'info' : undefined); } catch (e) { toast(String(e)); }
       reload();
     } }, 'Lad GoXLR Studio overtage nu') : null;
-    // Mindre fejl 3 / P2.3–P2.4: each GoXLR autostart is its own line. GoXLR Utility's are turned
-    // off with the user's OK; the driver's control panel is optional (harmless).
+    // Mindre fejl 3 / P2.3–P2.4: each GoXLR autostart is its own line, turned off with the user's
+    // OK. The driver's control panel (only a tray icon for buffer settings) is included by default –
+    // the driver and the sound are not affected – but it can be kept.
     const label = (a) => (a.kind === 'task' ? `Planlagt opgave "${a.name}"` : `Genvej "${a.name}" i Startup`);
-    const offer = autostarts.filter((a) => a.enabled && a.owner !== 'driver');
+    const offer = autostarts.filter((a) => a.enabled);
+    const others = offer.filter((a) => a.owner !== 'driver');
+    const panel = offer.filter((a) => a.owner === 'driver');
     const disable = async (list) => {
       if (!(await confirmDialog(`Slå disse fra, så de ikke starter med Windows?\n\n${list.map((a) => `• ${label(a)}`).join('\n')}\n\nPlanlagte opgaver deaktiveres, og genveje flyttes til backup-mappen – intet slettes.`, { ok: 'Slå fra' }))) return;
       try {
@@ -173,14 +176,22 @@ export function migrateView(ctx) {
       reload();
     };
     const autostartRows = autostarts.map((a) => a.owner === 'driver'
-      ? check(null, label(a), `TC-Helicons driver-kontrolpanel – ufarligt, og driveren skal blive. Du kan slå autostart fra, hvis du ikke bruger panelet.${a.enabled ? '' : ' (slået fra)'}`)
+      ? check(!a.enabled, label(a), a.enabled ? 'TC-Helicons driver-kontrolpanel: kun et ikon i bakken til bufferindstillinger. Slås det fra, påvirker det hverken driveren eller lyden, og panelet kan stadig åbnes fra Start-menuen.' : 'Slået fra – driveren virker som før')
       : check(!a.enabled, label(a), a.enabled ? `Starter ${a.owner === 'tc-app' ? 'TC-Helicons app (den tager GoXLR’en fra GoXLR Studio)' : 'GoXLR Utility'} med Windows: ${a.target || ''}` : 'Slået fra'));
-    const autostartBtn = offer.length ? h('button', { class: 'btn sm primary', 'data-testid': 'migrate-autostart-off', onclick: () => disable(offer) }, `Slå ${offer.length === 1 ? 'den' : `de ${offer.length}`} fra`) : null;
-    const driverBtns = autostarts.filter((a) => a.enabled && a.owner === 'driver').map((a) => h('button', { class: 'btn sm', 'data-testid': 'migrate-autostart-driver-off', onclick: () => disable([a]) }, 'Slå kontrolpanelets autostart fra (valgfrit)'));
+    const autostartBtn = offer.length ? h('button', { class: 'btn sm primary', 'data-testid': 'migrate-autostart-off', onclick: () => disable(offer) },
+      `Slå ${offer.length === 1 ? 'den' : `alle ${offer.length}`} fra (anbefalet)`) : null;
+    const keepPanelBtn = others.length && panel.length ? h('button', { class: 'btn sm', 'data-testid': 'migrate-autostart-keep-panel', onclick: () => disable(others) }, 'Behold driverens kontrolpanel') : null;
+    const driverRow = driver ? check(driver.installed, 'TC-Helicons USB-driver', driver.installed
+      ? 'Installeret. Den gør GoXLR’en til et lydkort i Windows og bliver – GoXLR Studio ændrer eller fjerner den aldrig.'
+      : 'Mangler. Uden den kan GoXLR Studio ikke tale med GoXLR’en. Den er gratis, men må kun hentes hos TC-Helicon.') : null;
+    const driverBtns = driver && !driver.installed ? h('div', { class: 'row', style: { flexWrap: 'wrap' } },
+      h('button', { class: 'btn sm primary', onclick: () => openUrl(driver.download_mini) }, 'Hent driveren til GoXLR Mini'),
+      h('button', { class: 'btn sm', onclick: () => openUrl(driver.download_full) }, 'Hent driveren til GoXLR')) : null;
     return h('div', { class: 'card' }, h('h2', {}, '4 · GoXLR-motor og profiler'),
+      driverRow, driverBtns,
       check(state[0], 'GoXLR-motor', daemon.bundled ? state[1] : 'Denne version har ikke GoXLR-motoren indbygget – behold GoXLR Utility.'),
       ...autostartRows,
-      autostartBtn || driverBtns.length ? h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } }, autostartBtn, ...driverBtns) : null,
+      autostartBtn ? h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } }, autostartBtn, keepPanelBtn) : null,
       check(null, 'Profiler', `Dine profiler (${(ctx.conn.status?.files?.profiles || []).join(', ') || '–'}) ligger i GoXLR-motorens mappe og bliver ved med at virke.`),
       tc.dir ? check(null, 'TC-Helicons app', `${tc.profiles.length} profiler og ${tc.mic_profiles.length} mikrofonprofiler i ${tc.dir}`) : null,
       h('div', { class: 'row', style: { marginTop: '10px', flexWrap: 'wrap' } }, takeBtn, tcBtn));
@@ -256,7 +267,7 @@ export function migrateView(ctx) {
 
   async function reload() {
     try {
-      [scan, apps, engine, daemon, autostarts] = await Promise.all([migrateScan(), installedApps(), engineInfo(), daemonInfo(), migrateAutostarts().catch(() => [])]);
+      [scan, apps, engine, daemon, autostarts, driver] = await Promise.all([migrateScan(), installedApps(), engineInfo(), daemonInfo(), migrateAutostarts().catch(() => []), driverInfo().catch(() => null)]);
       render();
     } catch (e) {
       root.replaceChildren(h('div', { class: 'card' }, `Kunne ikke scanne: ${e}`));
