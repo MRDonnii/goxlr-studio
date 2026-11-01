@@ -1,6 +1,7 @@
 import { h, slider, segmented, selectBox, toggle, throttle, promptDialog, confirmDialog, toast, logActivity } from './ui.js';
 import { MIC_MODELS, USB_ONLY, micSettings, micPresetCommands, describeMic } from './micpresets.js';
 import { GATE_TIMES, RATIOS, ATTACKS, RELEASES, enumIndex } from './micenums.js';
+import { analyzeMicTest, micSnapshot, snapshotCommands, SPEECH_TARGET } from './micassist.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { coefficients, magnitudeDb, formatFreq } from './eq.js';
@@ -25,8 +26,148 @@ function enumSlider(binder, { label, list, get, set, fmt }) {
 
 const fmtHz = (f) => (f >= 1000 ? `${f / 1000}k` : `${f}`).replace('.', ',');
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const clock = (t) => new Date(t).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
+
+// "Fortryd": before "Indstil til min mikrofon" or the assistant change anything, the mic settings
+// as they were are kept (also across restarts) and can be put back with one click.
+function micUndo(ctx) {
+  const { conn } = ctx;
+  const p = ctx.prefs;
+  const bar = h('div', { class: 'mic-undo', 'data-testid': 'mic-undo' });
+  const isMini = () => conn.mixer?.hardware?.device_type === 'Mini';
+  const render = () => {
+    const u = p.micUndo;
+    bar.replaceChildren(...(u ? [
+      h('span', { class: 'hint' }, `Ændret af ${u.label} kl. ${clock(u.at)}.`),
+      h('button', { class: 'btn sm', 'data-testid': 'mic-undo-btn', disabled: !conn.mixer, onclick: async () => {
+        for (const c of snapshotCommands(u.snap, isMini())) await conn.command(...c);
+        delete p.micUndo; ctx.savePrefs(); render();
+        logActivity(`Mikrofonindstillingerne er sat tilbage (fortryd ${u.label})`);
+        toast('Mikrofonindstillingerne er sat tilbage, som de var', 'info');
+      } }, 'Fortryd'),
+    ] : []));
+  };
+  render();
+  return {
+    bar,
+    save: (label) => { if (conn.mixer) { p.micUndo = { at: Date.now(), label, snap: micSnapshot(conn.mixer) }; ctx.savePrefs(); render(); } },
+  };
+}
+
+// Records a few seconds from the GoXLR's "Chat Mic" (what Discord hears – with the GoXLR's EQ,
+// gate and compressor) and plays it back.
+async function recordAndPlay(seconds, onTick) {
+  const raw = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  let stream = await navigator.mediaDevices.getUserMedia({ audio: raw });
+  const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+  const chat = inputs.find((d) => /chat mic/i.test(d.label) && /goxlr|tc-helicon/i.test(d.label));
+  if (chat && stream.getAudioTracks()[0]?.getSettings().deviceId !== chat.deviceId) {
+    stream.getTracks().forEach((t) => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { ...raw, deviceId: { exact: chat.deviceId } } });
+  }
+  const chunks = [];
+  const rec = new MediaRecorder(stream);
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const stopped = new Promise((r) => { rec.onstop = r; });
+  rec.start();
+  for (let left = seconds; left > 0; left--) { onTick(left); await sleep(1000); }
+  rec.stop();
+  await stopped;
+  stream.getTracks().forEach((t) => t.stop());
+  const url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }));
+  const audio = new Audio(url);
+  audio.onended = () => URL.revokeObjectURL(url);
+  await audio.play();
+  return chat ? chat.label : null;
+}
+
+// Mikrofon-assistenten: the room's noise for 3 s, then normal speech for 6 s → gain and gate.
+function micAssistCard(ctx, undo) {
+  const { conn } = ctx;
+  let running = false;
+  let result = null;
+  const status = h('div', { class: 'mic-assist-status', 'data-testid': 'mic-assist-status' });
+  const fill = h('div', { class: 'fill' });
+  const meter = h('div', { class: 'mic-assist-meter', title: 'Mikrofonens niveau' }, fill, h('div', { class: 'target', style: { left: `${((SPEECH_TARGET + 72) / 72) * 100}%` } }));
+  const body = h('div', { class: 'mic-preset' });
+  // In the browser demo: a quiet room, then a voice.
+  const level = (phase) => (conn.mode === 'live' ? conn.micLevel().catch(() => null)
+    : Promise.resolve(phase === 'silence' ? -63 + Math.random() * 3 : -40 + Math.random() * 16));
+  const listen = async (phase, seconds, text) => {
+    const values = [];
+    const end = Date.now() + seconds * 1000;
+    while (Date.now() < end) {
+      status.textContent = `${text} … ${Math.ceil((end - Date.now()) / 1000)}`;
+      const db = await level(phase);
+      if (Number.isFinite(db)) { values.push(db); fill.style.width = `${Math.max(0, Math.min(100, ((db + 72) / 72) * 100))}%`; }
+      await sleep(100);
+    }
+    return values;
+  };
+  const run = async () => {
+    if (running || !conn.mixer) return;
+    running = true; result = null; render();
+    try {
+      const silence = await listen('silence', 3, 'Vær helt stille');
+      const speech = await listen('speech', 6, 'Tal nu normalt, som når du spiller eller streamer');
+      const mic = conn.mixer.mic_status;
+      result = analyzeMicTest({ silence, speech, gain: mic.mic_gains[mic.mic_type] });
+    } finally {
+      running = false; fill.style.width = '0%'; status.textContent = ''; render();
+    }
+  };
+  const apply = async () => {
+    const r = result;
+    if (!r || r.error || !conn.mixer) return;
+    undo.save('mikrofon-assistenten');
+    const type = conn.mixer.mic_status.mic_type;
+    await conn.command('SetMicrophoneGain', type, r.newGain);
+    await conn.command('SetGateThreshold', r.gate);
+    await conn.command('SetGateActive', true);
+    logActivity(`Mikrofon-assistenten: gain ${r.gain} → ${r.newGain} dB, noise gate ${r.gate} dB`);
+    toast(`Gain ${r.newGain} dB og noise gate ${r.gate} dB er sat. Gem mikrofonprofilen, så det huskes.`, 'info');
+    result = null; render();
+  };
+  const listenBtn = h('button', { class: 'btn sm', 'data-testid': 'mic-listen', onclick: async () => {
+    listenBtn.disabled = true;
+    try {
+      const dev = await recordAndPlay(5, (left) => { listenBtn.textContent = `Optager … ${left}`; });
+      listenBtn.textContent = 'Afspiller …';
+      if (!dev) toast('Fandt ikke GoXLR’ens "Chat Mic" – optog fra standardmikrofonen i stedet', 'info');
+    } catch (e) {
+      toast(`Kunne ikke optage: ${e.message || e}. Giv appen lov til at bruge mikrofonen, hvis Windows spørger.`);
+    } finally {
+      setTimeout(() => { listenBtn.disabled = false; listenBtn.textContent = 'Optag og lyt (5 sek)'; }, 5500);
+    }
+  } }, 'Optag og lyt (5 sek)');
+  const render = () => {
+    const r = result;
+    const rows = [];
+    if (r?.error) rows.push(h('div', { class: 'hint warn-text' }, r.error));
+    else if (r) {
+      rows.push(h('div', {}, `Støj i rummet: ${Math.round(r.noise)} dB · din tale: ${Math.round(r.talk)} dB (højeste ${Math.round(r.peak)} dB).`));
+      rows.push(h('div', { 'data-testid': 'mic-assist-result' },
+        `Forslag: gain ${r.gain} → ${r.newGain} dB (${r.delta >= 0 ? '+' : ''}${r.delta}) og noise gate ${r.gate} dB. Så ligger din tale omkring ${Math.round(r.talkAfter)} dB.`));
+      for (const w of r.warnings) rows.push(h('div', { class: 'hint warn-text' }, w));
+      rows.push(h('div', { class: 'row', style: { flexWrap: 'wrap' } },
+        h('button', { class: 'btn sm primary', 'data-testid': 'mic-assist-apply', onclick: apply }, 'Brug forslaget'),
+        h('button', { class: 'btn sm', onclick: () => { result = null; render(); } }, 'Kassér')));
+    }
+    body.replaceChildren(
+      h('div', { class: 'hint' }, 'Måler dit rum og din stemme og sætter mikrofonens gain og noise gate efter det: først 3 sekunders stilhed, så 6 sekunder hvor du taler normalt.'),
+      meter, status, ...rows,
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } },
+        h('button', { class: 'btn sm primary', 'data-testid': 'mic-assist-start', disabled: running || !conn.mixer, onclick: run }, running ? 'Lytter …' : result ? 'Mål igen' : 'Start'),
+        listenBtn),
+      h('div', { class: 'hint' }, '"Optag og lyt" optager fra GoXLR’ens Chat Mic – præcis det, Discord hører – og afspiller det bagefter.'));
+  };
+  render();
+  return h('div', { class: 'card' }, h('h2', {}, 'Mikrofon-assistent'), body);
+}
+
 // "Din mikrofon": EQ, type, gate, compressor and de-esser from the mic's frequency response.
-function micPresetCard(ctx) {
+function micPresetCard(ctx, undo) {
   const { conn } = ctx;
   const p = ctx.prefs;
   const isMini = () => conn.mixer?.hardware?.device_type === 'Mini';
@@ -50,7 +191,8 @@ function micPresetCard(ctx) {
     const cmds = micPresetCommands(m, isMini(), parts);
     const what = [parts.eq && 'EQ', parts.type && 'mikrofontype', parts.gain && 'gain', parts.gate && 'noise gate', parts.comp && 'kompressor', parts.deess && 'de-esser'].filter(Boolean);
     if (!what.length) { toast('Vælg mindst én ting, der skal indstilles'); return; }
-    if (!(await confirmDialog(`Indstil ${what.join(', ')} til ${m.name}?\n\nDet overskriver de nuværende indstillinger i mikrofonprofilen "${conn.mixer.mic_profile_name}". Gem den bagefter (eller som en ny profil), så det huskes.`, { ok: 'Indstil' }))) return;
+    if (!(await confirmDialog(`Indstil ${what.join(', ')} til ${m.name}?\n\nDet overskriver de nuværende indstillinger i mikrofonprofilen "${conn.mixer.mic_profile_name}" – du kan fortryde bagefter. Gem profilen (eller en ny), når du er tilfreds.`, { ok: 'Indstil' }))) return;
+    undo.save(m.name);
     for (const c of cmds) await conn.command(...c);
     p.micModel = m.id; ctx.savePrefs();
     logActivity(`Mikrofon indstillet til ${m.name} (${what.join(', ')})`);
@@ -85,7 +227,7 @@ function micPresetCard(ctx) {
       h('div', { class: 'hint' }, 'Et udgangspunkt ud fra producentens frekvenskurve: EQ = en klar talestemme minus mikrofonens egen klang. Rum, stemme og afstand er forskellige, så lyt og finjustér. Gain står fra, fordi den afhænger af, hvor tæt og hvor højt du taler.'));
   };
   render();
-  return h('div', { class: 'card' }, h('h2', {}, 'Din mikrofon'), h('div', { class: 'row', style: { flexWrap: 'wrap' } }, sel), body);
+  return h('div', { class: 'card' }, h('h2', {}, 'Din mikrofon'), h('div', { class: 'row', style: { flexWrap: 'wrap' } }, sel), body, undo.bar);
 }
 
 export function micView(ctx) {
@@ -206,5 +348,6 @@ export function micView(ctx) {
     h('button', { class: 'btn sm', onclick: () => conn.command('SaveMicProfile') }, 'Gem'),
     h('button', { class: 'btn sm', 'data-testid': 'mic-profile-save-as', onclick: async () => { const n = await promptDialog('Navn på ny mikrofonprofil'); if (n) conn.command('SaveMicProfileAs', n); } }, 'Gem som…')));
 
-  return h('div', { class: 'grid' }, micPresetCard(ctx), eqCard, h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp));
+  const undo = micUndo(ctx);
+  return h('div', { class: 'grid' }, h('div', { class: 'grid cols-2' }, micPresetCard(ctx, undo), micAssistCard(ctx, undo)), eqCard, h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp));
 }

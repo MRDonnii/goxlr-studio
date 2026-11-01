@@ -80,3 +80,51 @@ test('gate and compressor times go to the engine as list positions (serde_repr u
   assert.equal(e.enumIndex(e.RATIOS, 99), 14);
   assert.equal(e.enumIndex(e.RATIOS, 'nope'), 0);
 });
+
+const a = await import('../public/js/micassist.js');
+
+test('mic assistant: gain to speech ≈ −15 dB with peaks below −6, gate above the room', () => {
+  // Quiet room (−62 dB), speech around −30 dB with peaks at −22 dB, gain 40 dB.
+  const silence = Array.from({ length: 30 }, (_, i) => -63 + (i % 3));
+  const speech = Array.from({ length: 60 }, (_, i) => -40 + (i % 11));
+  const r = a.analyzeMicTest({ silence, speech, gain: 40 });
+  assert.equal(r.noise, -61);
+  assert.equal(r.talk, -31);
+  assert.equal(r.delta, 16);
+  assert.equal(r.newGain, 56);
+  assert.ok(r.peak + r.delta <= a.PEAK_LIMIT);
+  assert.equal(r.gate, -37); // noise −45 after +16 dB, +8 → −37; speech −15 − 12 = −27
+  assert.deepEqual(r.warnings, []);
+  // Peaks decide when they would clip: speech at −20 but a peak at −4 → gain down.
+  const loud = a.analyzeMicTest({ silence, speech: [-22, -21, -20, -20, -4], gain: 30 });
+  assert.ok(loud.delta < 0 && loud.peak + loud.delta <= a.PEAK_LIMIT);
+  // A weak mic at full gain is told so; no difference between silence and speech is an error.
+  assert.match(a.analyzeMicTest({ silence, speech: speech.map((x) => x - 20), gain: 70 }).warnings[0], /svag/);
+  assert.ok(a.analyzeMicTest({ silence, speech: silence, gain: 40 }).error);
+  assert.ok(a.analyzeMicTest({ silence: [], speech: [], gain: 40 }).error);
+});
+
+test('snapshot of the mic settings puts everything back, also from names in older demo data', async () => {
+  const mixer = {
+    mic_status: {
+      mic_type: 'Condenser', mic_gains: { Dynamic: 50, Condenser: 31, Jack: 20 },
+      equaliser: { gain: { Equalizer31Hz: -3 }, frequency: { Equalizer31Hz: 31.5 } },
+      equaliser_mini: { gain: { Equalizer90Hz: 2 }, frequency: { Equalizer90Hz: 90 } },
+      noise_gate: { threshold: -40, attack: 0, release: 'Gate250ms', enabled: true, attenuation: 80 },
+      compressor: { threshold: -20, ratio: 8, attack: 4, release: 9, makeup_gain: 3 },
+    },
+    levels: { deess: 35 },
+  };
+  const s = a.micSnapshot(mixer);
+  mixer.mic_status.mic_gains.Condenser = 60; // a later change does not touch the snapshot
+  const full = a.snapshotCommands(s, false);
+  assert.deepEqual(full[0], ['SetMicrophoneType', 'Condenser']);
+  assert.deepEqual(full[1], ['SetMicrophoneGain', 'Condenser', 31]);
+  assert.ok(full.some((c) => c[0] === 'SetEqGain' && c[1] === 'Equalizer31Hz' && c[2] === -3));
+  assert.ok(full.some((c) => c[0] === 'SetGateRelease' && c[1] === 20));
+  assert.ok(full.some((c) => c[0] === 'SetCompressorRatio' && c[1] === 8));
+  assert.ok(full.some((c) => c[0] === 'SetDeeser' && c[1] === 35));
+  const mini = a.snapshotCommands(s, true);
+  assert.ok(mini.some((c) => c[0] === 'SetEqMiniGain' && c[2] === 2));
+  assert.ok(!mini.some((c) => c[0] === 'SetEqGain'));
+});

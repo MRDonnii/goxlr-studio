@@ -279,3 +279,11 @@ input[data-testid="deck-search"] { flex: 1; min-width: 0; }
 .mic-preset { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .mic-preset-parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px; }
 select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
+
+/* Mikrofon-assistent + fortryd */
+.mic-assist-meter { position: relative; height: 10px; border-radius: 5px; background: #1a2233; overflow: hidden; }
+.mic-assist-meter .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #eab308 75%, #ef4444); transition: width 90ms linear; }
+.mic-assist-meter .target { position: absolute; top: 0; bottom: 0; width: 2px; background: #e5e7eb; opacity: .6; }
+.mic-assist-status { min-height: 1.3em; font-weight: 600; }
+.warn-text { color: #fbbf24; }
+.mic-undo:not(:empty) { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
