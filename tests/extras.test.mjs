@@ -283,3 +283,12 @@ test('device triggers: suggestions from the GoXLR profile names', () => {
   assert.deepEqual(x.suggestDeviceActions(['Headset', 'Speakers', 'Stream']), { onConnect: ['profile:Headset'], onDisconnect: ['profile:Speakers'] });
   assert.deepEqual(x.suggestDeviceActions(['Default']), { onConnect: [], onDisconnect: [] });
 });
+
+test('mono and balance only lower, as Equalizer APO lines', () => {
+  assert.deepEqual(x.channelLines({}), []);
+  assert.deepEqual(x.channelLines({ mono: true }), ['Channel: all', 'Copy: L=0.5*L+0.5*R R=0.5*L+0.5*R']);
+  assert.deepEqual(x.channelLines({ balance: 3 }), ['Channel: L', 'Preamp: -3.0 dB', 'Channel: all']);
+  assert.deepEqual(x.channelLines({ balance: -1.5 }), ['Channel: R', 'Preamp: -1.5 dB', 'Channel: all']);
+  const p = x.enginePayload({ enabled: true, preamp: 0, bands: [] }, { channels: { mono: true, balance: 2 } });
+  assert.equal(p.extra.length, 5);
+});

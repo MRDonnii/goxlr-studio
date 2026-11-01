@@ -26,11 +26,13 @@ test('the chain includes Loudness: its shelves count, its preamp too', () => {
   assert.equal(c.chainPeak({ ...eq, enabled: false }, {}), 0);
 });
 
-test('Auto puts the loudest point of the whole chain at 0 dB, never above 0 dB preamp', () => {
+test('Auto puts the loudest point of the whole chain at −0,5 dB, never above 0 dB preamp', () => {
   const eq = eqOf(0, [pk(1000, 3)]);
-  assert.equal(c.safePreamp(eq, {}), -3);
+  assert.equal(c.safePreamp(eq, {}), -3.5);
   const peak = c.chainPeak({ ...eq, preamp: c.safePreamp(eq, {}) }, {});
-  assert.ok(peak <= 0 && peak > -0.11, String(peak));
+  assert.ok(peak <= -0.5 && peak > -0.61, String(peak));
+  // Nothing boosted: 0 dB preamp, no margin needed.
+  assert.equal(c.safePreamp(eqOf(-2, [pk(500, -4)]), {}), 0);
   // Only cuts: the preamp goes back to 0, not above.
   assert.equal(c.safePreamp(eqOf(-6, [pk(1000, -3)]), {}), 0);
   // Loudness on top of a bass boost needs more.
@@ -41,11 +43,11 @@ test('Auto puts the loudest point of the whole chain at 0 dB, never above 0 dB p
 test('klip-beskyttelse lowers just enough, and only when needed', () => {
   assert.equal(c.clipGuard(eqOf(0, [pk(1000, -3)]), {}), 0);
   const g = c.clipGuard(eqOf(0, [pk(1000, 5)]), {});
-  assert.ok(g <= -5 && g >= -5.1, String(g));
+  assert.ok(g <= -5.5 && g >= -5.6, String(g));
   // The offset makes the played chain stay at or below 0 dB.
   const eq = eqOf(-1, [pk(250, 4), pk(3000, 6, 2)]);
   const off = c.clipGuard(eq, {});
-  assert.ok(Math.max(...c.chainResponse(eq, {}, undefined, off)) <= 0.001);
+  assert.ok(Math.max(...c.chainResponse(eq, {}, undefined, off)) <= -0.499);
   assert.equal(c.clipGuard({ ...eq, enabled: false }, {}), 0);
 });
 
@@ -59,7 +61,7 @@ test('headroom badge texts', () => {
   assert.equal(c.headroomInfo(eqOf(-3, []), {}).text, 'Headroom 3,0 dB');
   assert.equal(c.headroomInfo(eqOf(0, [pk(1000, 2)]), {}, false).kind, 'clip');
   assert.match(c.headroomInfo(eqOf(0, [pk(1000, 2)]), {}, false).text, /^Kan klippe \+2,0 dB$/);
-  assert.match(c.headroomInfo(eqOf(0, [pk(1000, 2)]), {}, true).text, /^Klip-beskyttelse −2,0 dB$/);
+  assert.match(c.headroomInfo(eqOf(0, [pk(1000, 2)]), {}, true).text, /^Klip-beskyttelse −2,5 dB$/);
   assert.equal(c.headroomInfo({ ...eqOf(0, []), enabled: false }, {}).kind, 'off');
 });
 
@@ -109,7 +111,7 @@ test('A/B match counts the clip guard, and needs the EQ on in both slots', () =>
   const m = c.abMatch(st);
   assert.ok(m.diff < 0, String(m.diff));
   assert.ok(m.match.A < 0 && m.match.B === 0);
-  assert.ok(c.playbackOffset(st) <= -5.9 && c.playbackOffset(st) >= -6.1, 'B plays with the guard only');
+  assert.ok(c.playbackOffset(st) <= -6.4 && c.playbackOffset(st) >= -6.6, 'B plays with the guard only');
   const off = c.abMatch({ ...st, slots: { A: { ...eqOf(0, []), enabled: false }, B: eqOf(-6, []) } });
   assert.equal(off.unmatched, true);
   assert.deepEqual(off.match, { A: 0, B: 0 });

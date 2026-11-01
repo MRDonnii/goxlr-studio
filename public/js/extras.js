@@ -33,6 +33,16 @@ export function crossfeedLines({ level = -8, cutoff = 700, delay = 0.3 } = {}) {
   ];
 }
 
+// Mono (both ears get the same – one earbud, or hearing loss on one side) and balance (dB; above
+// 0 = more to the right, the left side is lowered). Only lowers, so it never clips.
+export function channelLines({ mono = false, balance = 0 } = {}) {
+  const out = [];
+  if (mono) out.push('Channel: all', 'Copy: L=0.5*L+0.5*R R=0.5*L+0.5*R');
+  const b = Math.max(-20, Math.min(20, Number(balance) || 0));
+  if (b) out.push(`Channel: ${b > 0 ? 'L' : 'R'}`, `Preamp: ${(-Math.abs(b)).toFixed(1)} dB`, 'Channel: all');
+  return out;
+}
+
 // Gentle bass/treble lift for listening at low volume (amount 0–10 dB).
 export function loudnessBands(amount) {
   if (!amount) return [];
@@ -51,7 +61,7 @@ export function enginePayload(eq, extras = {}, target = null, offset = 0) {
     ...eq,
     preamp,
     bands: [...eq.bands, ...loud],
-    extra: extras.crossfeed?.enabled ? crossfeedLines(extras.crossfeed) : [],
+    extra: [...(extras.crossfeed?.enabled ? crossfeedLines(extras.crossfeed) : []), ...channelLines(extras.channels)],
     target,
   };
 }

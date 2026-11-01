@@ -9,7 +9,9 @@ use std::path::PathBuf;
 
 /// HKCU\Software\Microsoft\Multimedia\Audio, UserDuckingPreference: what Windows does with other
 /// sounds when it detects communications (0 mute, 1 −80 % (default), 2 −50 %, 3 nothing).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const DUCKING_KEY: &str = r"Software\Microsoft\Multimedia\Audio";
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const DUCKING_VALUE: &str = "UserDuckingPreference";
 
 #[derive(Serialize, Clone, Debug)]

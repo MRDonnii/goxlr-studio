@@ -27,18 +27,25 @@ export function chainResponse(eq, extras = {}, freqs = CHAIN_FREQS, offset = 0) 
 
 export const chainPeak = (eq, extras, freqs = CHAIN_FREQS) => Math.max(...chainResponse(eq, extras, freqs));
 
-/** "Klip-beskyttelse": how much the engine lowers the preamp, so the chain never goes above 0 dB
- *  (0 when it doesn't need to). The stored preset is left as it is. */
-export function clipGuard(eq, extras) {
+// A boosted signal can peak a little higher between the samples than the curve shows, so a chain
+// that boosts is taken down to −0,5 dB, not 0 dB.
+export const SAFETY_MARGIN = 0.5;
+
+/** "Klip-beskyttelse": how much the engine lowers the preamp when the chain would go above 0 dB –
+ *  down to −0,5 dB (0 when it doesn't need to). The stored preset is left as it is. */
+export function clipGuard(eq, extras, margin = SAFETY_MARGIN) {
   if (!eq?.enabled) return 0;
   const peak = chainPeak(eq, extras);
-  return peak > 0.05 ? -Math.ceil(peak * 10) / 10 : 0;
+  return peak > 0.05 ? -Math.ceil((peak + margin) * 10) / 10 : 0;
 }
 
-/** "Auto": the preamp that puts the loudest point of the whole chain at 0 dB – never above 0 dB. */
-export function safePreamp(eq, extras) {
+/** "Auto": the preamp that puts the loudest point of the whole chain at −0,5 dB – or 0 dB preamp
+ *  when nothing is boosted. Never above 0 dB. */
+export function safePreamp(eq, extras, margin = SAFETY_MARGIN) {
+  const boost = chainPeak({ ...eq, preamp: 0, enabled: true }, extras);
+  if (boost <= 0.05) return 0;
   const peak = chainPeak({ ...eq, enabled: true }, extras);
-  return Math.min(0, Math.floor(((eq.preamp || 0) - peak) * 10 + 1e-6) / 10) || 0;
+  return Math.min(0, Math.floor(((eq.preamp || 0) - peak - margin) * 10 + 1e-6) / 10) || 0;
 }
 
 /** For the toolbar badge: headroom, or what the clip guard does, or a warning when it is off. */

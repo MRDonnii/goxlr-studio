@@ -74,6 +74,7 @@ function extrasCard(ctx, apply) {
   const x = state.extras;
   x.crossfeed ??= { enabled: false, level: -8, cutoff: 700, delay: 0.3 };
   x.loudness ??= { enabled: false, amount: 4 };
+  x.channels ??= { mono: false, balance: 0 };
   const save = () => { storeSet('output-eq', state); apply(); };
   const sw = (obj) => { const i = h('input', { type: 'checkbox', checked: obj.enabled, onchange: () => { obj.enabled = i.checked; save(); } }); return h('label', { class: 'switch' }, i, h('span')); };
   const range = (obj, key, min, max, step, fmt) => {
@@ -92,7 +93,11 @@ function extrasCard(ctx, apply) {
     h('div', { class: 'hint' }, 'Til hovedtelefoner: lidt af venstre kanal blandes ind i højre (og omvendt) som når man hører højttalere – mindre "lyd inde i hovedet".'),
     h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'Loudness'), h('div', { class: 'spacer' }), sw(x.loudness)),
     h('div', { class: 'row' }, h('label', {}, 'Løft'), ...range(x.loudness, 'amount', 1, 10, 0.5, (v) => `${v} dB`)),
-    h('div', { class: 'hint' }, 'Løfter bas og diskant til lav lydstyrke. Preamp sænkes automatisk tilsvarende, så intet klipper. Begge dele virker oven på alle presets.'));
+    h('div', { class: 'hint' }, 'Løfter bas og diskant til lav lydstyrke. Preamp sænkes automatisk tilsvarende, så intet klipper. Begge dele virker oven på alle presets.'),
+    h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'Mono'), h('div', { class: 'spacer' }),
+      (() => { const i = h('input', { type: 'checkbox', 'data-testid': 'eq-mono', checked: !!x.channels.mono, onchange: () => { x.channels.mono = i.checked; save(); } }); return h('label', { class: 'switch' }, i, h('span')); })()),
+    h('div', { class: 'row' }, h('label', {}, 'Balance'), ...range(x.channels, 'balance', -10, 10, 0.5, (v) => (v === 0 ? 'Midt' : `${v > 0 ? 'H' : 'V'} ${String(Math.abs(v)).replace('.', ',')} dB`))),
+    h('div', { class: 'hint' }, 'Mono: begge ører får det samme – fx med én øresnegl eller nedsat hørelse på det ene øre. Balance: H 3 dB = venstre side 3 dB lavere, så lyden flytter mod højre.'));
 }
 
 // Search the AutoEQ project's measured corrections and import one as a preset.
