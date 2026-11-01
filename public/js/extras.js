@@ -449,3 +449,28 @@ export function startLevelCommands(cfg, available = []) {
     .filter(([c, v]) => v != null && Number.isFinite(+v) && available.includes(c))
     .map(([c, v]) => ['SetVolume', c, Math.round((Math.max(0, Math.min(100, +v)) * 255) / 100)]);
 }
+
+// ---------- "Hvad er nyt" ----------
+/** The release notes in the UI's language: Danish before "### English", English after it. */
+export function notesFor(body, lang) {
+  const text = String(body || '').replace(/\r/g, '').split(/\n\*\*Full Changelog\*\*/)[0];
+  const i = text.search(/^#{2,3}\s*English\s*$/m);
+  if (i < 0) return text.trim();
+  if (lang === 'en') return text.slice(i).replace(/^#{2,3}\s*English\s*\n/, '').trim();
+  return text.slice(0, i).replace(/\n-{3,}\s*$/, '').trim();
+}
+
+/** A little Markdown (headings, lists, **bold**, ---) as blocks – drawn without HTML. */
+export function markdownBlocks(md) {
+  const inline = (s) => s.split(/(\*\*[^*]+\*\*)/).filter(Boolean).map((x) => (/^\*\*.+\*\*$/.test(x) ? { text: x.slice(2, -2), bold: true } : { text: x.replace(/`/g, '') }));
+  const out = [];
+  for (const raw of String(md || '').split('\n')) {
+    const line = raw.trimEnd();
+    if (!line.trim()) continue;
+    if (/^-{3,}$/.test(line.trim())) out.push({ kind: 'hr' });
+    else if (/^#{1,6}\s/.test(line)) out.push({ kind: 'h', parts: inline(line.replace(/^#+\s*/, '')) });
+    else if (/^\s*[-*]\s/.test(line)) out.push({ kind: 'li', parts: inline(line.replace(/^\s*[-*]\s+/, '')) });
+    else out.push({ kind: 'p', parts: inline(line) });
+  }
+  return out;
+}

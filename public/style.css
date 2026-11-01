@@ -342,3 +342,11 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 /* EQ: "Lyder det forkert?" */
 .fix-grid { display: flex; flex-wrap: wrap; gap: 6px; }
 .preset-info { font-style: italic; }
+
+/* "Hvad er nyt" */
+.dlg.dlg-wide { max-width: 640px; }
+.dlg-body { max-height: 60vh; overflow: auto; padding-right: 4px; }
+.dlg-body h4 { margin: 12px 0 4px; font-size: 14px; }
+.dlg-body ul { margin: 4px 0 8px; padding-left: 20px; }
+.dlg-body p { margin: 6px 0; }
+.dlg-body hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }

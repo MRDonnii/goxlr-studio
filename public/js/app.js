@@ -1,5 +1,5 @@
 import { GoXLRConnection } from './api.js';
-import { h, Binder, toast, icon, ICONS, logActivity, confirmDialog } from './ui.js';
+import { h, Binder, toast, icon, ICONS, logActivity, confirmDialog, infoDialog } from './ui.js';
 import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
@@ -13,13 +13,13 @@ import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
 import { playbackOffset } from './eqchain.js';
-import { channelEndpoint, enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
+import { notesFor, markdownBlocks, channelEndpoint, enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { startDeviceTriggers } from './devicetriggers.js';
 import { startMqtt } from './mqtt.js';
 import { startHearing } from './hearing.js';
-import { setLanguage, resolveLanguage, t } from './i18n.js';
+import { setLanguage, resolveLanguage, t, language } from './i18n.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 
@@ -277,6 +277,36 @@ async function reportUpdateResult() {
   else { u.failed = out.text; renderBanners(); }
   ctx.onUpdateState?.();
 }
+
+// ---------- "Hvad er nyt" ----------
+// Once after an update (not after the first install): the release notes for the version you got.
+async function showWhatsNew(force = false) {
+  const info = await appInfo().catch(() => null);
+  if (!info) return;
+  const seen = ctx.prefs.lastSeenVersion;
+  if (!force) {
+    if (seen === info.version) return;
+    ctx.prefs.lastSeenVersion = info.version;
+    ctx.savePrefs();
+    if (!seen) return;
+  }
+  const rel = await latestRelease().catch(() => null);
+  if (!rel || compareVersions(rel.tag_name, info.version) !== 0 || !rel.body) {
+    if (force) toast('Kunne ikke hente udgivelsesnoterne');
+    return;
+  }
+  const blocks = markdownBlocks(notesFor(rel.body, language())).filter((b, i) => !(i === 0 && b.kind === 'h'));
+  const inline = (parts) => parts.map((x) => (x.bold ? h('strong', {}, x.text) : x.text));
+  const nodes = [];
+  let list = null;
+  for (const b of blocks) {
+    if (b.kind === 'li') { if (!list) { list = h('ul'); nodes.push(list); } list.append(h('li', {}, inline(b.parts))); continue; }
+    list = null;
+    nodes.push(b.kind === 'hr' ? h('hr') : b.kind === 'h' ? h('h4', {}, inline(b.parts)) : h('p', {}, inline(b.parts)));
+  }
+  infoDialog(`Hvad er nyt i GoXLR Studio ${info.version}`, nodes, { testid: 'whats-new' });
+}
+ctx.showWhatsNew = (force) => showWhatsNew(force);
 
 // ---------- local API ----------
 async function applyApi() {
@@ -816,6 +846,7 @@ async function boot() {
   setTimeout(checkEngineRegistration, 3000);
   setInterval(daemonWatchdog, 15000);
   setTimeout(() => reportUpdateResult(), 2000);
+  setTimeout(() => showWhatsNew(), 4000);
   setTimeout(() => checkDriver(), 2500);
   startMutedReminder();
   runLaunchAction();

@@ -190,3 +190,17 @@ export function dialog({ title = '', text = '', input = null, ok = 'OK', cancel 
 }
 export const confirmDialog = (text, opts = {}) => dialog({ text, ...opts });
 export const promptDialog = (text, value = '', opts = {}) => dialog({ text, ...opts, input: { value, ...(opts.input || {}) } });
+
+/** A dialog with your own content (nodes) and one OK button. */
+export function infoDialog(title, content, { ok = 'OK', testid = 'info-dialog' } = {}) {
+  return new Promise((resolve) => {
+    const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); resolve(); };
+    const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); close(); } };
+    const okBtn = h('button', { class: 'btn sm primary', 'data-testid': 'dialog-ok', onclick: close }, ok);
+    const overlay = h('div', { class: 'dlg-overlay', 'data-testid': testid },
+      h('div', { class: 'dlg dlg-wide', role: 'dialog', 'aria-modal': 'true' }, title ? h('h3', {}, title) : null, h('div', { class: 'dlg-body' }, content), h('div', { class: 'row dlg-actions' }, okBtn)));
+    document.body.append(overlay);
+    document.addEventListener('keydown', onKey, true);
+    okBtn.focus();
+  });
+}

@@ -309,3 +309,13 @@ test('EQ presets: export all, import adds and never overwrites', () => {
   assert.throws(() => x.importPresets({}, '{"hej":1}'), /presetfil/);
   assert.throws(() => x.importPresets({}, 'Preamp: -3 dB'), /presetfil/);
 });
+
+test('"Hvad er nyt": the notes in the right language, drawn as blocks', () => {
+  const body = '## GoXLR Studio 0.5.4\n\n**Nyt: Dansk.** Tekst\n- punkt\n\n---\n\n### English\n\n**New: English.** Text\n- item\n\n**Full Changelog**: x';
+  assert.match(x.notesFor(body, 'da'), /^## GoXLR Studio 0.5.4[\s\S]*- punkt$/);
+  assert.match(x.notesFor(body, 'en'), /^\*\*New: English\.\*\* Text\n- item$/);
+  assert.equal(x.notesFor('Kun dansk', 'en'), 'Kun dansk');
+  const b = x.markdownBlocks(x.notesFor(body, 'da'));
+  assert.deepEqual(b.map((y) => y.kind), ['h', 'p', 'li']);
+  assert.deepEqual(b[1].parts, [{ text: 'Nyt: Dansk.', bold: true }, { text: ' Tekst' }]);
+});

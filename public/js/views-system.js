@@ -74,7 +74,8 @@ export function systemSettings(ctx) {
   renderUpd();
   const updCard = h('div', { class: 'card' }, h('h2', {}, 'Opdateringer'), updInfo,
     toggle(binder, { label: 'Installér automatisk (når appen ligger i bakken)', get: () => p.autoUpdate !== false, set: (v) => { p.autoUpdate = v; ctx.savePrefs(); } }),
-    h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => ctx.checkUpdate(true) }, 'Søg efter opdatering'), installBtn,
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('button', { class: 'btn sm', onclick: () => ctx.checkUpdate(true) }, 'Søg efter opdatering'), installBtn,
+      h('button', { class: 'btn sm', 'data-testid': 'whats-new-btn', onclick: () => ctx.showWhatsNew?.(true) }, 'Hvad er nyt'),
       h('a', { href: 'https://github.com/MRDonnii/goxlr-studio/releases', target: '_blank', rel: 'noopener' }, 'Udgivelser')),
     h('div', { class: 'hint' }, 'Appen tjekker GitHub hver 6. time. Filen kontrolleres mod GitHubs checksum, før den installeres; dine indstillinger bevares. Under installationen lukker GoXLR Studio, installeren vises kort, og appen starter igen af sig selv – hvert trin skrives i Diagnose.'));
 
