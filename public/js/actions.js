@@ -1,4 +1,7 @@
 import { toast } from './ui.js';
+
+// Toast in the app, plus the on-screen display when the app is in the background.
+const notify = (ctx, text, kind = 'info') => (ctx.notify ? ctx.notify(text, kind) : toast(text, 'info'));
 import { storeSet, listAudioDevices, setDefaultDevice } from './native.js';
 import { applyScene } from './views-misc.js';
 import { BUILTIN_PRESETS } from './eq.js';
@@ -20,7 +23,7 @@ export function applyEqPreset(ctx, name) {
   storeSet('output-eq', ctx.outputEq);
   ctx.applyOutputEq();
   ctx.onStateChanged?.('eq');
-  toast(`EQ: ${name}`, 'info');
+  notify(ctx, `EQ: ${name}`);
 }
 
 export function toggleEq(ctx) {
@@ -29,12 +32,12 @@ export function toggleEq(ctx) {
   storeSet('output-eq', ctx.outputEq);
   ctx.applyOutputEq();
   ctx.onStateChanged?.('eq');
-  toast(`EQ ${e.enabled ? 'til' : 'fra'}`, 'info');
+  notify(ctx, `EQ ${e.enabled ? 'til' : 'fra'}`, e.enabled ? 'ok' : 'mute');
 }
 
 function loadProfile(ctx, name) {
   ctx.conn.command('LoadProfile', name, true);
-  toast(`Profil: ${name}`, 'info');
+  notify(ctx, `Profil: ${name}`);
 }
 
 async function cycleOutput(ctx) {
@@ -47,7 +50,7 @@ async function cycleOutput(ctx) {
   const next = ring[(i + 1) % ring.length];
   await setDefaultDevice(next.id, 'all');
   ctx.refreshDevices?.();
-  toast(`Udgang: ${shortName(next.name)}`, 'info');
+  notify(ctx, `Udgang: ${shortName(next.name)}`);
 }
 
 function nudgeVolume(ctx, ch, delta) {
@@ -66,11 +69,31 @@ export async function runAction(ctx, id) {
       const [a, b] = arg.split('|');
       return loadProfile(ctx, m?.profile_name === a ? b : a);
     }
-    case 'micprofile': ctx.conn.command('LoadMicProfile', arg, true); return toast(`Mikrofonprofil: ${arg}`, 'info');
+    case 'micprofile': ctx.conn.command('LoadMicProfile', arg, true); return notify(ctx, `Mikrofonprofil: ${arg}`);
     case 'scene': { const s = ctx.scenes.find((x) => x.id === arg); if (s) return applyScene(ctx, s); return; }
-    case 'mute-mic': if (m) ctx.conn.command('SetCoughMuteState', m.cough_button.state === 'Unmuted' ? 'MutedToX' : 'Unmuted'); return;
-    case 'mute-fader': if (m) ctx.conn.command('SetFaderMuteState', arg, m.fader_status[arg].mute_state === 'Unmuted' ? 'MutedToX' : 'Unmuted'); return;
+    case 'mute-mic': {
+      if (!m) return;
+      const mute = m.cough_button.state === 'Unmuted';
+      ctx.conn.command('SetCoughMuteState', mute ? 'MutedToX' : 'Unmuted');
+      return notify(ctx, mute ? 'Mikrofon muted' : 'Mikrofon tændt', mute ? 'mute' : 'ok');
+    }
+    case 'mute-fader': {
+      if (!m) return;
+      const mute = m.fader_status[arg].mute_state === 'Unmuted';
+      ctx.conn.command('SetFaderMuteState', arg, mute ? 'MutedToX' : 'Unmuted');
+      return notify(ctx, `${m.fader_status[arg].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[arg].channel] || `Fader ${arg}`} ${mute ? 'muted' : 'tændt'}`, mute ? 'mute' : 'ok');
+    }
     case 'eq-toggle': return toggleEq(ctx);
+    case 'crossfeed-toggle':
+    case 'loudness-toggle': {
+      const k = kind === 'crossfeed-toggle' ? 'crossfeed' : 'loudness';
+      const x = (ctx.outputEq.extras ??= {});
+      x[k] = { ...(k === 'crossfeed' ? { level: -8, cutoff: 700, delay: 0.3 } : { amount: 4 }), ...x[k], enabled: !x[k]?.enabled };
+      storeSet('output-eq', ctx.outputEq);
+      ctx.applyOutputEq();
+      ctx.onStateChanged?.('eq');
+      return notify(ctx, `${k === 'crossfeed' ? 'Crossfeed' : 'Loudness'} ${x[k].enabled ? 'til' : 'fra'}`, x[k].enabled ? 'ok' : 'mute');
+    }
     case 'eq-preset': return applyEqPreset(ctx, arg);
     case 'eq-next': {
       const names = eqPresetNames(ctx);
@@ -83,8 +106,8 @@ export async function runAction(ctx, id) {
     case 'output-next': return cycleOutput(ctx);
     case 'vol-up': return nudgeVolume(ctx, arg, 13);
     case 'vol-down': return nudgeVolume(ctx, arg, -13);
-    case 'fx-toggle': if (m?.effects) ctx.conn.command('SetFXEnabled', !m.effects.is_enabled); return;
-    case 'ducking-toggle': ctx.ducker.settings.enabled = !ctx.ducker.settings.enabled; ctx.ducker.save(); return toast(`Auto-ducking ${ctx.ducker.settings.enabled ? 'til' : 'fra'}`, 'info');
+    case 'fx-toggle': if (m?.effects) { ctx.conn.command('SetFXEnabled', !m.effects.is_enabled); notify(ctx, `Effekter ${m.effects.is_enabled ? 'fra' : 'til'}`); } return;
+    case 'ducking-toggle': ctx.ducker.settings.enabled = !ctx.ducker.settings.enabled; ctx.ducker.save(); return notify(ctx, `Auto-ducking ${ctx.ducker.settings.enabled ? 'til' : 'fra'}`);
     case 'show': return window.__TAURI__?.core.invoke('plugin:window|show', { label: 'main' }).catch(() => {});
     default: return undefined;
   }
@@ -105,6 +128,8 @@ export async function actionCatalog(ctx) {
   g('Afspilnings-EQ', [
     { id: 'eq-toggle', label: 'EQ til/fra' },
     { id: 'eq-next', label: 'Næste EQ-preset' },
+    { id: 'crossfeed-toggle', label: 'Crossfeed til/fra' },
+    { id: 'loudness-toggle', label: 'Loudness til/fra' },
     ...eqPresetNames(ctx).map((p) => ({ id: `eq-preset:${p}`, label: `EQ-preset "${p}"` })),
   ]);
   g('Scener', ctx.scenes.map((s) => ({ id: `scene:${s.id}`, label: `Scene "${s.name}"` })));

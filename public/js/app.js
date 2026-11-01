@@ -4,7 +4,9 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, startDaemon, engineStatus, apoTakeover, listAudioDevices } from './native.js';
+import { diagView } from './views-diag.js';
+import { enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { appsView, startAppRules } from './views-apps.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames } from './actions.js';
@@ -22,6 +24,7 @@ const PAGES = [
   { id: 'lighting', title: 'Lys', icon: 'light', view: lightingView },
   { id: 'profiles', title: 'Profiler', icon: 'profile', view: profilesView },
   { id: 'hotkeys', title: 'Genveje', icon: 'key', view: hotkeysView },
+  { id: 'diag', title: 'Diagnose', icon: 'diag', view: diagView },
   { id: 'settings', title: 'Indstillinger', icon: 'settings', view: settingsView },
 ];
 
@@ -70,11 +73,14 @@ const ctx = {
   binder: new Binder(),
   cleanup: [],
   ducker: new Ducker(conn),
-  prefs: { pinnedDevices: [], autostart: false, closeToTray: true },
+  prefs: { pinnedDevices: [], autostart: false, closeToTray: true, osd: true, autoStartDaemon: true, autoUpdate: true, fixStaleApps: false },
   scenes: [],
   hotkeys: [],
   hotkeyStatus: {},
   appRules: [],
+  appTriggers: [],
+  updateState: {},
+  apiError: null,
   capturingHotkey: false,
   outputEq: null,
   onMicLevel: null,
@@ -83,16 +89,170 @@ const ctx = {
   saveScenes: () => { storeSet('scenes', ctx.scenes); syncTray(); renderTopActions(); },
   saveHotkeys: () => { storeSet('hotkeys', ctx.hotkeys); return registerHotkeys(); },
   saveAppRules: () => storeSet('app-rules', ctx.appRules),
+  saveAppTriggers: () => storeSet('app-triggers', ctx.appTriggers),
+  notify: (text, kind = 'info') => {
+    toast(text, 'info');
+    if (ctx.prefs.osd !== false) showOsd(text, kind);
+  },
+  checkUpdate: (manual) => checkUpdate(manual),
+  installUpdate: () => doInstallUpdate(),
+  applyApi: () => applyApi(),
+  onApoChanged: (takenOver) => { ctx.prefs.apoExpected = takenOver; ctx.savePrefs(); ctx.apoLost = false; renderBanners(); },
   pauseHotkeys: () => setHotkeys([]).catch(() => {}),
   resumeHotkeys: () => registerHotkeys(),
   runAction: (id) => Promise.resolve(runAction(ctx, id)).catch((e) => toast(String(e))),
   onStateChanged: (kind) => {
     syncTray();
+    syncTrayStatus();
+    publishApi();
     renderTopActions();
     if (kind === 'eq' && current === 'outeq') mount();
   },
-  applyOutputEq: () => setOutputEqEngine({ ...ctx.outputEq.slots[ctx.outputEq.active], target: ctx.outputEq.target }).catch(() => {}),
+  applyOutputEq: () => applyOutputEq(),
 };
+
+// The EQ target is stored by id and name, so it survives GoXLR driver updates that change ids.
+async function applyOutputEq() {
+  const st = ctx.outputEq;
+  let target = st.target;
+  if (target) {
+    const devs = await listAudioDevices().catch(() => []);
+    const r = resolveDevice(devs, target, st.target_name, 'render');
+    if (r && r !== target) { st.target = target = r; storeSet('output-eq', st); }
+    if (r && !st.target_name) { st.target_name = deviceName(devs, r); storeSet('output-eq', st); }
+  }
+  return setOutputEqEngine(enginePayload(st.slots[st.active], st.extras, target));
+}
+
+// ---------- updates ----------
+const RELEASES = 'https://api.github.com/repos/MRDonnii/goxlr-studio/releases/latest';
+async function checkUpdate(manual = false) {
+  const u = ctx.updateState;
+  try {
+    const info = await appInfo();
+    u.current = info.version;
+    u.installed = info.installed;
+    const r = await fetch(RELEASES, { headers: { Accept: 'application/vnd.github+json' } });
+    if (r.status === 404) { Object.assign(u, { latest: null, available: false, error: null, checkedAt: Date.now() }); if (manual) toast('Der er ingen udgivelser endnu', 'info'); return; }
+    if (!r.ok) throw new Error(`GitHub svarede ${r.status}`);
+    const rel = await r.json();
+    const asset = pickUpdateAsset(rel, info.installed);
+    Object.assign(u, { latest: rel.tag_name, notes: rel.body || '', url: rel.html_url, asset, error: null, checkedAt: Date.now() });
+    u.available = compareVersions(rel.tag_name, info.version) > 0 && !!asset;
+    if (manual) toast(u.available ? `Version ${rel.tag_name} er klar` : 'Du har den nyeste version', 'info');
+    if (u.available && isNative() && ctx.prefs.autoUpdate !== false && document.hidden) doInstallUpdate();
+  } catch (e) {
+    u.error = String(e.message || e);
+    u.checkedAt = Date.now();
+    if (manual) toast(`Opdatering: ${u.error}`);
+  }
+  ctx.onUpdateState?.();
+  renderBanners();
+}
+
+async function doInstallUpdate() {
+  const u = ctx.updateState;
+  if (!u.asset) return;
+  if (!isNative()) { window.open(u.url, '_blank'); return; }
+  u.installing = true;
+  renderBanners();
+  toast(`Henter ${u.latest}… appen genstarter af sig selv`, 'info');
+  try { await installUpdate(u.asset.url, u.asset.sha256); } catch (e) { u.installing = false; toast(`Opdatering fejlede: ${e}`); renderBanners(); }
+}
+
+// ---------- local API ----------
+async function applyApi() {
+  const cfg = ctx.prefs.api;
+  if (!cfg) return;
+  try { await setApi(cfg); ctx.apiError = null; } catch (e) { ctx.apiError = String(e); toast(`API: ${e}`); }
+  publishApi(true);
+}
+
+let apiStateKey = '';
+let apiActionsKey = '';
+async function publishApi(force = false) {
+  if (!isNative() || !ctx.prefs.api?.enabled) return;
+  const m = conn.mixer;
+  const eq = ctx.outputEq?.slots[ctx.outputEq.active];
+  const state = {
+    connected: conn.mode === 'live',
+    profile: m?.profile_name || null,
+    profiles: m ? conn.status.files?.profiles || [] : [],
+    mic_profile: m?.mic_profile_name || null,
+    mic_muted: m ? m.cough_button.state !== 'Unmuted' : null,
+    volumes: m?.levels.volumes || {},
+    eq: { enabled: !!eq?.enabled, preset: ctx.outputEq?.presetName || null, presets: ctx.outputEq ? eqPresetNames(ctx) : [] },
+    scenes: ctx.scenes.map((x) => ({ id: x.id, name: x.name })),
+  };
+  const key = JSON.stringify(state);
+  if (!force && key === apiStateKey) return;
+  apiStateKey = key;
+  const shape = JSON.stringify([state.profiles, state.eq.presets, state.scenes]);
+  let actions;
+  if (force || shape !== apiActionsKey) {
+    apiActionsKey = shape;
+    actions = (await actionCatalog(ctx)).flatMap((g) => g.items.map((i) => ({ id: i.id, label: i.label, group: g.title })));
+  }
+  apiPublish(state, actions);
+}
+
+// ---------- banners (APO lost, daemon missing, update ready) ----------
+function renderBanners() {
+  const el = document.getElementById('banners');
+  if (!el) return;
+  const items = [];
+  if (isNative() && conn.mode === 'demo') {
+    items.push(h('div', { class: 'banner warn' }, 'GoXLR Utility kører ikke – du ser demo-data.',
+      h('button', { class: 'btn sm primary', onclick: () => startDaemon().then(() => toast('Starter GoXLR Utility…', 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR Utility')));
+  }
+  if (ctx.apoLost) {
+    items.push(h('div', { class: 'banner warn' }, 'Equalizer APO’s config.txt er blevet ændret (typisk af Peace) – GoXLR Studios EQ er ikke aktiv.',
+      h('button', { class: 'btn sm primary', onclick: async () => { try { await apoTakeover(true); await ctx.applyOutputEq(); ctx.apoLost = false; toast('EQ’en er aktiv igen', 'info'); } catch (e) { toast(String(e)); } renderBanners(); } }, 'Genopret'),
+      h('button', { class: 'btn sm', onclick: () => ctx.onApoChanged(false) }, 'Lad Peace styre')));
+  }
+  const u = ctx.updateState;
+  if (u.available) {
+    items.push(h('div', { class: 'banner' }, `GoXLR Studio ${u.latest} er klar.`,
+      h('button', { class: 'btn sm primary', disabled: u.installing, onclick: () => doInstallUpdate() }, u.installing ? 'Installerer…' : 'Installér og genstart'),
+      h('a', { href: u.url, target: '_blank', rel: 'noopener' }, 'Hvad er nyt?')));
+  }
+  el.replaceChildren(...items);
+}
+
+// Peace rewrites config.txt when it is opened, which silently removes our Include line.
+async function apoWatchdog() {
+  if (!isNative()) return;
+  const st = await engineStatus().catch(() => null);
+  if (st?.apo_installed) {
+    if (st.taken_over && !ctx.prefs.apoExpected) { ctx.prefs.apoExpected = true; ctx.savePrefs(); }
+    const lost = !st.taken_over && !!ctx.prefs.apoExpected;
+    if (lost && !ctx.apoLost) ctx.notify('Afspilnings-EQ er slået fra af Peace/APO', 'mute');
+    if (lost !== !!ctx.apoLost) { ctx.apoLost = lost; renderBanners(); }
+  }
+}
+
+// ---------- per-profile EQ + tray status ----------
+let lastProfile;
+function followProfile() {
+  const m = conn.mixer;
+  if (!m) return;
+  if (m.profile_name === lastProfile) return;
+  lastProfile = m.profile_name;
+  const link = ctx.outputEq?.profileLinks?.[m.profile_name];
+  if (link && link !== ctx.outputEq.presetName && (ctx.outputEq.presets[link] || BUILTIN_PRESETS[link])) applyEqPreset(ctx, link);
+}
+
+let trayStatusKey = '';
+function syncTrayStatus() {
+  const m = conn.mixer;
+  const muted = !!m && m.cough_button.state !== 'Unmuted';
+  const eq = ctx.outputEq?.slots[ctx.outputEq.active];
+  const tip = ['GoXLR Studio', m?.profile_name, eq ? (eq.enabled ? `EQ: ${ctx.outputEq.presetName || 'tilpasset'}` : 'EQ fra') : null, muted ? 'Mikrofon muted' : null].filter(Boolean).join(' · ');
+  const key = `${muted}|${tip}`;
+  if (key === trayStatusKey) return;
+  trayStatusKey = key;
+  setTrayStatus(muted, tip);
+}
 
 // ---------- hotkeys ----------
 async function registerHotkeys() {
@@ -231,6 +391,10 @@ let lastMode = null;
 conn.addEventListener('change', () => {
   updateChrome();
   syncTray();
+  syncTrayStatus();
+  followProfile();
+  publishApi();
+  if (conn.mode !== lastMode) renderBanners();
   const k = topActionsKey();
   if (k !== topKey) { topKey = k; renderTopActions(); }
   if (conn.serial !== lastSerial || conn.mode !== lastMode) {
@@ -318,11 +482,13 @@ async function registerNativeHooks() {
   });
   // Tray ids are action ids: profile:…, eq-preset:…, eq-toggle, scene:…, mute-mic.
   await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });
+  await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload); });
 }
 
 async function boot() {
-  const [prefs, scenes, outputEq, hotkeys, appRules] = await Promise.all([
-    storeGet('prefs', {}), storeGet('scenes', []), loadOutputEqState(), storeGet('hotkeys', null), storeGet('app-rules', []), ctx.ducker.load()]);
+  const [prefs, scenes, outputEq, hotkeys, appRules, appTriggers] = await Promise.all([
+    storeGet('prefs', {}), storeGet('scenes', []), loadOutputEqState(), storeGet('hotkeys', null), storeGet('app-rules', []), storeGet('app-triggers', []), ctx.ducker.load()]);
+  ctx.appTriggers = appTriggers;
   Object.assign(ctx.prefs, prefs);
   ctx.scenes = scenes;
   ctx.outputEq = outputEq;
@@ -334,7 +500,17 @@ async function boot() {
   registerHotkeys();
   syncTray();
   startAppRules(ctx);
-  ctx.applyOutputEq();
+  ctx.applyOutputEq().catch(() => {});
+  if (ctx.prefs.api?.enabled) applyApi();
+  renderBanners();
+  // Background chores: APO watchdog, daemon autostart, update check.
+  setInterval(apoWatchdog, 20000);
+  setTimeout(apoWatchdog, 4000);
+  setTimeout(() => {
+    if (isNative() && conn.mode === 'demo' && ctx.prefs.autoStartDaemon !== false) startDaemon().catch(() => {});
+  }, 3000);
+  setTimeout(() => checkUpdate(), 15000);
+  setInterval(() => checkUpdate(), 6 * 3600 * 1000);
   current = localStorage.getItem('studio.page') || 'mixer';
   navigate(current);
   conn.start();

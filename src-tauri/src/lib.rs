@@ -1,13 +1,16 @@
+mod api;
 mod apo;
 mod apps;
 mod audio;
 mod daemon;
+mod osd;
 mod store;
+mod update;
 
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -51,6 +54,7 @@ struct AppState {
     close_to_tray: AtomicBool,
     tray: Mutex<TrayModel>,
     hotkeys: Mutex<HashMap<u32, String>>,
+    api: Arc<api::Api>,
 }
 
 #[tauri::command]
@@ -167,6 +171,91 @@ async fn apo_list_configs() -> Result<Vec<apo::ConfigFile>, String> {
     blocking(apo::list_configs).await
 }
 
+#[tauri::command]
+fn show_osd(app: AppHandle, text: String, kind: Option<String>) {
+    osd::show(&app, text, kind.unwrap_or_default());
+}
+
+/// Starts GoXLR Utility if it is installed in one of the usual places.
+#[tauri::command]
+fn start_daemon() -> Result<String, String> {
+    let mut roots = Vec::new();
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+        if let Some(v) = std::env::var_os(var) {
+            let base = std::path::PathBuf::from(v);
+            roots.push(base.join("GoXLR Utility"));
+            roots.push(base.join("Programs").join("GoXLR Utility"));
+        }
+    }
+    for dir in roots {
+        for exe in ["goxlr-launcher.exe", "goxlr-daemon.exe"] {
+            let p = dir.join(exe);
+            if p.exists() {
+                std::process::Command::new(&p).current_dir(&dir).spawn().map_err(|e| e.to_string())?;
+                return Ok(p.display().to_string());
+            }
+        }
+    }
+    Err("Fandt ikke GoXLR Utility – er den installeret?".into())
+}
+
+#[tauri::command]
+fn set_api(app: AppHandle, state: State<'_, AppState>, config: api::ApiConfig) -> Result<(), String> {
+    state.api.configure(app, config)
+}
+
+/// The frontend publishes its state and action list for GET /state and GET /actions.
+#[tauri::command]
+fn api_publish(state: State<'_, AppState>, status: Value, actions: Option<Value>) {
+    *state.api.state.lock().unwrap() = status;
+    if let Some(a) = actions {
+        *state.api.actions.lock().unwrap() = a;
+    }
+}
+
+/// Red dot on the tray icon while the mic is muted.
+#[tauri::command]
+fn set_tray_status(app: AppHandle, muted: bool, tooltip: String) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id("main") else { return Ok(()) };
+    let _ = tray.set_tooltip(Some(&tooltip));
+    let Some(base) = app.default_window_icon() else { return Ok(()) };
+    let (w, h) = (base.width(), base.height());
+    let mut rgba = base.rgba().to_vec();
+    if muted {
+        let (cx, cy, r) = (w as f32 * 0.72, h as f32 * 0.72, w as f32 * 0.28);
+        for y in 0..h {
+            for x in 0..w {
+                let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                let i = ((y * w + x) * 4) as usize;
+                if d <= r - r * 0.18 {
+                    rgba[i..i + 4].copy_from_slice(&[244, 63, 94, 255]);
+                } else if d <= r {
+                    rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+                }
+            }
+        }
+    }
+    tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h))).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct AppInfo {
+    version: String,
+    installed: bool,
+}
+
+#[tauri::command]
+fn app_info(app: AppHandle) -> AppInfo {
+    AppInfo { version: app.package_info().version.to_string(), installed: update::is_installed() }
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle, url: String, sha256: Option<String>) -> Result<(), String> {
+    blocking(move || update::prepare(&url, sha256.as_deref())).await?;
+    app.exit(0);
+    Ok(())
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -250,12 +339,17 @@ pub fn run() {
             close_to_tray: AtomicBool::new(true),
             tray: Mutex::new(TrayModel::default()),
             hotkeys: Mutex::new(HashMap::new()),
+            api: Arc::new(api::Api::default()),
         })
         .setup(|app| {
             let handle = app.handle().clone();
             let state = app.state::<AppState>();
             state.close_to_tray.store(prefs_close_to_tray(&handle), Ordering::SeqCst);
             state.daemon.clone().spawn(handle.clone(), DAEMON_URL.to_string());
+            update::cleanup();
+            if let Err(e) = osd::create(&handle) {
+                log::warn!("OSD: {e}");
+            }
 
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
@@ -310,6 +404,13 @@ pub fn run() {
             app_sessions,
             set_app_device,
             apo_open_configurator,
+            show_osd,
+            start_daemon,
+            set_api,
+            api_publish,
+            set_tray_status,
+            app_info,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GoXLR Studio");

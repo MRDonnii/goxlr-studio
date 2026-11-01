@@ -4,6 +4,7 @@ import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse,
 import { storeGet, storeSet, setOutputEqEngine, engineStatus, listAudioDevices, apoTakeover, apoReadConfig, apoListConfigs, apoOpenConfigurator, isNative } from './native.js';
 import { shortName } from './views-mixer.js';
 import { applyEqPreset, toggleEq } from './actions.js';
+import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl } from './extras.js';
 
 // Reads every Peace/APO preset file and stores the non-empty ones as presets. Returns the imported names.
 export async function importPeacePresets(ctx) {
@@ -22,16 +23,110 @@ export async function importPeacePresets(ctx) {
   return { names, total: files.length };
 }
 
+// "EQ follows profile": pick a preset per GoXLR profile; applied whenever the profile changes.
+function profileLinksCard(ctx) {
+  const state = ctx.outputEq;
+  state.profileLinks ??= {};
+  const profiles = ctx.conn.status?.files?.profiles || [];
+  const names = [...Object.keys(state.presets), ...Object.keys(BUILTIN_PRESETS).filter((n) => !(n in state.presets))];
+  const rows = profiles.map((p) => {
+    const sel = h('select', { onchange: () => {
+      if (sel.value) state.profileLinks[p] = sel.value; else delete state.profileLinks[p];
+      storeSet('output-eq', state);
+      if (sel.value && ctx.conn.mixer?.profile_name === p && state.presetName !== sel.value) applyEqPreset(ctx, sel.value);
+    } },
+      h('option', { value: '' }, '— uændret —'),
+      names.map((n) => h('option', { value: n, selected: state.profileLinks[p] === n }, n)));
+    return h('div', { class: 'row' }, h('label', {}, p, ctx.conn.mixer?.profile_name === p ? h('span', { class: 'badge ok', style: { marginLeft: '6px' } }, 'aktiv') : null), sel);
+  });
+  return h('div', { class: 'card' }, h('h2', {}, 'EQ følger GoXLR-profil'),
+    rows.length ? rows : h('div', { class: 'hint' }, 'Ingen GoXLR-profiler fundet.'),
+    h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Når profilen skifter – fra appen, en genvej, G HUB eller GoXLR Utility – skifter EQ’en med. Fx Headset → dit hovedtelefon-preset, Speakers → dit højttaler-preset.'));
+}
+
+// Crossfeed and loudness are layered on top of whichever preset is active.
+function extrasCard(ctx, apply) {
+  const state = ctx.outputEq;
+  state.extras ??= {};
+  const x = state.extras;
+  x.crossfeed ??= { enabled: false, level: -8, cutoff: 700, delay: 0.3 };
+  x.loudness ??= { enabled: false, amount: 4 };
+  const save = () => { storeSet('output-eq', state); apply(); };
+  const sw = (obj) => { const i = h('input', { type: 'checkbox', checked: obj.enabled, onchange: () => { obj.enabled = i.checked; save(); } }); return h('label', { class: 'switch' }, i, h('span')); };
+  const range = (obj, key, min, max, step, fmt) => {
+    const val = h('span', { class: 'val' }, fmt(obj[key]));
+    const r = h('input', { type: 'range', min, max, step, value: obj[key] });
+    const fill = () => r.style.setProperty('--p', `${((obj[key] - min) / (max - min)) * 100}%`);
+    r.addEventListener('input', () => { obj[key] = Number(r.value); val.textContent = fmt(obj[key]); fill(); });
+    r.addEventListener('change', save);
+    fill();
+    return [r, val];
+  };
+  return h('div', { class: 'card' }, h('h2', {}, 'Lytte-forbedringer'),
+    h('div', { class: 'row' }, h('label', {}, 'Crossfeed'), h('div', { class: 'spacer' }), sw(x.crossfeed)),
+    h('div', { class: 'row' }, h('label', {}, 'Styrke'), ...range(x.crossfeed, 'level', -15, -3, 0.5, (v) => `${v} dB`)),
+    h('div', { class: 'row' }, h('label', {}, 'Afskæring'), ...range(x.crossfeed, 'cutoff', 300, 1500, 50, (v) => `${v} Hz`)),
+    h('div', { class: 'hint' }, 'Til hovedtelefoner: lidt af venstre kanal blandes ind i højre (og omvendt) som når man hører højttalere – mindre "lyd inde i hovedet".'),
+    h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'Loudness'), h('div', { class: 'spacer' }), sw(x.loudness)),
+    h('div', { class: 'row' }, h('label', {}, 'Løft'), ...range(x.loudness, 'amount', 1, 10, 0.5, (v) => `${v} dB`)),
+    h('div', { class: 'hint' }, 'Løfter bas og diskant til lav lydstyrke. Preamp sænkes automatisk tilsvarende, så intet klipper. Begge dele virker oven på alle presets.'));
+}
+
+// Search the AutoEQ project's measured corrections and import one as a preset.
+let autoEqIndex = null;
+function autoEqCard(ctx) {
+  const input = h('input', { type: 'text', placeholder: 'Model, fx HD 650 eller Arctis', style: { flex: 1 } });
+  const results = h('div', { class: 'list autoeq-results' });
+  const status = h('div', { class: 'hint' }, 'Måleresultater fra AutoEQ-projektet (github.com/jaakkopasanen/AutoEq) for over 5000 hovedtelefoner.');
+  const loadIndex = async () => {
+    if (autoEqIndex) return autoEqIndex;
+    try { const c = JSON.parse(localStorage.getItem('studio.autoeq-index') || 'null'); if (c && Date.now() - c.at < 7 * 864e5) return (autoEqIndex = c.list); } catch { /* ignore */ }
+    status.textContent = 'Henter AutoEQ-oversigten…';
+    const r = await fetch('https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/INDEX.md');
+    if (!r.ok) throw new Error(`AutoEQ svarede ${r.status}`);
+    autoEqIndex = parseAutoEqIndex(await r.text());
+    try { localStorage.setItem('studio.autoeq-index', JSON.stringify({ at: Date.now(), list: autoEqIndex })); } catch { /* quota */ }
+    status.textContent = `${autoEqIndex.length} profiler.`;
+    return autoEqIndex;
+  };
+  const pick = async (e) => {
+    try {
+      const r = await fetch(autoEqUrl(e));
+      if (!r.ok) throw new Error(`AutoEQ svarede ${r.status}`);
+      const parsed = parseApoConfig(await r.text());
+      if (!parsed.bands.length) throw new Error('Filen indeholdt ingen filtre');
+      const name = `AutoEQ: ${e.name}`;
+      ctx.outputEq.presets[name] = parsed;
+      await storeSet('output-eq', ctx.outputEq);
+      applyEqPreset(ctx, name);
+    } catch (err) { toast(String(err.message || err)); }
+  };
+  const search = debounce(async () => {
+    const q = input.value.trim();
+    if (q.length < 2) { results.replaceChildren(); return; }
+    try {
+      const hits = searchAutoEq(await loadIndex(), q, 25);
+      results.replaceChildren(...hits.map((e) => h('div', { class: 'item' }, h('div', {}, e.name, h('div', { class: 'hint' }, e.source)), h('div', { class: 'spacer' }),
+        h('button', { class: 'btn sm', onclick: () => pick(e) }, 'Brug'))));
+      if (!hits.length) results.append(h('div', { class: 'hint' }, 'Ingen match.'));
+    } catch (err) { status.textContent = `Kunne ikke hente AutoEQ: ${err.message || err}`; }
+  }, 250);
+  input.addEventListener('input', search);
+  return h('div', { class: 'card' }, h('h2', {}, 'AutoEQ – find dine hovedtelefoner'),
+    h('div', { class: 'row' }, input), results, status);
+}
+
 function presetBar(ctx) {
   const state = ctx.outputEq;
   const eq = state.slots[state.active];
   const mine = Object.keys(state.presets);
   const key = (n) => ctx.hotkeyFor?.(`eq-preset:${n}`);
+  const modified = state.presetName && presetModified(eq, state.presets[state.presetName] || BUILTIN_PRESETS[state.presetName]);
   const chip = (n, builtin) => h('button', {
     class: `chip ${state.presetName === n ? 'on' : ''} ${builtin ? 'ghost' : ''}`,
-    title: key(n) ? `Genvej: ${key(n)}` : (builtin ? 'Indbygget preset' : 'Klik for at bruge'),
+    title: state.presetName === n && modified ? 'Ændret siden det blev indlæst – klik for at nulstille' : key(n) ? `Genvej: ${key(n)}` : (builtin ? 'Indbygget preset' : 'Klik for at bruge'),
     onclick: () => applyEqPreset(ctx, n),
-  }, n);
+  }, n, state.presetName === n && modified ? h('span', { class: 'chip-mod' }, ' ●') : null);
   const importBtn = h('button', { class: 'btn sm', onclick: async () => {
     if (!isNative()) { toast('Peace-presets kan kun importeres i Windows-appen.'); return; }
     importBtn.disabled = true;
@@ -70,7 +165,7 @@ export function outputEqView(ctx) {
 
   const persist = debounce(() => storeSet('output-eq', state), 400);
   const apply = debounce(() => {
-    setOutputEqEngine({ ...eq(), target: state.target }).then(() => refreshEngine()).catch((e) => toast(`Lydmotor: ${e}`));
+    ctx.applyOutputEq().then(() => refreshEngine()).catch((e) => toast(`Lydmotor: ${e}`));
     preview.update();
   }, 60);
   const changed = (record = true) => {
@@ -86,6 +181,7 @@ export function outputEqView(ctx) {
   const undo = () => { if (history.length > 1) { future.push(history.pop()); restore(history[history.length - 1]); } };
   const redo = () => { if (future.length) { const s = future.pop(); history.push(s); restore(s); } };
 
+  const bar = presetBar(ctx);
   const canvas = h('canvas', { class: 'eq-canvas', style: { height: '360px' } });
   const graph = new EqGraph(canvas, {
     minDb: -18, maxDb: 18,
@@ -154,6 +250,14 @@ export function outputEqView(ctx) {
     clipWarn.style.display = eq().enabled && peak > 0.05 ? '' : 'none';
     clipWarn.textContent = `Kan klippe (+${peak.toFixed(1)} dB)`;
     bypass.checked = eq().enabled;
+    // Keep the "modified" dot on the active preset chip in sync while editing.
+    const active = bar.querySelector('.chip.on:not(.power)');
+    if (active) {
+      const mod = presetModified(eq(), state.presets[state.presetName] || BUILTIN_PRESETS[state.presetName]);
+      const dot = active.querySelector('.chip-mod');
+      if (mod && !dot) active.append(h('span', { class: 'chip-mod' }, ' ●'));
+      if (!mod && dot) dot.remove();
+    }
     for (const [k, b] of abBtns) b.classList.toggle('on', k === state.active);
   };
 
@@ -201,7 +305,7 @@ export function outputEqView(ctx) {
     fileIn.value = '';
   });
   const presetsCard = h('div', { class: 'card' }, h('h2', {}, 'Presets'),
-    h('div', { class: 'row' }, presetSel,
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, presetSel,
       h('button', { class: 'btn sm', onclick: () => { const [k, ...r] = presetSel.value.split(':'); const n = r.join(':'); loadEq(k === 'u' ? state.presets[n] : BUILTIN_PRESETS[n], k === 'u' ? n : null); } }, 'Indlæs'),
       h('button', { class: 'btn sm', onclick: () => {
         const n = prompt('Navn på preset', state.presetName || '');
@@ -251,10 +355,10 @@ export function outputEqView(ctx) {
   takeoverBtn.addEventListener('click', async () => {
     const enable = !engine?.taken_over;
     if (enable && !confirm('GoXLR Studio overtager Equalizer APO. Din nuværende config.txt gemmes som backup og kan gendannes her. Windows beder om administrator-tilladelse én gang. Fortsæt?')) return;
-    try { await apoTakeover(enable); apply(); toast(enable ? 'GoXLR Studio styrer nu EQ’en' : 'Din gamle APO-opsætning er gendannet', 'info'); } catch (e) { toast(String(e)); }
+    try { await apoTakeover(enable); ctx.onApoChanged?.(enable); apply(); toast(enable ? 'GoXLR Studio styrer nu EQ’en' : 'Din gamle APO-opsætning er gendannet', 'info'); } catch (e) { toast(String(e)); }
     refreshEngine();
   });
-  const targetSel = h('select', { onchange: () => { state.target = targetSel.value || null; persist(); apply(); } });
+  const targetSel = h('select', { onchange: () => { state.target = targetSel.value || null; state.target_name = targetSel.selectedOptions[0]?.dataset.name || null; persist(); apply(); } });
   const refreshEngine = async () => {
     engine = await engineStatus().catch((e) => ({ available: false, reason: String(e) }));
     engineBadge.textContent = engine.running ? 'Aktiv' : engine.available ? 'Klar' : 'Ikke aktiv';
@@ -282,7 +386,7 @@ export function outputEqView(ctx) {
     }
   };
   listAudioDevices().then((devs) => {
-    targetSel.replaceChildren(h('option', { value: '' }, 'Alle udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id }, shortName(d.name))));
+    targetSel.replaceChildren(h('option', { value: '' }, 'Alle udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id, 'data-name': d.name }, shortName(d.name))));
     targetSel.value = state.target || '';
   }).catch(() => {});
   refreshEngine();
@@ -313,12 +417,13 @@ export function outputEqView(ctx) {
   apply();
 
   return h('div', { class: 'grid' },
-    presetBar(ctx),
+    bar,
     h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar,
       h('div', { class: 'eq-wrap', style: { marginTop: '12px' } }, canvas),
       h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
       h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody)),
-    h('div', { class: 'grid cols-3' }, presetsCard, engineCard, previewCard));
+    h('div', { class: 'grid cols-3' }, presetsCard, engineCard, previewCard),
+    h('div', { class: 'grid cols-3' }, profileLinksCard(ctx), extrasCard(ctx, apply), autoEqCard(ctx)));
 }
 
 function makePreview(getEq) {

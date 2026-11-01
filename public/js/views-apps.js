@@ -1,6 +1,8 @@
 import { h, toast } from './ui.js';
 import { appSessions, setAppDevice, listAudioDevices, isNative } from './native.js';
 import { shortName } from './views-mixer.js';
+import { resolveDevice, deviceName, triggerActions } from './extras.js';
+import { actionCatalog } from './actions.js';
 
 // Rules: [{ exe, output, input }] – a device id, or null for "follow the Windows default".
 // A missing key (undefined) means "leave this direction alone".
@@ -25,28 +27,45 @@ const isStale = (id, devs, flow) => id != null && !devs.some((d) => d.id === id 
 export async function enforceAppRules(ctx, { fixStale = ctx.prefs.fixStaleApps } = {}) {
   const [sessions, devs] = await Promise.all([appSessions(), listAudioDevices()]);
   let changed = 0;
+  let healed = false;
   for (const s of sessions) {
     const rule = ctx.appRules.find((r) => sameExe(r.exe, s.exe));
     for (const flow of ['render', 'capture']) {
       const key = flowKey(flow);
       const cur = s[key] ?? null;
       let want;
-      if (rule && rule[key] !== undefined && !isStale(rule[key], devs, flow)) want = rule[key];
+      if (rule && rule[key] !== undefined) {
+        // Follow the device by name if a driver update gave it a new id.
+        const id = resolveDevice(devs, rule[key], rule[`${key}_name`], flow);
+        if (id !== undefined && id !== rule[key]) { rule[key] = id; healed = true; }
+        if (id !== undefined) want = id;
+      }
+      if (want !== undefined) { /* rule wins */ }
       else if (fixStale && isStale(cur, devs, flow)) want = null;
       if (want === undefined || want === cur) continue;
       try { await setAppDevice(s.pid, flow, want); changed++; } catch { /* process may have exited */ }
     }
   }
+  if (healed) ctx.saveAppRules();
   return changed;
+}
+
+// App triggers: run an action when an app starts or exits (detected via its audio session).
+let running = null;
+export function checkTriggers(ctx, sessions) {
+  const now = new Set(sessions.map((s) => s.exe));
+  if (running) for (const id of triggerActions(ctx.appTriggers || [], running, now)) ctx.runAction(id);
+  running = now;
 }
 
 export function startAppRules(ctx) {
   let busy = false;
   const tick = async () => {
-    if (!busy && (ctx.appRules.length || ctx.prefs.fixStaleApps)) {
+    if (!busy) {
       busy = true;
       try {
-        if (await enforceAppRules(ctx)) ctx.onAppsChanged?.();
+        if ((ctx.appRules.length || ctx.prefs.fixStaleApps) && await enforceAppRules(ctx)) ctx.onAppsChanged?.();
+        if (ctx.appTriggers?.length) checkTriggers(ctx, await appSessions());
       } catch { /* backend unavailable */ }
       busy = false;
     }
@@ -78,7 +97,7 @@ export function appsView(ctx) {
       try {
         await Promise.all(g.pids.map((pid) => setAppDevice(pid, flow, id)));
         const rule = ctx.appRules.find((r) => sameExe(r.exe, g.exe));
-        if (rule) { rule[key] = id; ctx.saveAppRules(); }
+        if (rule) { rule[key] = id; rule[`${key}_name`] = deviceName(devs, id); ctx.saveAppRules(); }
         toast(`${g.exe} → ${devName(id)}`, 'info');
       } catch (e) { toast(String(e)); }
       refresh();
@@ -104,7 +123,9 @@ export function appsView(ctx) {
         if (rule) ctx.appRules.splice(ctx.appRules.indexOf(rule), 1);
         else {
           const first = g.sessions[0];
-          ctx.appRules.push({ exe: g.exe, output: isStale(first.output, devs, 'render') ? null : first.output ?? null, input: isStale(first.input, devs, 'capture') ? null : first.input ?? null });
+          const output = isStale(first.output, devs, 'render') ? null : first.output ?? null;
+          const input = isStale(first.input, devs, 'capture') ? null : first.input ?? null;
+          ctx.appRules.push({ exe: g.exe, output, output_name: deviceName(devs, output), input, input_name: deviceName(devs, input) });
         }
         ctx.saveAppRules(); render();
       } }, rule ? '📌 Husket' : 'Husk');
@@ -119,7 +140,8 @@ export function appsView(ctx) {
 
     rulesList.replaceChildren(...ctx.appRules.map((r) => {
       const desc = (key) => (r[key] === undefined ? 'uændret' : devName(r[key]));
-      const bad = isStale(r.output, devs, 'render') || isStale(r.input, devs, 'capture');
+      const bad = (r.output != null && resolveDevice(devs, r.output, r.output_name, 'render') === undefined)
+        || (r.input != null && resolveDevice(devs, r.input, r.input_name, 'capture') === undefined);
       return h('div', { class: 'item' },
         h('b', {}, r.exe.replace(/\.exe$/i, '')),
         h('span', { class: 'hint' }, `Udgang: ${desc('output')} · Mikrofon: ${desc('input')}`),
@@ -163,5 +185,38 @@ export function appsView(ctx) {
           h('span', { class: 'hint' }, 'Ret automatisk'), h('label', { class: 'switch' }, autoFix, h('span'))),
         h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Apps uden regel sættes tilbage til Windows-standard; apps med regel får deres huskede enhed.')),
       h('div', { class: 'card' }, h('h2', {}, 'Regler'), rulesList,
-        h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Reglerne håndhæves hvert 5. sekund, også når appen ligger i bakken – fx Spotify → Music, Discord → Chat.'))));
+        h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Reglerne håndhæves hvert 5. sekund, også når appen ligger i bakken – fx Spotify → Music, Discord → Chat.'))),
+    triggersCard(ctx, () => groups));
+}
+
+// "When cod.exe starts → scene Gaming, when it exits → scene Normal".
+function triggersCard(ctx, getGroups) {
+  const list = h('div', { class: 'list' });
+  let catalog = [];
+  const save = () => { ctx.saveAppTriggers(); render(); };
+  const actionSel = (t, key) => {
+    const sel = h('select', { class: 'trigger-sel', onchange: () => { t[key] = sel.value || null; save(); } },
+      h('option', { value: '' }, '— intet —'),
+      catalog.map((g) => h('optgroup', { label: g.title }, g.items.map((i) => h('option', { value: i.id, selected: i.id === t[key] }, i.label)))));
+    return sel;
+  };
+  const render = () => {
+    list.replaceChildren(...ctx.appTriggers.map((t) => {
+      const exe = h('input', { type: 'text', value: t.exe || '', placeholder: 'fx cod.exe', list: 'running-exes', style: { width: '160px' }, onchange: () => { t.exe = exe.value.trim(); save(); } });
+      return h('div', { class: 'item', style: { flexWrap: 'wrap' } },
+        h('span', { class: 'lbl app-lbl' }, 'Når'), exe,
+        h('span', { class: 'lbl app-lbl' }, 'starter →'), actionSel(t, 'onStart'),
+        h('span', { class: 'lbl app-lbl' }, 'lukker →'), actionSel(t, 'onExit'),
+        h('div', { class: 'spacer' }),
+        h('button', { class: 'btn sm', onclick: () => { ctx.appTriggers.splice(ctx.appTriggers.indexOf(t), 1); save(); } }, '✕'));
+    }));
+    if (!ctx.appTriggers.length) list.append(h('div', { class: 'hint' }, 'Ingen automatik endnu.'));
+    datalist.replaceChildren(...getGroups().map((g) => h('option', { value: g.exe })));
+  };
+  const datalist = h('datalist', { id: 'running-exes' });
+  actionCatalog(ctx).then((c) => { catalog = c; render(); });
+  return h('div', { class: 'card' }, h('h2', {}, 'Automatik når en app starter',
+    h('button', { class: 'btn sm primary', onclick: () => { ctx.appTriggers.push({ exe: '', onStart: null, onExit: null }); save(); } }, '+ Ny')),
+    list, datalist,
+    h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Fx: når Call of Duty starter → scenen "Gaming" eller profilen "Headset"; når det lukker → tilbage igen. Apps opdages, når de begynder at bruge lyd (tjekkes hvert 5. sekund).'));
 }

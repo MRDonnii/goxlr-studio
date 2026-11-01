@@ -7,7 +7,11 @@ Windows-app (Tauri 2: Rust + vanilla JS) der erstatter TC-Helicons GoXLR-app, Eq
 - `src-tauri/src/daemon.rs` – WebSocket-klient til GoXLR Utility (`ws://127.0.0.1:14564/api/websocket`), JSON-patches sendes som `daemon-patch`-events.
 - `src-tauri/src/audio.rs` – Windows Core Audio: list enheder + skift standardenhed (IPolicyConfig).
 - `src-tauri/src/apo.rs` – afspilnings-EQ: skriver filtre til `%ProgramData%\GoXLR Studio\GoXLR Studio.txt`; "Overtag APO" sætter én Include-linje i APO's config.txt (backup gemmes) via UAC.
-- `src-tauri/src/lib.rs` – kommandoer, bakke-ikon, globale genveje (Ctrl+Alt+1–9 scener, Ctrl+Alt+M mute), luk-til-bakke, autostart.
+- `src-tauri/src/lib.rs` – kommandoer, bakke-ikon (rød prik ved mute), frie globale genveje (`set_hotkeys`), luk-til-bakke, autostart, `start_daemon`.
+- `src-tauri/src/osd.rs` – OSD-vindue (`public/osd.html`), vises uden at tage fokus; springes over når hovedvinduet har fokus.
+- `src-tauri/src/api.rs` – lokalt HTTP-API (token påkrævet): `/state`, `/actions`, `/action/<id>` → event `api-action`.
+- `src-tauri/src/update.rs` – auto-opdatering fra GitHub-releases (kun URL'er under repoets releases/download, SHA-256 fra GitHubs `digest`), installer `/S` eller udskift portable exe.
+- `public/js/extras.js` – rene hjælpere (enhed-navne-fallback, crossfeed/loudness, AutoEQ, versioner, app-triggers) med tests i `tests/extras.test.mjs`.
 - Kommando-/statusformater kommer fra GoXLR Utility: `ipc/src/lib.rs` og `ipc/src/device.rs` i github.com/GoXLR-on-Linux/goxlr-utility.
 
 ## Test
@@ -20,13 +24,13 @@ Windows-app (Tauri 2: Rust + vanilla JS) der erstatter TC-Helicons GoXLR-app, Eq
 - Firmware til GoXLR'en røres ikke (lukket, risiko for brick).
 
 ## Status og næste skridt
-Færdigt (backend + frontend):
-- Frie globale genveje (`views-hotkeys.js`, store `hotkeys` = `[{id, accel, action}]`). Første start seeder Ctrl+Alt+M (mute) og Ctrl+Alt+1–9 for eksisterende scener; nye scener får næste ledige Ctrl+Alt+tal. Forslag med "Tilføj alle" til F13/F14 og Ctrl+PgUp/PgDn (Headset/Speakers). I browseren virker genvejene kun i fokuseret fane.
-- `app.js`: Tauri-events `hotkey` (binding-id) og `tray-action` (action-id) → `runAction`; `syncTray()` kalder `setTray(...)` ved ændringer; topbjælke med hurtig-skift af GoXLR-profil, EQ til/fra + EQ-preset og de 3 første scener; kommandopaletten bygger på `actionCatalog` og viser genveje.
-- Lyd pr. app (`views-apps.js`): apps grupperet pr. exe, forældede enheds-id'er markeres, regler (store `app-rules`) håndhæves hvert 5. s globalt (`startAppRules`), "Ret forældede nu" + pref `fixStaleApps`.
-- Afspilnings-EQ: preset-chips øverst, "Importér alle Peace-presets", APO-status pr. udgang + knap til Configurator.
-- Scener kan medtage GoXLR-profil/mikrofonprofil (indlæses først). Effekter-siden skjules for Mini (`?mini` i URL'en giver Mini i demo).
+Version 0.2.0. Færdigt:
+- Genveje, lyd pr. app (regler, ret forældede, automatik når en app starter/lukker), bakkemenu, hurtig-skift i topbjælken, kommandopalet over `actionCatalog`.
+- Afspilnings-EQ: preset-chips med "ændret"-prik, Peace-import, AutoEQ-søgning, EQ følger GoXLR-profil (`outputEq.profileLinks`), crossfeed + loudness (`outputEq.extras`, sendes som `extra`-linjer/ekstra bånd), APO-status pr. udgang, APO-vagthund (banner når Peace har overskrevet config.txt).
+- Enheder huskes med navn (`*_name`) i scener, app-regler og EQ-udgang, så de findes igen efter driver-opdateringer.
+- OSD ovenpå spil, rød prik i bakke-ikonet ved mute, start af GoXLR Utility, lokalt API, backup/gendan, Diagnose-side, auto-opdatering (tjek hver 6. time, auto-installation når appen ligger i bakken).
+- Release: tag `v*` → GitHub-release med `*-setup.exe`, `.msi` og `GoXLR-Studio-portable.exe` (auto-opdatering vælger setup eller portable).
 
 Næste skridt:
-- Test i den rigtige Windows-app hos brugeren: genvejsregistrering mens AutoHotkey kører (skal vise "Optaget"), lyd pr. app på Windows 11, Peace-import med brugerens filer.
-- Overvej at vise "ændret" på aktivt EQ-preset når båndene er redigeret.
+- Test hos brugeren på Windows: OSD i spil (fokus må ikke stjæles), genveje med AutoHotkey kørende, lyd pr. app, Peace-import, APO-vagthund, opdatering fra 0.2.0 → 0.2.1.
+- Mulige forbedringer: niveaumåler i bakken, MQTT, signerede opdateringer (tauri-plugin-updater kræver en hemmelig nøgle i repo-secrets).

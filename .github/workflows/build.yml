@@ -33,7 +33,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item src-tauri/target/release/goxlr-studio.exe "dist/GoXLR Studio (portable).exe"
+          Copy-Item src-tauri/target/release/goxlr-studio.exe "dist/GoXLR-Studio-portable.exe"
           Copy-Item src-tauri/target/release/bundle/nsis/*.exe dist/
           Copy-Item src-tauri/target/release/bundle/msi/*.msi dist/
 

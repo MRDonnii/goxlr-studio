@@ -152,7 +152,7 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 /* Quick switches in the top bar */
 .seg.quick button { padding: 4px 11px; font-size: 12.5px; }
 .seg.quick button.on { background: linear-gradient(90deg, rgba(34,211,238,.28), rgba(168,85,247,.22)); color: #fff; }
-select.quick { padding: 4px 8px; font-size: 12.5px; max-width: 200px; }
+select.quick { padding: 4px 8px; font-size: 12.5px; max-width: 260px; }
 .quick-eq { display: inline-flex; align-items: center; gap: 4px; }
 .eq-pill svg { margin-right: 4px; }
 .eq-pill:not(.on) { color: var(--muted); }
@@ -185,3 +185,15 @@ select.quick { padding: 4px 8px; font-size: 12.5px; max-width: 200px; }
 select.stale { border-color: var(--warn); color: var(--warn); }
 .warn-text { color: var(--warn); }
 a { color: var(--accent); }
+
+/* Banners, OSD-related and system settings */
+.banners { padding: 0 28px; display: flex; flex-direction: column; gap: 8px; }
+.banners:empty { display: none; }
+.banners .banner { margin: 8px 0 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.banner.warn { background: rgba(251,191,36,.10); border-color: rgba(251,191,36,.4); }
+.chip-mod { color: var(--warn); }
+.api-examples { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.api-examples code, .api-examples pre { font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace; background: #0f1522; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; overflow-x: auto; white-space: pre; margin: 0; color: #c7d2e8; }
+.autoeq-results { margin-top: 8px; max-height: 260px; overflow: auto; }
+.list .item.stale { border-color: rgba(251,191,36,.45); }
+.list .item select.trigger-sel { width: 240px; }

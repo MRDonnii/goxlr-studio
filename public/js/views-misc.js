@@ -3,6 +3,8 @@ import { CHANNELS } from './demo.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
 import { listAudioDevices, setDefaultDevice, storeSet, isNative } from './native.js';
 import { prettyAccel } from './views-hotkeys.js';
+import { resolveDevice } from './extras.js';
+import { systemSettings } from './views-system.js';
 
 const STYLE_LABELS = {
   reverb: ['Library', 'DarkBloom', 'MusicClub', 'RealPlate', 'Chapel', 'HockeyArena'],
@@ -96,31 +98,63 @@ export async function captureScene(ctx, name, opts) {
   if (opts.parts.monitor) scene.monitor = m.levels.output_monitor;
   if (opts.parts.devices) {
     const devs = await listAudioDevices().catch(() => []);
-    scene.output = devs.find((d) => d.flow === 'render' && d.default)?.id || null;
-    scene.input = devs.find((d) => d.flow === 'capture' && d.default)?.id || null;
+    const out = devs.find((d) => d.flow === 'render' && d.default);
+    const inp = devs.find((d) => d.flow === 'capture' && d.default);
+    scene.output = out?.id || null;
+    scene.input = inp?.id || null;
+    // Names let the scene find the devices again after a driver update changes their ids.
+    scene.output_name = out?.name || null;
+    scene.input_name = inp?.name || null;
   }
   if (opts.parts.eq) scene.eqSlot = structuredClone(ctx.outputEq.slots[ctx.outputEq.active]);
   if (opts.parts.lighting) scene.lighting = structuredClone(m.lighting);
   return scene;
 }
 
+// Resolves true once pred(mixer) holds, false after the timeout.
+function waitFor(conn, pred, ms = 3000) {
+  return new Promise((resolve) => {
+    if (conn.mixer && pred(conn.mixer)) { resolve(true); return; }
+    const done = (ok) => { clearTimeout(timer); conn.removeEventListener('change', on); resolve(ok); };
+    const on = () => { if (conn.mixer && pred(conn.mixer)) done(true); };
+    const timer = setTimeout(() => done(false), ms);
+    conn.addEventListener('change', on);
+  });
+}
+
 export async function applyScene(ctx, scene) {
   const { conn } = ctx;
   if (!conn.mixer) return;
   // Profiles replace most of the mixer state, so load them first and then layer the rest on top.
-  let loaded = false;
-  if (scene.profile_name && conn.mixer.profile_name !== scene.profile_name) { await conn.command('LoadProfile', scene.profile_name, true); loaded = true; }
-  if (scene.mic_profile_name && conn.mixer.mic_profile_name !== scene.mic_profile_name) { await conn.command('LoadMicProfile', scene.mic_profile_name, true); loaded = true; }
+  let unsure = false;
+  if (scene.profile_name && conn.mixer.profile_name !== scene.profile_name) {
+    await conn.command('LoadProfile', scene.profile_name, true);
+    unsure = !(await waitFor(conn, (mx) => mx.profile_name === scene.profile_name));
+  }
+  if (scene.mic_profile_name && conn.mixer.mic_profile_name !== scene.mic_profile_name) {
+    await conn.command('LoadMicProfile', scene.mic_profile_name, true);
+    unsure = !(await waitFor(conn, (mx) => mx.mic_profile_name === scene.mic_profile_name)) || unsure;
+  }
+  // Give the daemon a moment to stream the rest of the new profile's state.
+  if (scene.profile_name || scene.mic_profile_name) await new Promise((r) => setTimeout(r, 150));
   const m = conn.mixer;
-  // After a profile load the local state may lag behind the daemon's patches, so send everything.
-  const differs = (a, b) => loaded || a !== b;
+  // If the daemon never confirmed the load, the local state may be stale: send everything.
+  const differs = (a, b) => unsure || a !== b;
   const jobs = [];
   if (scene.volumes) for (const [c, v] of Object.entries(scene.volumes)) if (differs(m.levels.volumes[c], v)) jobs.push(conn.command('SetVolume', c, v));
   if (scene.mutes) for (const [f, s] of Object.entries(scene.mutes)) if (differs(m.fader_status[f].mute_state, s)) jobs.push(conn.command('SetFaderMuteState', f, s));
   if (scene.router) for (const [i, outs] of Object.entries(scene.router)) for (const [o, on] of Object.entries(outs)) if (differs(m.router[i]?.[o], on)) jobs.push(conn.command('SetRouter', i, o, on));
   if (scene.monitor && differs(m.levels.output_monitor, scene.monitor)) jobs.push(conn.command('SetMonitorMix', scene.monitor));
-  if (scene.output) jobs.push(setDefaultDevice(scene.output, 'all').catch((e) => toast(`Udgang: ${e}`)));
-  if (scene.input) jobs.push(setDefaultDevice(scene.input, 'all').catch((e) => toast(`Mikrofon: ${e}`)));
+  if (scene.output || scene.input) {
+    const devs = await listAudioDevices().catch(() => []);
+    for (const [key, flow, label] of [['output', 'render', 'Udgang'], ['input', 'capture', 'Mikrofon']]) {
+      if (!scene[key]) continue;
+      const id = resolveDevice(devs, scene[key], scene[`${key}_name`], flow);
+      if (!id) { toast(`${label} i scenen "${scene.name}" findes ikke længere`); continue; }
+      if (id !== scene[key]) { scene[key] = id; ctx.saveScenes?.(); }
+      jobs.push(setDefaultDevice(id, 'all').catch((e) => toast(`${label}: ${e}`)));
+    }
+  }
   if (scene.lighting) jobs.push(...applyLighting(conn, scene.lighting));
   if (scene.eqSlot) {
     ctx.outputEq.slots[ctx.outputEq.active] = structuredClone(scene.eqSlot);
@@ -130,7 +164,7 @@ export async function applyScene(ctx, scene) {
   }
   await Promise.all(jobs);
   ctx.refreshDevices?.();
-  toast(`Scene: ${scene.name}`, 'info');
+  if (ctx.notify) ctx.notify(`Scene: ${scene.name}`); else toast(`Scene: ${scene.name}`, 'info');
 }
 
 export function scenesView(ctx) {
@@ -404,7 +438,7 @@ export function settingsView(ctx) {
     isNative() ? toggle(binder, { label: 'Start med Windows', get: () => ctx.prefs.autostart, set: (v) => { ctx.prefs.autostart = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_autostart', { enabled: v }).catch((e) => toast(String(e))); } }) : null,
     isNative() ? toggle(binder, { label: 'Luk til bakke-ikon', get: () => ctx.prefs.closeToTray, set: (v) => { ctx.prefs.closeToTray = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_close_to_tray', { enabled: v }).catch(() => {}); } }) : null,
     h('div', { class: 'hint' }, 'GoXLR Studio styrer GoXLR’en via GoXLR Utility-tjenesten (port 14564), som skal køre i baggrunden i stedet for TC-Helicons app.'));
-  return h('div', { class: 'grid cols-2' }, h('div', { class: 'card' }, h('h2', {}, 'Enhed'), info), behaviour, app);
+  return h('div', { class: 'grid' }, h('div', { class: 'grid cols-2' }, h('div', { class: 'card' }, h('h2', {}, 'Enhed'), info), behaviour, app), systemSettings(ctx));
 }
 
 export { CHANNELS, CHANNEL_LABEL, shortName };

@@ -117,3 +117,35 @@ export async function setAppDevice(pid, flow, id) {
 export async function setTray(model) {
   if (isNative()) return invoke('set_tray', { model }).catch(() => {});
 }
+
+export async function showOsd(text, kind = 'info') {
+  if (isNative()) return invoke('show_osd', { text, kind }).catch(() => {});
+}
+
+export async function startDaemon() {
+  if (!isNative()) throw new Error('Kun i Windows-appen');
+  return invoke('start_daemon');
+}
+
+export async function setApi(config) {
+  if (!isNative()) return null;
+  return invoke('set_api', { config });
+}
+
+export async function apiPublish(status, actions) {
+  if (isNative()) return invoke('api_publish', { status, actions: actions ?? null }).catch(() => {});
+}
+
+export async function setTrayStatus(muted, tooltip) {
+  if (isNative()) return invoke('set_tray_status', { muted, tooltip }).catch(() => {});
+}
+
+export async function appInfo() {
+  if (isNative()) return invoke('app_info');
+  return { version: '0.2.0', installed: false, browser: true };
+}
+
+export async function installUpdate(url, sha256) {
+  if (!isNative()) throw new Error('Kun i Windows-appen');
+  return invoke('install_update', { url, sha256 });
+}
