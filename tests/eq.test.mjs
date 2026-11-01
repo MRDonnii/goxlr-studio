@@ -69,3 +69,20 @@ test('GoXLR commands are sent the way serde reads them (one value is not a list)
   assert.deepEqual(commandJson('SetRouter', ['Microphone', 'Headphones', true]), { SetRouter: ['Microphone', 'Headphones', true] });
   assert.deepEqual(commandJson('SaveProfile', []), { SaveProfile: [] });
 });
+
+test('"Det lyder forkert": a move adjusts a nearby band of the same type or adds one', async () => {
+  const { fixMove, SOUND_FIXES, BUILTIN_PRESETS, PRESET_INFO } = await import('../public/js/eq.js');
+  const harsh = SOUND_FIXES.find((f) => f.id === 'harsh').move;
+  const eq = { enabled: true, preamp: 0, bands: [{ id: 'a', enabled: true, type: 'PK', freq: 3000, gain: -1, q: 1 }] };
+  const once = fixMove(eq, harsh);
+  assert.equal(once.bands.length, 1);
+  assert.equal(once.bands[0].gain, -4);
+  assert.equal(eq.bands[0].gain, -1, 'the original is not changed');
+  const dull = fixMove(eq, SOUND_FIXES.find((f) => f.id === 'dull').move);
+  assert.equal(dull.bands.length, 2);
+  assert.equal(dull.bands[1].type, 'HSC');
+  let far = eq;
+  for (let i = 0; i < 6; i++) far = fixMove(far, harsh);
+  assert.equal(far.bands[0].gain, -12);
+  for (const n of Object.keys(BUILTIN_PRESETS)) assert.ok(PRESET_INFO[n], n);
+});

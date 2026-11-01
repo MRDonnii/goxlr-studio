@@ -178,4 +178,43 @@ export const BUILTIN_PRESETS = {
   'Tale / podcast': { enabled: true, preamp: -2, bands: [{ type: 'HP', freq: 80, gain: 0, q: 0.707 }, { type: 'PK', freq: 250, gain: -2, q: 1 }, { type: 'PK', freq: 3000, gain: 2, q: 1 }] },
   'Fodtrin (FPS)': { enabled: true, preamp: -4.4, bands: [{ type: 'LSC', freq: 120, gain: -4, q: 0.7 }, { type: 'PK', freq: 2500, gain: 4, q: 1.2 }, { type: 'PK', freq: 5000, gain: 2, q: 1.5 }] },
   'Mindre skarp': { enabled: true, preamp: 0, bands: [{ type: 'PK', freq: 6500, gain: -3, q: 2 }, { type: 'HSC', freq: 10000, gain: -2, q: 0.7 }] },
+  'Film / serier': { enabled: true, preamp: -2.5, bands: [{ type: 'LSC', freq: 80, gain: 1.5, q: 0.7 }, { type: 'PK', freq: 2500, gain: 2.5, q: 1 }, { type: 'PK', freq: 6500, gain: -1, q: 2 }] },
+  'Musik': { enabled: true, preamp: -3, bands: [{ type: 'LSC', freq: 90, gain: 2.5, q: 0.7 }, { type: 'PK', freq: 2500, gain: -1, q: 1 }, { type: 'HSC', freq: 9000, gain: 2, q: 0.7 }] },
+  'Sen aften': { enabled: true, preamp: 0, bands: [{ type: 'LSC', freq: 120, gain: -4, q: 0.7 }, { type: 'PK', freq: 3000, gain: -2, q: 1.2 }] },
 };
+
+// What each built-in preset is for (shown when it is chosen).
+export const PRESET_INFO = {
+  'Flad': 'Ingen EQ – lyden som den er.',
+  'Bas-boost': 'Mere bas til musik og spil. Preamp er sænket, så intet klipper.',
+  'Tale / podcast': 'Klar tale: dybe brum skæres væk, lidt mindre mudder og lidt mere tydelighed.',
+  'Fodtrin (FPS)': 'Til skydespil: mindre buldren fra eksplosioner og mere af fodtrin og genladning (2–5 kHz).',
+  'Mindre skarp': 'Tager toppen af skarpe s-lyde og diskant, der gør ondt ved høj lydstyrke.',
+  'Film / serier': 'Tydeligere dialog og lidt mere fylde i bunden – godt til film, serier og YouTube.',
+  'Musik': 'En let "smil-kurve": lidt mere bas og luft i toppen, som de fleste kan lide til musik.',
+  'Sen aften': 'Til lav lydstyrke, når andre sover: mindre bas, der går gennem væggene, og blødere top.',
+};
+
+// "Det lyder forkert": a problem → one EQ move. Applied on top of the current EQ (fixMove).
+export const SOUND_FIXES = [
+  { id: 'boomy', label: 'For meget bas / buldrer', move: { type: 'LSC', freq: 120, gain: -3, q: 0.7 }, why: 'Sænker bassen under ca. 120 Hz.' },
+  { id: 'thin', label: 'Tynd / mangler bas', move: { type: 'LSC', freq: 100, gain: 3, q: 0.7 }, why: 'Løfter bassen under ca. 100 Hz.' },
+  { id: 'muddy', label: 'Mudret / uklar', move: { type: 'PK', freq: 300, gain: -3, q: 1 }, why: 'Fjerner lidt af området omkring 300 Hz, hvor lyd klumper sammen.' },
+  { id: 'boxy', label: 'Hul / lyder som i en dåse', move: { type: 'PK', freq: 600, gain: -2.5, q: 1.2 }, why: 'Sænker "kasse-lyden" omkring 600 Hz.' },
+  { id: 'nasal', label: 'Næset / tudet', move: { type: 'PK', freq: 1200, gain: -2, q: 1.4 }, why: 'Sænker området omkring 1,2 kHz.' },
+  { id: 'harsh', label: 'Skarp / skinger / gør ondt', move: { type: 'PK', freq: 3200, gain: -3, q: 1.4 }, why: 'Sænker 3 kHz, hvor øret er mest følsomt.' },
+  { id: 'sibilant', label: 'S-lyde hvæser', move: { type: 'PK', freq: 7000, gain: -3, q: 2 }, why: 'Et smalt dyk omkring 7 kHz, hvor s-lydene ligger.' },
+  { id: 'dull', label: 'Mat / mangler luft', move: { type: 'HSC', freq: 10000, gain: 3, q: 0.7 }, why: 'Løfter toppen over 10 kHz.' },
+  { id: 'dialog', label: 'Svært at høre stemmer', move: { type: 'PK', freq: 2500, gain: 3, q: 1 }, why: 'Løfter 2,5 kHz, hvor stemmer er tydelige.' },
+  { id: 'footsteps', label: 'Svært at høre fodtrin', move: { type: 'PK', freq: 4000, gain: 3, q: 1.2 }, why: 'Løfter 3–5 kHz, hvor fodtrin og genladning ligger.' },
+];
+
+/** The EQ with one move from SOUND_FIXES: a band of the same type within a third of an octave is
+ *  adjusted (gain added, limited to ±12 dB); otherwise a new band is added. */
+export function fixMove(eq, move) {
+  const out = { ...eq, bands: eq.bands.map((b) => ({ ...b })) };
+  const near = out.bands.find((b) => b.enabled !== false && b.type === move.type && Math.abs(Math.log2(b.freq / move.freq)) <= 1 / 3);
+  if (near) near.gain = Math.max(-12, Math.min(12, Math.round(((near.gain || 0) + move.gain) * 10) / 10));
+  else out.bands.push({ ...newBand(move.freq, move.type), gain: move.gain, q: move.q });
+  return out;
+}

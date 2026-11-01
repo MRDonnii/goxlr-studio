@@ -1,6 +1,6 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
-import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
+import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
 import { chainResponse, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
 import { t } from './i18n.js';
@@ -175,6 +175,7 @@ function presetBar(ctx) {
       Object.keys(BUILTIN_PRESETS).filter((n) => !mine.includes(n)).map((n) => chip(n, true)),
       h('div', { class: 'spacer' }),
       importBtn),
+    PRESET_INFO[state.presetName] && !state.presets[state.presetName] ? h('div', { class: 'hint preset-info', 'data-testid': 'preset-info', style: { marginTop: '8px' } }, `${state.presetName}: ${PRESET_INFO[state.presetName]}`) : null,
     !mine.length ? h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Hent dine Peace-presets ind med ét klik – derefter skifter du med chipsene her, fra bakke-ikonet, toppen af vinduet eller en genvej.') : null);
 }
 
@@ -188,8 +189,27 @@ export async function loadOutputEqState() {
 export function outputEqView(ctx) {
   const state = ctx.outputEq;
   const eq = () => state.slots[state.active];
-  let history = [JSON.stringify(eq())];
-  let future = [];
+  // Fortryd/gentag per slot, kept across restarts (this PC only).
+  const UNDO_KEY = 'studio.eq-undo';
+  const loadUndo = () => {
+    const cur = JSON.stringify(eq());
+    try {
+      const u = JSON.parse(localStorage.getItem(UNDO_KEY) || '{}')[state.active];
+      if (u?.history?.length) {
+        if (u.history[u.history.length - 1] === cur) return [u.history, u.future || []];
+        return [[...u.history.slice(-49), cur], []];
+      }
+    } catch { /* no storage */ }
+    return [[cur], []];
+  };
+  const saveUndo = () => {
+    try {
+      const all = JSON.parse(localStorage.getItem(UNDO_KEY) || '{}');
+      all[state.active] = { history: history.slice(-50), future: future.slice(-50) };
+      localStorage.setItem(UNDO_KEY, JSON.stringify(all));
+    } catch { /* full or blocked */ }
+  };
+  let [history, future] = loadUndo();
   let selected = 0;
 
   const persist = debounce(() => storeSet('output-eq', state), 400);
@@ -200,15 +220,15 @@ export function outputEqView(ctx) {
   const changed = (record = true) => {
     if (record) {
       const snap = JSON.stringify(eq());
-      if (snap !== history[history.length - 1]) { history.push(snap); if (history.length > 200) history.shift(); future = []; }
+      if (snap !== history[history.length - 1]) { history.push(snap); if (history.length > 200) history.shift(); future = []; saveUndo(); }
     }
     persist();
     apply();
     redraw();
   };
   const restore = (snap) => { state.slots[state.active] = JSON.parse(snap); selected = Math.min(selected, eq().bands.length - 1); changed(false); renderBands(); };
-  const undo = () => { if (history.length > 1) { future.push(history.pop()); restore(history[history.length - 1]); } };
-  const redo = () => { if (future.length) { const s = future.pop(); history.push(s); restore(s); } };
+  const undo = () => { if (history.length > 1) { future.push(history.pop()); restore(history[history.length - 1]); saveUndo(); } };
+  const redo = () => { if (future.length) { const s = future.pop(); history.push(s); restore(s); saveUndo(); } };
 
   const bar = presetBar(ctx);
   const fmt1 = (v) => String(Math.round(Math.abs(v) * 10) / 10).replace('.', ',');
@@ -281,7 +301,7 @@ export function outputEqView(ctx) {
   const offsetDb = () => playbackOffset(state);
   const chainDiffers = () => eq().enabled && (!!state.extras?.loudness?.enabled || !!state.extras?.crossfeed?.enabled || offsetDb() !== 0);
   const guardBox = h('input', { type: 'checkbox', 'data-testid': 'eq-clip-guard', onchange: () => { state.clipGuard = guardBox.checked; persist(); apply(); redraw(); } });
-  const selectSlot = (k) => { state.active = k; history = [JSON.stringify(eq())]; future = []; selected = 0; persist(); apply(); renderBands(); redraw(); };
+  const selectSlot = (k) => { state.active = k; [history, future] = loadUndo(); selected = 0; persist(); apply(); renderBands(); redraw(); };
   const abSeg = h('div', { class: 'seg', 'data-testid': 'eq-ab' });
   const abBtns = ['A', 'B'].map((k) => {
     const b = h('button', { onclick: () => selectSlot(k) }, k);
@@ -701,6 +721,16 @@ export function outputEqView(ctx) {
 
   // "Uden EQ" in the Lyttetest plays at the EQ's loudness when "Udlign lydstyrke" is on.
   const bypassGainDb = () => (state.abMatch !== false && eq().enabled ? Math.min(0, Math.round(loudnessDb(chainResponse(eq(), state.extras, CHAIN_FREQS, offsetDb())) * 10) / 10) : 0);
+  // "Det lyder forkert?": one click per problem, on top of the EQ you have (Ctrl+Z undoes it).
+  const fixCard = h('div', { class: 'card' }, h('h2', {}, 'Lyder det forkert?'),
+    h('div', { class: 'hint', style: { marginBottom: '8px' } }, 'Vælg det, du hører. EQ’en justeres et lille skridt – tryk igen for mere, eller Ctrl+Z for at fortryde.'),
+    h('div', { class: 'fix-grid', 'data-testid': 'sound-fixes' }, SOUND_FIXES.map((f) => h('button', { class: 'btn sm', title: f.why, 'data-testid': `fix-${f.id}`, onclick: () => {
+      state.slots[state.active] = fixMove(eq(), f.move);
+      if (!eq().enabled) eq().enabled = true;
+      changed(); renderBands();
+      toast(`${f.label}: ${f.why}`, 'info');
+    } }, f.label))));
+
   const preview = makePreview(() => (ctx.playbackEq ? ctx.playbackEq() : eq()), bypassGainDb);
   const previewCard = h('div', { class: 'card' }, h('h2', {}, 'Lyttetest'),
     h('div', { class: 'hint' }, 'Afspil lyd gennem EQ’en her i appen og skift mellem med/uden for at høre forskellen.'),
@@ -724,7 +754,7 @@ export function outputEqView(ctx) {
   return h('div', { class: 'grid' },
     bar,
     h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar, abRow, blindBox, editorBody),
-    h('div', { class: 'grid cols-3' }, presetsCard, engineCard, previewCard),
+    h('div', { class: 'grid cols-3' }, presetsCard, engineCard, h('div', { class: 'grid' }, fixCard, previewCard)),
     h('div', { class: 'grid cols-3' }, profileLinksCard(ctx), extrasCard(ctx, () => { apply(); redraw(); }), autoEqCard(ctx)));
 }
 

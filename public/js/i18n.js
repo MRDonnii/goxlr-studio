@@ -83,6 +83,13 @@ function translateCore(text, tables, depth = 0) {
     const rest = translateCore(sym[2], tables, depth + 1);
     if (rest !== sym[2]) return lead + sym[1] + rest + trail;
   }
+  // "Film / serier: Tydeligere dialog …": a name and a text, each known.
+  const colon = core.indexOf(': ');
+  if (colon > 0 && depth < 2) {
+    const a = translateCore(core.slice(0, colon), tables, depth + 1);
+    const b = translateCore(core.slice(colon + 2), tables, depth + 1);
+    if (a !== core.slice(0, colon) || b !== core.slice(colon + 2)) return lead + a + ': ' + b + trail;
+  }
   // "Standard · Kommunikation": translate each part.
   if (core.includes(' · ')) {
     const parts = core.split(' · ');

@@ -338,3 +338,7 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .sc-body { flex: 1; min-width: 0; }
 .sc-title { font-weight: 600; margin-bottom: 2px; }
 .sc-item .btn { flex-shrink: 0; }
+
+/* EQ: "Lyder det forkert?" */
+.fix-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-info { font-style: italic; }

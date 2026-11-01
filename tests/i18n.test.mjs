@@ -42,3 +42,8 @@ test('every UI text has an English translation (scripts/i18n-extract.py --missin
   const missing = Object.keys(JSON.parse(r.stdout || '{}'));
   assert.deepEqual(missing, [], 'Oversæt: python3 scripts/i18n-extract.py --missing → scripts/i18n-merge.py');
 });
+
+test('"name: text" – both halves translated', () => {
+  assert.equal(tr('Film / serier: Tydeligere dialog og lidt mere fylde i bunden – godt til film, serier og YouTube.'), 'Movies / TV: Clearer dialogue and a little more body in the low end – good for movies, TV and YouTube.');
+  assert.equal(tr('Mit preset: noget helt andet'), 'Mit preset: noget helt andet');
+});
