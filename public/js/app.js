@@ -89,6 +89,7 @@ const ctx = {
   onMicLevel: null,
   navigate: (id) => navigate(id),
   savePrefs: () => storeSet('prefs', ctx.prefs),
+  renderBanners: () => renderBanners(),
   saveScenes: () => { storeSet('scenes', ctx.scenes); syncTray(); renderTopActions(); },
   saveHotkeys: () => { storeSet('hotkeys', ctx.hotkeys); return registerHotkeys(); },
   saveAppRules: () => storeSet('app-rules', ctx.appRules),
@@ -207,6 +208,19 @@ function renderBanners() {
   if (isNative() && conn.mode === 'demo') {
     items.push(h('div', { class: 'banner warn' }, 'GoXLR-motoren kører ikke, eller mixeren er ikke tilsluttet – du ser demo-data.',
       h('button', { class: 'btn sm primary', onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR-motoren')));
+  }
+  if (ctx.eqTargetNotice && ctx.outputEq?.target) {
+    const name = ctx.outputEq.target_name || 'én udgang';
+    const confirm = (all) => {
+      if (all) { ctx.outputEq.target = null; ctx.outputEq.target_name = null; storeSet('output-eq', ctx.outputEq); applyOutputEq().catch(() => {}); }
+      ctx.prefs.eqTargetConfirmed = true; ctx.savePrefs(); ctx.eqTargetNotice = false; renderBanners();
+      if (current === 'outeq') mount();
+      toast(all ? 'EQ’en gælder nu alle markerede udgange' : `EQ’en gælder fortsat kun ${name}`, 'info');
+    };
+    items.push(h('div', { class: 'banner warn', 'data-testid': 'banner-eq-target' },
+      `EQ’en gælder kun ${name} – en indstilling fra en tidligere version. Lyd på andre udgange (fx Music fra Spotify) får ingen EQ.`,
+      h('button', { class: 'btn sm primary', 'data-testid': 'banner-eq-target-all', onclick: () => confirm(true) }, 'Gælder alle markerede udgange'),
+      h('button', { class: 'btn sm', 'data-testid': 'banner-eq-target-keep', onclick: () => confirm(false) }, `Behold kun ${name}`)));
   }
   const rep = ctx.engineRepair;
   if (rep?.needed) {
@@ -568,6 +582,8 @@ async function boot() {
   Object.assign(ctx.prefs, prefs);
   ctx.scenes = scenes;
   ctx.outputEq = outputEq;
+  // Fejl 2: versions before 0.4.2 kept a single "EQ gælder for" output silently – ask once.
+  ctx.eqTargetNotice = !!(outputEq.target && !ctx.prefs.eqTargetConfirmed);
   ctx.appRules = appRules;
   ctx.hotkeys = hotkeys || defaultHotkeys(scenes);
   if (!hotkeys) storeSet('hotkeys', ctx.hotkeys);

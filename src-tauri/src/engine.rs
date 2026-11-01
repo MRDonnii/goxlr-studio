@@ -846,6 +846,12 @@ pub struct DeviceTest {
     pub ok: bool,
     #[serde(default)]
     pub error: Option<String>,
+    /// config.txt's Device: line includes this output (fejl 2: "kører" alone is not enough).
+    #[serde(default)]
+    pub covered: Option<bool>,
+    /// Highest peak measured on the output before the test (0..1).
+    #[serde(default)]
+    pub peak: Option<f32>,
 }
 
 const TEST_PIPE_VALUE: &str = "DeviceTestPipeName";
@@ -1150,7 +1156,7 @@ fn test_outputs(guids: &[String], auto_adjust: bool, log: &mut Vec<String>) -> V
 
 /// Tests the installed outputs among `wanted` and reports per output. Returns true when Windows
 /// should be restarted (the engine did not load everywhere).
-fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &mut Vec<DeviceTest>) -> bool {
+fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &mut Vec<DeviceTest>, sound: &mut Vec<String>) -> bool {
     let guids: Vec<String> = devices()
         .into_iter()
         .filter(|d| d.installed && wanted.iter().any(|w| w.to_lowercase().ends_with(&d.guid.to_lowercase())))
@@ -1159,7 +1165,15 @@ fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &m
     if guids.is_empty() {
         return !restart_audio(log);
     }
+    // Before the test restarts the audio service and interrupts what is playing.
+    let (notes, per_output) = sound_check(log);
     *tests = test_outputs(&guids, auto_adjust, log);
+    for t in tests.iter_mut() {
+        if let Some((peak, covered)) = per_output.get(&t.guid.to_lowercase()) {
+            t.peak = Some(*peak);
+            t.covered = Some(*covered);
+        }
+    }
     for t in tests.iter() {
         log.push(match (&t.error, t.ok) {
             (_, true) => format!("✓ {}: EQ-motoren kører ({})", t.name, mode_label(&t.mode)),
@@ -1176,7 +1190,147 @@ fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &m
             format!("Motoren er ikke registreret korrekt i Windows ({}).", reg.problems.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("; "))
         });
     }
+    log.extend(notes.iter().cloned());
+    *sound = notes;
     !failed.is_empty()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Where the EQ applies compared with where sound plays (fejl 2): an EQ for "System" is "running"
+// but does nothing for Spotify on "Music".
+// ---------------------------------------------------------------------------------------------
+
+/// Which outputs config.txt's Device: line covers (Equalizer APO's rules: "all", GUIDs, or words
+/// that must all occur in "device connection {guid}"; ";" separates alternatives).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Coverage {
+    All,
+    Patterns(Vec<Vec<String>>),
+}
+
+/// Pure: the first Device: line of a config written by apo::render (no line = all outputs).
+pub fn parse_coverage(config: &str) -> Coverage {
+    for line in config.lines() {
+        let l = line.trim().trim_start_matches('\u{feff}');
+        let Some(rest) = l.strip_prefix("Device:") else { continue };
+        let alts: Vec<Vec<String>> = rest
+            .split(';')
+            .map(|a| a.split_whitespace().map(|w| w.to_lowercase()).collect::<Vec<_>>())
+            .filter(|w| !w.is_empty())
+            .collect();
+        if alts.is_empty() || alts.iter().any(|w| w.len() == 1 && w[0] == "all") {
+            return Coverage::All;
+        }
+        return Coverage::Patterns(alts);
+    }
+    Coverage::All
+}
+
+impl Coverage {
+    /// `device_string` as Equalizer APO builds it: "device connection {guid}".
+    pub fn covers(&self, device_string: &str) -> bool {
+        let full = device_string.to_lowercase();
+        match self {
+            Coverage::All => true,
+            Coverage::Patterns(alts) => alts.iter().any(|words| words.iter().all(|w| full.contains(w.as_str()))),
+        }
+    }
+}
+
+/// One output during the sound check.
+#[derive(Debug, Clone)]
+pub struct OutputSound {
+    pub name: String,
+    pub device_string: String,
+    pub installed: bool,
+    pub peak: f32,
+}
+
+const PLAYING_PEAK: f32 = 0.003;
+
+/// Pure: what to tell the user about where sound plays and where the EQ applies.
+pub fn sound_notes(outputs: &[OutputSound], cov: &Coverage) -> Vec<String> {
+    let applies: Vec<&str> = outputs.iter().filter(|o| o.installed && cov.covers(&o.device_string)).map(|o| o.name.as_str()).collect();
+    let playing: Vec<&OutputSound> = outputs.iter().filter(|o| o.peak >= PLAYING_PEAK).collect();
+    if playing.is_empty() {
+        return vec!["Der spillede ingen lyd under testen – start fx musik, og tryk \"Test EQ-motoren\" igen for at se, om EQ'en rammer lyden.".into()];
+    }
+    let only = if applies.is_empty() { "ingen udgange".to_string() } else { applies.join(", ") };
+    playing
+        .iter()
+        .map(|o| {
+            if !o.installed {
+                format!("⚠ Der spiller lyd på {}, som ikke har EQ-motoren.", o.name)
+            } else if !cov.covers(&o.device_string) {
+                format!("⚠ Der spiller lyd på {}, men EQ'en gælder kun {only}.", o.name)
+            } else {
+                format!("✓ Der spiller lyd på {}, og EQ'en gælder der.", o.name)
+            }
+        })
+        .collect()
+}
+
+/// Highest peak per output over `ms` milliseconds (0 when it cannot be read).
+#[cfg(windows)]
+fn measure_peaks(guids: &[String], ms: u64) -> Vec<f32> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
+    use windows::Win32::Media::Audio::*;
+    use windows::Win32::System::Com::*;
+    let mut peaks = vec![0f32; guids.len()];
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let Ok(en) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return peaks };
+        let meters: Vec<Option<IAudioMeterInformation>> = guids
+            .iter()
+            .map(|g| {
+                let id = reg::wide(&endpoint_id(g));
+                en.GetDevice(PCWSTR(id.as_ptr())).ok().and_then(|d| d.Activate::<IAudioMeterInformation>(CLSCTX_ALL, None).ok())
+            })
+            .collect();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        while std::time::Instant::now() < deadline {
+            for (i, m) in meters.iter().enumerate() {
+                if let Some(v) = m.as_ref().and_then(|m| m.GetPeakValue().ok()) {
+                    peaks[i] = peaks[i].max(v);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    peaks
+}
+
+#[cfg(not(windows))]
+fn measure_peaks(guids: &[String], _ms: u64) -> Vec<f32> {
+    vec![0.0; guids.len()]
+}
+
+/// Device string as Equalizer APO matches it: "device connection {guid}".
+fn device_string(guid: &str) -> String {
+    let props = format!(r"{RENDER_KEY}\{guid}\Properties");
+    let dev = reg::read_str(&props, DEVICE_VALUE).unwrap_or_default();
+    let conn = reg::read_str(&props, CONNECTION_VALUE).unwrap_or_default();
+    format!("{dev} {conn} {guid}")
+}
+
+/// Measures where sound plays right now (before the test restarts the audio service) and compares
+/// it with the outputs config.txt's Device: line covers.
+fn sound_check(log: &mut Vec<String>) -> (Vec<String>, std::collections::HashMap<String, (f32, bool)>) {
+    let outputs = devices();
+    let guids: Vec<String> = outputs.iter().map(|d| d.guid.clone()).collect();
+    let peaks = measure_peaks(&guids, 2000);
+    let config = std::fs::read_to_string(config_dir().join("config.txt")).unwrap_or_default();
+    let cov = parse_coverage(&config);
+    let sounds: Vec<OutputSound> = outputs
+        .iter()
+        .zip(&peaks)
+        .map(|(d, p)| OutputSound { name: d.name.clone(), device_string: device_string(&d.guid), installed: d.installed, peak: *p })
+        .collect();
+    let notes = sound_notes(&sounds, &cov);
+    let per_output = outputs.iter().zip(&sounds).map(|(d, o)| (d.guid.to_lowercase(), (o.peak, cov.covers(&o.device_string)))).collect();
+    log.push("Målt hvor der spiller lyd, og hvor EQ'en gælder (config.txt)".into());
+    (notes, per_output)
 }
 
 fn installed_guids() -> Vec<String> {
@@ -1223,6 +1377,9 @@ pub struct TaskResult {
     /// Per output: is the engine loaded (see `Task::Test`).
     #[serde(default)]
     pub tests: Vec<DeviceTest>,
+    /// Where sound was playing during the test compared with where the EQ applies (fejl 2).
+    #[serde(default)]
+    pub sound: Vec<String>,
 }
 
 fn hidden(program: &str) -> std::process::Command {
@@ -1337,7 +1494,7 @@ fn remove_external(log: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>, tests: &mut Vec<DeviceTest>) -> Result<bool, String> {
+fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>, tests: &mut Vec<DeviceTest>, sound: &mut Vec<String>) -> Result<bool, String> {
     if !bundled() {
         return Err("Denne version af GoXLR Studio indeholder ikke EQ-motoren".into());
     }
@@ -1364,7 +1521,7 @@ fn install_engine(devices: &[String], mode: Option<&str>, log: &mut Vec<String>,
     reg::write_dword(AUDIO_KEY, "DisableProtectedAudioDG", 1)?;
     ensure_engine_registered(log)?;
     apply_devices(devices, mode, log)?;
-    Ok(verify(devices, mode.is_none(), log, tests))
+    Ok(verify(devices, mode.is_none(), log, tests, sound))
 }
 
 fn uninstall_engine(log: &mut Vec<String>) -> Result<bool, String> {
@@ -1419,12 +1576,13 @@ fn use_external(enable: bool, log: &mut Vec<String>) -> Result<bool, String> {
 pub fn run_task(task: &Task) -> TaskResult {
     let mut log = Vec::new();
     let mut tests = Vec::new();
+    let mut sound = Vec::new();
     let res = match task {
-        Task::Install { devices, mode } => install_engine(devices, mode.as_deref(), &mut log, &mut tests),
+        Task::Install { devices, mode } => install_engine(devices, mode.as_deref(), &mut log, &mut tests, &mut sound),
         // A way chosen by hand is only tested; otherwise the way that works is found automatically.
         Task::SetDevices { devices, mode } => ensure_engine_registered(&mut log)
             .and_then(|_| apply_devices(devices, mode.as_deref(), &mut log))
-            .map(|_| verify(devices, mode.is_none(), &mut log, &mut tests)),
+            .map(|_| verify(devices, mode.is_none(), &mut log, &mut tests, &mut sound)),
         // Repairs what an older version or Equalizer APO's uninstaller left behind, then tests.
         Task::Test => ensure_engine_registered(&mut log).and_then(|_| {
             let guids = installed_guids();
@@ -1432,7 +1590,7 @@ pub fn run_task(task: &Task) -> TaskResult {
                 log.push("EQ-motoren er ikke sat på nogen udgang endnu".into());
                 Ok(false)
             } else {
-                Ok(verify(&guids, true, &mut log, &mut tests))
+                Ok(verify(&guids, true, &mut log, &mut tests, &mut sound))
             }
         }),
         Task::Uninstall => uninstall_engine(&mut log),
@@ -1440,8 +1598,8 @@ pub fn run_task(task: &Task) -> TaskResult {
         Task::RestoreExternal => use_external(false, &mut log),
     };
     match res {
-        Ok(reboot) => TaskResult { ok: true, error: None, log, reboot, tests },
-        Err(e) => TaskResult { ok: false, error: Some(e), log, reboot: false, tests },
+        Ok(reboot) => TaskResult { ok: true, error: None, log, reboot, tests, sound },
+        Err(e) => TaskResult { ok: false, error: Some(e), log, reboot: false, tests, sound },
     }
 }
 
@@ -1585,6 +1743,36 @@ mod tests {
         assert_eq!(codes(&f), ["wrong-path-post-mix", "protected-audiodg"]);
         let f = RegFacts { dll_exists: false, ..facts_ok() };
         assert_eq!(codes(&f), ["missing-dll"]);
+    }
+
+    #[test]
+    fn coverage_follows_equalizer_apo_device_rules() {
+        let system = "TC-Helicon GoXLR System {58a6a695-a61b-4549-8340-5b88409d9be5}";
+        let music = "TC-Helicon GoXLR Music {11111111-2222-3333-4444-555555555555}";
+        let cov = parse_coverage("# x\nDevice: {58a6a695-a61b-4549-8340-5b88409d9be5}\nPreamp: -4 dB\n");
+        assert!(cov.covers(system) && !cov.covers(music));
+        assert_eq!(parse_coverage("Device: all\n"), Coverage::All);
+        assert_eq!(parse_coverage("Preamp: 0 dB\n"), Coverage::All);
+        let cov = parse_coverage("\u{feff}Device: GoXLR Music; Speakers\n");
+        assert!(cov.covers(music) && !cov.covers(system) && cov.covers("Realtek Speakers {x}"));
+    }
+
+    #[test]
+    fn sound_notes_find_eq_on_the_wrong_output() {
+        // The report: Spotify on Music (peak 0.398), EQ only on System.
+        let cov = parse_coverage("Device: {58a6a695-a61b-4549-8340-5b88409d9be5}\n");
+        let out = |name: &str, guid: &str, installed: bool, peak: f32| OutputSound { name: name.into(), device_string: format!("TC-Helicon GoXLR {name} {guid}"), installed, peak };
+        let outputs = [
+            out("System", "{58a6a695-a61b-4549-8340-5b88409d9be5}", true, 0.0),
+            out("Music", "{11111111-2222-3333-4444-555555555555}", true, 0.398),
+            out("Højttalere", "{99999999-2222-3333-4444-555555555555}", false, 0.2),
+        ];
+        let notes = sound_notes(&outputs, &cov);
+        assert_eq!(notes[0], "⚠ Der spiller lyd på Music, men EQ'en gælder kun System.");
+        assert_eq!(notes[1], "⚠ Der spiller lyd på Højttalere, som ikke har EQ-motoren.");
+        assert!(sound_notes(&outputs, &Coverage::All)[0].starts_with("✓ Der spiller lyd på Music"));
+        let silent = [out("System", "{a}", true, 0.0)];
+        assert!(sound_notes(&silent, &Coverage::All)[0].starts_with("Der spillede ingen lyd"));
     }
 
     #[test]

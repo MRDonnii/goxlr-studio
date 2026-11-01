@@ -210,6 +210,11 @@ a { color: var(--accent); }
 .engine-log:empty { display: none; }
 .engine-log .ok { color: var(--ok); }
 .engine-log .bad { color: var(--warn); }
+.sound-notes { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.sound-notes:empty, .target-warn:empty { display: none; }
+.sound-notes .bad { color: var(--warn); }
+.sound-notes .ok { color: var(--ok); }
+.target-warn { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(251,191,36,.45); border-radius: 10px; background: rgba(251,191,36,.08); color: var(--warn); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
 
 /* Migration page */
 .migrate-head .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }

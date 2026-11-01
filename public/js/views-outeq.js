@@ -27,14 +27,22 @@ const ENGINE_MODES = ['lfx-gfx', 'sfx-efx', 'sfx-mfx'];
 const ENGINE_MODE_LABEL = { 'lfx-gfx': 'LFX/GFX', 'sfx-efx': 'SFX/EFX', 'sfx-mfx': 'SFX/MFX' };
 
 // Summary of the last engine test (see engine.rs Task::Test): which outputs the engine loads on.
-export function engineTestSummary(tests = []) {
+export function engineTestSummary(tests = [], sound = []) {
   const tested = tests.filter((t) => !t.error);
   const ok = tested.filter((t) => t.ok);
   if (!tested.length) return null;
-  if (ok.length === tested.length) return { ok: true, text: `EQ-motoren er testet og kører på ${ok.length === 1 ? 'udgangen' : `alle ${ok.length} udgange`}.` };
-  const bad = tested.filter((t) => !t.ok).map((t) => shortName(t.name)).join(', ');
-  return { ok: false, text: `EQ-motoren blev ikke indlæst på: ${bad}. Genstart pc’en og tryk "Test EQ-motoren".` };
+  if (ok.length !== tested.length) {
+    const bad = tested.filter((t) => !t.ok).map((t) => shortName(t.name)).join(', ');
+    return { ok: false, kind: 'not-loaded', text: `EQ-motoren blev ikke indlæst på: ${bad}. Genstart pc’en og tryk "Test EQ-motoren".` };
+  }
+  // Fejl 2: loaded is not enough – the EQ must apply where the sound plays.
+  const warn = sound.find((l) => l.startsWith('⚠'));
+  if (warn) return { ok: false, kind: 'coverage', text: warn.replace(/^⚠\s*/, '') };
+  return { ok: true, kind: 'ok', text: `EQ-motoren er testet og kører på ${ok.length === 1 ? 'udgangen' : `alle ${ok.length} udgange`}.` };
 }
+
+// Does the EQ (state.target = one output, or null = all marked outputs) apply to this output?
+const appliesTo = (state, id) => !state.target || String(state.target).toLowerCase() === String(id).toLowerCase();
 
 // "EQ follows profile": pick a preset per GoXLR profile; applied whenever the profile changes.
 function profileLinksCard(ctx) {
@@ -355,6 +363,9 @@ export function outputEqView(ctx) {
   const devList = h('div', { class: 'engine-devices' });
   const engineActions = h('div', { class: 'row', style: { flexWrap: 'wrap', marginTop: '10px' } });
   const targetHint = h('div', { class: 'hint' });
+  const targetWarn = h('div', { class: 'target-warn', 'data-testid': 'eq-target-warning' });
+  const soundBox = h('div', { class: 'sound-notes', 'data-testid': 'engine-sound-notes' });
+  const renderSound = (notes = []) => soundBox.replaceChildren(...notes.map((l) => h('div', { class: l.startsWith('⚠') ? 'bad' : l.startsWith('✓') ? 'ok' : '' }, l)));
   const importApoBtn = h('button', { class: 'btn sm', onclick: async () => {
     try {
       const text = await apoReadConfig();
@@ -366,11 +377,17 @@ export function outputEqView(ctx) {
       toast(`Importeret ${parsed.bands.length} filtre fra din Peace/APO-opsætning`, 'info');
     } catch (e) { toast(String(e)); }
   } }, 'Importér nuværende Peace-opsætning');
-  const targetSel = h('select', { onchange: () => { state.target = targetSel.value || null; state.target_name = targetSel.selectedOptions[0]?.dataset.name || null; persist(); apply(); renderTarget(); } });
+  const setTarget = (id, name) => {
+    state.target = id || null; state.target_name = id ? name || null : null;
+    // A choice made here is the user's own (fejl 2: older versions kept one silently).
+    ctx.prefs.eqTargetConfirmed = true; ctx.savePrefs?.(); ctx.eqTargetNotice = false; ctx.renderBanners?.();
+    persist(); apply(); renderTarget(); renderDevices();
+  };
+  const targetSel = h('select', { 'data-testid': 'eq-target', onchange: () => setTarget(targetSel.value, targetSel.selectedOptions[0]?.dataset.name) });
   let info = { kind: 'none', devices: [] };
   let chosen = null;
   let lastTest = null; // { at, tests } from the last engine task
-  storeGet('engine-test', null).then((t) => { lastTest = t; if (info.devices.length) { renderDevices(); refreshText(); } }).catch(() => {});
+  storeGet('engine-test', null).then((t) => { lastTest = t; renderSound(t?.sound); if (info.devices.length) { renderDevices(); refreshText(); } }).catch(() => {});
   const testOf = (d) => lastTest?.tests?.find((t) => d.guid && t.guid.toLowerCase() === d.guid.toLowerCase());
   const isGoXLR = (n) => /goxlr|tc-helicon/i.test(n);
   const installedIds = () => info.devices.filter((d) => d.installed).map((d) => d.id);
@@ -380,15 +397,17 @@ export function outputEqView(ctx) {
     engineText.textContent = busy;
     try {
       const r = await engineTask(task);
-      engineLog.replaceChildren(...(r.log || []).map((l) => h('div', { class: /^✓/.test(l) ? 'ok' : /^✗/.test(l) ? 'bad' : '' }, /^[✓✗–]/.test(l) ? '' : '• ', l)));
+      // The sound check is shown highlighted below the log (soundBox), not twice.
+      engineLog.replaceChildren(...(r.log || []).filter((l) => !(r.sound || []).includes(l)).map((l) => h('div', { class: /^✓/.test(l) ? 'ok' : /^✗/.test(l) ? 'bad' : '' }, /^[✓✗–]/.test(l) ? '' : '• ', l)));
       if (!r.ok) throw new Error(r.error || 'Ukendt fejl');
       if (r.tests?.length || task.action === 'uninstall') {
-        lastTest = { at: Date.now(), tests: r.tests || [] };
+        lastTest = { at: Date.now(), tests: r.tests || [], sound: r.sound || [] };
         storeSet('engine-test', lastTest).catch(() => {});
       }
+      renderSound(r.sound);
       ctx.onApoChanged?.(task.action !== 'uninstall' && task.action !== 'restore-external');
       apply();
-      const sum = engineTestSummary(r.tests);
+      const sum = engineTestSummary(r.tests, r.sound);
       toast(sum ? sum.text : r.reboot ? 'Færdig – genstart pc’en, så alle programmer bruger EQ’en' : 'Færdig', sum && !sum.ok ? undefined : 'info');
     } catch (e) { toast(String(e.message || e)); }
     refreshEngine();
@@ -437,16 +456,23 @@ export function outputEqView(ctx) {
     devList.replaceChildren(...info.devices.map((d) => {
       const cb = h('input', { type: 'checkbox', checked: chosen.has(d.id), onchange: () => { if (cb.checked) chosen.add(d.id); else chosen.delete(d.id); renderActions(); } });
       const t = d.installed ? testOf(d) : null;
-      const badge = !d.installed ? null
-        : t && !t.error ? h('span', { class: `badge ${t.ok ? 'ok' : 'warn'}` }, t.ok ? 'kører' : 'ikke indlæst')
-          : h('span', { class: 'badge ok' }, 'aktiv');
+      const status = !d.installed ? null : t && !t.error ? (t.ok ? 'kører' : 'ikke indlæst') : 'aktiv';
+      const applies = appliesTo(state, d.id);
+      const badge = status && h('span', { class: `badge ${status === 'ikke indlæst' || !applies ? 'warn' : 'ok'}`, 'data-testid': 'engine-device-status' },
+        `${status} · EQ ${applies ? 'gælder her' : 'gælder ikke her'}`);
       return h('label', { class: 'engine-dev', title: d.mode ? `${d.name} – ${ENGINE_MODE_LABEL[d.mode] || d.mode}` : d.name }, cb, h('span', {}, shortName(d.name)), badge);
     }));
     if (!info.devices.length) devList.append(h('div', { class: 'hint' }, 'Fandt ingen udgange.'));
   };
   const renderTarget = () => {
-    const d = info.devices.find((x) => x.id === state.target);
+    const d = info.devices.find((x) => appliesTo(state, x.id) && state.target);
     targetHint.textContent = state.target && d && !d.installed ? 'EQ-motoren kører ikke på denne udgang endnu – markér den ovenfor.' : '';
+    // Fejl 2: the engine sits on several outputs, but the EQ applies to one of them only.
+    const others = info.devices.filter((x) => x.installed && !appliesTo(state, x.id)).map((x) => shortName(x.name));
+    targetWarn.replaceChildren(...(state.target && others.length ? [
+      h('span', {}, `⚠ EQ’en gælder kun ${shortName(state.target_name || d?.name || 'én udgang')} – lyd på ${others.join(', ')} får ingen EQ.`),
+      h('button', { class: 'btn sm primary', 'data-testid': 'eq-target-all', onclick: () => { targetSel.value = ''; setTarget(null); toast('EQ’en gælder nu alle markerede udgange', 'info'); } }, 'Gælder alle markerede udgange'),
+    ] : []));
   };
   const refreshEngine = async () => {
     info = await engineInfo().catch((e) => ({ kind: 'none', bundled: false, devices: [], error: String(e) }));
@@ -466,13 +492,13 @@ export function outputEqView(ctx) {
       none: 'EQ-motoren er ikke installeret endnu.',
     }[info.kind] || '';
     const unregistered = info.kind === 'builtin' && info.registration && !info.registration.ok;
-    const sum = running && info.kind === 'builtin' ? engineTestSummary(lastTest?.tests) : null;
+    const sum = running && info.kind === 'builtin' ? engineTestSummary(lastTest?.tests, lastTest?.sound) : null;
     const state = unregistered
       ? `Motoren er installeret, men ikke registreret korrekt i Windows, så EQ’en høres ikke: ${info.registration.problems.map((x) => x.text).join('; ')}. Tryk "Reparér EQ-motoren".`
       : !running ? '' : sum ? sum.text : 'Tryk "Test EQ-motoren" for at tjekke at den kører på udgangene.';
     engineText.textContent = `${kind} ${state}${info.error ? ` (${info.error})` : ''}`;
     if (unregistered) { engineBadge.textContent = 'Skal repareres'; engineBadge.className = 'badge warn'; }
-    else if (sum && !sum.ok) { engineBadge.textContent = 'Ikke indlæst'; engineBadge.className = 'badge warn'; }
+    else if (sum && !sum.ok) { engineBadge.textContent = sum.kind === 'coverage' ? 'Rammer ikke lyden' : 'Ikke indlæst'; engineBadge.className = 'badge warn'; }
   }
   listAudioDevices().then((devs) => {
     targetSel.replaceChildren(h('option', { value: '' }, 'Alle markerede udgange'), ...devs.filter((d) => d.flow === 'render').map((d) => h('option', { value: d.id, 'data-name': d.name }, shortName(d.name))));
@@ -483,7 +509,8 @@ export function outputEqView(ctx) {
     engineText,
     h('div', { class: 'hint', style: { margin: '10px 0 4px' } }, 'Udgange med EQ-motor:'), devList,
     engineActions, engineLog,
-    h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'EQ gælder for'), targetSel), targetHint);
+    soundBox,
+    h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'EQ gælder for'), targetSel), targetWarn, targetHint);
 
   const preview = makePreview(eq);
   const previewCard = h('div', { class: 'card' }, h('h2', {}, 'Lyttetest'),

@@ -104,10 +104,18 @@ function demoTest(log, autoAdjust = true) {
     demoEngine.mode = 'sfx-efx';
   }
   const ok = demoEngine.mode !== 'lfx-gfx';
-  const tests = ids.map((id) => ({ guid: id, name: demoDevices.find((x) => x.id === id)?.name || id, mode: demoEngine.mode, pre_mix: ok, post_mix: ok, ok, error: null }));
-  for (const t of tests) log.push(t.ok ? `✓ ${t.name}: EQ-motoren kører (${label[t.mode]})` : `✗ ${t.name}: EQ-motoren blev ikke indlæst – genstart pc'en og tryk "Test EQ-motoren"`);
+  const target = (() => { try { return JSON.parse(localStorage.getItem('studio.output-eq') || '{}').target || null; } catch { return null; } })();
+  const covers = (id) => !target || target === id;
+  const tests = ids.map((id) => ({ guid: id, name: demoDevices.find((x) => x.id === id)?.name || id, mode: demoEngine.mode, pre_mix: ok, post_mix: ok, ok, error: null, covered: covers(id), peak: id === 'out-goxlr-music' ? 0.398 : 0 }));
+  for (const t of tests) log.push(t.ok ? `✓ ${t.name}: EQ-motoren kører (${label[t.mode]})` : `✗ ${t.name}: ikke indlæst`);
+  // Demo: Spotify plays on Music.
+  const music = demoDevices.find((x) => x.id === 'out-goxlr-music')?.name || 'Music';
+  const only = tests.filter((t) => t.covered).map((t) => t.name).join(', ') || 'ingen udgange';
+  demoSound = [covers('out-goxlr-music') ? `✓ Der spiller lyd på ${music}, og EQ'en gælder der.` : `⚠ Der spiller lyd på ${music}, men EQ'en gælder kun ${only}.`];
+  log.push(...demoSound);
   return tests;
 }
+let demoSound = [];
 
 export async function engineTask(task) {
   if (isNative()) return invoke('engine_task', { task });
@@ -133,7 +141,7 @@ export async function engineTask(task) {
     demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); log.push('EQ-motoren er fjernet');
   } else if (task.action === 'use-external') { demoEngine.uses_our_config = true; log.push('Equalizer APO læser nu GoXLR Studios EQ'); }
   else if (task.action === 'restore-external') { demoEngine.uses_our_config = false; log.push('Equalizer APO bruger igen sin egen config-mappe'); }
-  return { ok: true, error: null, log, reboot: tests.some((t) => !t.ok && !t.error), tests };
+  return { ok: true, error: null, log, reboot: tests.some((t) => !t.ok && !t.error), tests, sound: tests.length ? demoSound : [] };
 }
 
 export async function engineStatus() {
@@ -290,7 +298,7 @@ export async function setTrayStatus(muted, tooltip) {
 
 export async function appInfo() {
   if (isNative()) return invoke('app_info');
-  return { version: '0.4.1', installed: false, browser: true };
+  return { version: '0.4.2', installed: false, browser: true };
 }
 
 export async function installUpdate(url, sha256) {
