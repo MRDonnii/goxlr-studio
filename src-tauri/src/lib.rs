@@ -13,6 +13,7 @@ mod migrate;
 mod osd;
 mod session;
 mod sounds;
+mod spectrum;
 mod store;
 mod update;
 
@@ -308,6 +309,18 @@ fn open_path(path: String) -> Result<(), String> {
 #[tauri::command]
 fn audio_levels() -> HashMap<String, f32> {
     meters::levels()
+}
+
+/// Live spectrum of an output (None = Windows' default output) for the EQ graph.
+#[tauri::command]
+async fn spectrum_read(device: Option<String>) -> spectrum::Spectrum {
+    tauri::async_runtime::spawn_blocking(move || spectrum::read(device)).await.unwrap_or_else(|e| spectrum::Spectrum {
+        device: String::new(),
+        rate: 0,
+        bands: Vec::new(),
+        playing: false,
+        error: Some(e.to_string()),
+    })
 }
 
 /// Presses a key combination (Discord's "Toggle Mute" keybind).
@@ -719,6 +732,7 @@ pub fn run() {
             open_url,
             send_keys,
             audio_levels,
+            spectrum_read,
             discord_running,
             show_osd,
             start_daemon,

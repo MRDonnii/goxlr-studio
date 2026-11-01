@@ -2,7 +2,8 @@ import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { BUILTIN_PRESETS, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
 import { chainResponse, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
-import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative } from './native.js';
+import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
+import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
 import { shortName } from './views-mixer.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl } from './extras.js';
@@ -335,8 +336,60 @@ export function outputEqView(ctx) {
     h('div', { class: 'spacer' }),
     h('button', { class: 'btn sm', 'data-testid': 'eq-blind-start', title: 'Hør A og B som X og Y uden at vide hvilken er hvilken – 5 runder', onclick: () => startBlind() }, 'Blindtest'));
 
+  // ---- Live-spektrum (Tillæg 2): what plays right now, behind the curve ----
+  const specCanvas = h('canvas', { class: 'eq-spectrum' });
+  const prefs = ctx.prefs;
+  const specToggle = h('input', { type: 'checkbox', 'data-testid': 'eq-spectrum-on', checked: prefs.eqSpectrum !== false, onchange: () => {
+    prefs.eqSpectrum = specToggle.checked; ctx.savePrefs?.();
+    specSel.disabled = !specToggle.checked;
+    if (!specToggle.checked) { specLevels = null; graph.drawSpectrum(specCanvas, null); specStatus.textContent = ''; }
+  } });
+  const specSel = h('select', { 'data-testid': 'eq-spectrum-device', disabled: prefs.eqSpectrum === false, onchange: () => { prefs.eqSpectrumDevice = specSel.value; ctx.savePrefs?.(); specAuto = null; specLevels = null; } },
+    h('option', { value: 'auto' }, 'Automatisk – det der spiller'), h('option', { value: '' }, 'Windows’ standardudgang'));
+  const specStatus = h('span', { class: 'spectrum-status', 'data-testid': 'eq-spectrum-status' });
+  let renderDevs = [];
+  listAudioDevices().then((devs) => {
+    const goxlr = (d) => (/goxlr|tc-helicon/i.test(d.name) ? 0 : 1);
+    renderDevs = devs.filter((d) => d.flow === 'render').sort((a, b) => goxlr(a) - goxlr(b));
+    specSel.append(...renderDevs.map((d) => h('option', { value: d.id }, shortName(d.name))));
+    specSel.value = prefs.eqSpectrumDevice ?? 'auto';
+    if (!specSel.value && prefs.eqSpectrumDevice) specSel.value = 'auto';
+  }).catch(() => {});
+  let specLevels = null, specAt = 0, specAuto = null, levelsAt = 0, specBusy = false;
+  const specTick = async () => {
+    if (specBusy || !specToggle.checked || document.hidden || blind || !document.body.contains(canvas)) return;
+    specBusy = true;
+    try {
+      const now = performance.now();
+      let bands = null, label;
+      if (preview.playing) {
+        bands = preview.spectrum();
+        label = 'Lyttetest';
+        specStatus.textContent = 'Viser lyttetesten – med EQ';
+      } else {
+        let dev = specSel.value;
+        if (dev === 'auto') {
+          if (now - levelsAt > 1000) { levelsAt = now; specAuto = pickSpectrumDevice(await audioLevels().catch(() => null), renderDevs.map((d) => d.id), specAuto); }
+          dev = specAuto;
+        }
+        const r = await spectrumRead(dev || null);
+        label = dev ? shortName(renderDevs.find((d) => d.id === dev)?.name || dev) : 'Standardudgangen';
+        bands = r?.bands?.length === SPECTRUM_BANDS ? r.bands : null;
+        specStatus.textContent = r?.error ? `Kan ikke lytte på ${label}: ${r.error}` : r?.playing ? `Lytter på ${label}` : `${label}: intet spiller lige nu`;
+      }
+      specLevels = smoothSpectrum(specLevels, bands || new Array(SPECTRUM_BANDS).fill(SPECTRUM_FLOOR), now - specAt);
+      specAt = now;
+      graph.drawSpectrum(specCanvas, { freqs: SPECTRUM_FREQS, db: specLevels, label });
+    } catch { /* next tick */ } finally { specBusy = false; }
+  };
+  const specTimer = setInterval(specTick, 50);
+  const spectrumRow = h('div', { class: 'row spectrum-row' },
+    h('label', { class: 'check-inline', title: 'Viser det, der spiller lige nu, bag EQ-kurven – så du kan se, hvor musikken eller spillet har sin energi.' }, specToggle, h('span', {}, 'Live-spektrum')),
+    specSel, specStatus);
+
   const editorBody = h('div', {},
-    h('div', { class: 'eq-wrap', style: { marginTop: '12px' } }, canvas),
+    h('div', { class: 'eq-wrap live', style: { marginTop: '12px' } }, specCanvas, canvas),
+    spectrumRow,
     h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
     chainLegend,
     h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody));
@@ -638,7 +691,7 @@ export function outputEqView(ctx) {
     else if (e.key.toLowerCase() === 'b' && !e.ctrlKey && !e.altKey) { toggleEq(ctx); }
   };
   document.addEventListener('keydown', onKey);
-  ctx.cleanup.push(() => { endBlind(null); graph.destroy(); preview.stop(); document.removeEventListener('keydown', onKey); });
+  ctx.cleanup.push(() => { clearInterval(specTimer); endBlind(null); graph.destroy(); preview.stop(); document.removeEventListener('keydown', onKey); });
 
   renderBands();
   setTimeout(redraw);
@@ -652,7 +705,7 @@ export function outputEqView(ctx) {
 }
 
 function makePreview(getEq, bypassGainDb = () => 0) {
-  let ac = null, src = null, chainIn = null, out = null, bypassed = false, kind = null, buffer = null;
+  let ac = null, src = null, chainIn = null, out = null, bypassed = false, kind = null, buffer = null, analyser = null;
   const status = h('span', { class: 'hint' });
   const playNoise = h('button', { class: 'btn sm', onclick: () => start('noise') }, 'Pink noise');
   const fileIn = h('input', { type: 'file', accept: 'audio/*', style: { display: 'none' } });
@@ -668,7 +721,11 @@ function makePreview(getEq, bypassGainDb = () => 0) {
   });
 
   function ensure() {
-    if (!ac) { ac = new AudioContext(); out = ac.createGain(); out.gain.value = 0.5; out.connect(ac.destination); }
+    if (!ac) {
+      ac = new AudioContext(); out = ac.createGain(); out.gain.value = 0.5; out.connect(ac.destination);
+      // For the live spectrum on the graph while the Lyttetest plays (after the EQ, before the volume).
+      analyser = ac.createAnalyser(); analyser.fftSize = 8192; analyser.smoothingTimeConstant = 0;
+    }
   }
   function pinkNoise() {
     const len = ac.sampleRate * 4;
@@ -724,6 +781,7 @@ function makePreview(getEq, bypassGainDb = () => 0) {
       node.connect(match); node = match; chainIn.push(match);
     }
     node.connect(out);
+    node.connect(analyser);
     ab.textContent = label(g);
     ab.classList.toggle('on', !bypassed);
   }
@@ -732,8 +790,14 @@ function makePreview(getEq, bypassGainDb = () => 0) {
   return {
     controls: h('div', {}, h('div', { class: 'row', style: { flexWrap: 'wrap' } }, playNoise, playFile, ab, stopBtn, fileIn), h('div', { class: 'row' }, status)),
     update: () => { if (src) rebuild(); },
-    stop: () => { stop(); ac?.close(); ac = null; },
+    stop: () => { stop(); ac?.close(); ac = null; analyser = null; },
     get playing() { return !!kind; },
+    spectrum: () => {
+      if (!analyser) return null;
+      const bins = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(bins);
+      return bandsFromBins(bins, ac.sampleRate, analyser.fftSize);
+    },
   };
 }
 

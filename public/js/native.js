@@ -450,6 +450,15 @@ export async function discordRunning() {
   return true;
 }
 
+// Live spectrum of an output (null = Windows' default output) for the EQ graph – spectrum.rs.
+// The browser demo plays "music" on the Music output.
+export async function spectrumRead(device) {
+  if (isNative()) return invoke('spectrum_read', { device: device || null });
+  const { demoSpectrum, SPECTRUM_BANDS, SPECTRUM_FLOOR } = await import('./spectrum.js');
+  const playing = !device || device === 'out-goxlr-music';
+  return { device: device || '', rate: 48000, playing, error: null, bands: playing ? demoSpectrum(performance.now() / 1000) : new Array(SPECTRUM_BANDS).fill(SPECTRUM_FLOOR) };
+}
+
 // Peak level (0–1) per audio endpoint, for the VU meters.
 export async function audioLevels() {
   if (isNative()) return invoke('audio_levels');

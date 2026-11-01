@@ -122,6 +122,44 @@ export class EqGraph {
     this.opts.onAdd(this.fOf(x), Math.round(this.dbOf(y) * 10) / 10);
   }
 
+  /** The live spectrum on its own canvas behind the graph, so it can move ~20 times a second
+   *  without redrawing the EQ. sp = { freqs, db, label }; own scale from −96 to −12 dB. */
+  drawSpectrum(c, sp, lo = -96, hi = -12) {
+    const dpr = window.devicePixelRatio || 1;
+    const W = this.w, H = this.h;
+    if (!W || !H) return;
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) {
+      c.width = Math.round(W * dpr);
+      c.height = Math.round(H * dpr);
+    }
+    const g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    if (!sp?.db?.length) return;
+    const p = this.pad();
+    const bottom = H - p.b;
+    const yS = (db) => p.t + (1 - Math.min(Math.max((db - lo) / (hi - lo), 0), 1)) * (bottom - p.t);
+    g.beginPath();
+    g.moveTo(this.xOf(sp.freqs[0]), bottom);
+    sp.db.forEach((db, k) => g.lineTo(this.xOf(sp.freqs[k]), yS(db)));
+    g.lineTo(this.xOf(sp.freqs[sp.freqs.length - 1]), bottom);
+    g.closePath();
+    const fill = g.createLinearGradient(0, p.t, 0, bottom);
+    fill.addColorStop(0, 'rgba(168,85,247,.32)');
+    fill.addColorStop(1, 'rgba(34,211,238,.06)');
+    g.fillStyle = fill;
+    g.fill();
+    g.strokeStyle = 'rgba(168,85,247,.55)';
+    g.lineWidth = 1;
+    g.stroke();
+    if (sp.label) {
+      g.font = '11px system-ui, sans-serif';
+      g.fillStyle = 'rgba(200,180,255,.8)';
+      g.textAlign = 'right';
+      g.fillText(sp.label, W - p.r - 6, p.t + 14);
+    }
+  }
+
   draw() {
     const c = this.canvas;
     const dpr = window.devicePixelRatio || 1;
