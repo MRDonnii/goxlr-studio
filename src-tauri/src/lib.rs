@@ -13,6 +13,7 @@ mod migrate;
 mod mqtt;
 mod osd;
 mod session;
+mod soundcheck;
 mod sounds;
 mod spectrum;
 mod store;
@@ -331,6 +332,27 @@ fn mqtt_stop() {
 #[tauri::command]
 fn mqtt_status() -> mqtt::Status {
     mqtt::status()
+}
+
+/// Lydtjek (soundcheck.rs): Windows settings that change or hide the sound.
+#[tauri::command]
+async fn soundcheck_report() -> Result<soundcheck::Report, String> {
+    blocking(|| Ok(soundcheck::report())).await
+}
+
+#[tauri::command]
+async fn soundcheck_set_ducking(value: u32) -> Result<(), String> {
+    blocking(move || soundcheck::set_ducking(value)).await
+}
+
+#[tauri::command]
+async fn soundcheck_restore_ducking() -> Result<Option<u32>, String> {
+    blocking(soundcheck::restore_ducking).await
+}
+
+#[tauri::command]
+async fn soundcheck_set_endpoint(id: String, volume: Option<f32>, mute: Option<bool>) -> Result<(), String> {
+    blocking(move || soundcheck::set_endpoint(&id, volume, mute)).await
 }
 
 /// Live spectrum of an output (None = Windows' default output) for the EQ graph.
@@ -755,6 +777,10 @@ pub fn run() {
             send_keys,
             audio_levels,
             spectrum_read,
+            soundcheck_report,
+            soundcheck_set_ducking,
+            soundcheck_restore_ducking,
+            soundcheck_set_endpoint,
             mqtt_start,
             mqtt_publish,
             mqtt_stop,

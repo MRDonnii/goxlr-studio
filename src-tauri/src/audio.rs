@@ -12,7 +12,7 @@ pub struct AudioDevice {
 #[cfg(windows)]
 #[allow(non_snake_case)]
 mod imp {
-    use super::AudioDevice;
+    use super::{AudioDevice, DeviceFormat};
     use std::ffi::c_void;
     #[allow(unused_imports)]
     use windows::core::{interface, IUnknown, IUnknown_Vtbl, Interface, GUID, HRESULT, PCWSTR, PWSTR};
@@ -112,6 +112,35 @@ mod imp {
     pub fn name_of(id: &str) -> Option<String> {
         list().ok()?.into_iter().find(|d| d.id == id).map(|d| d.name)
     }
+
+    /// The format Windows uses for the device ("Standardformat" in the sound settings).
+    pub fn device_format(id: &str) -> Option<DeviceFormat> {
+        com_init();
+        let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let unk: IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL).ok()?;
+            let pc: IPolicyConfig = unk.cast().ok()?;
+            let mut p: *mut c_void = std::ptr::null_mut();
+            pc.GetDeviceFormat(PCWSTR(wide.as_ptr()), 0, &mut p).ok().ok()?;
+            if p.is_null() {
+                return None;
+            }
+            use windows::Win32::Media::Audio::{WAVEFORMATEX, WAVEFORMATEXTENSIBLE};
+            let wf: WAVEFORMATEX = std::ptr::read_unaligned(p as *const WAVEFORMATEX);
+            let (tag, rate, channels, mut bits) = (wf.wFormatTag, wf.nSamplesPerSec, wf.nChannels, wf.wBitsPerSample);
+            let mut float = tag == 3;
+            if tag == 0xFFFE && wf.cbSize >= 22 {
+                let ext: WAVEFORMATEXTENSIBLE = std::ptr::read_unaligned(p as *const WAVEFORMATEXTENSIBLE);
+                let valid = ext.Samples.wValidBitsPerSample;
+                if valid > 0 {
+                    bits = valid;
+                }
+                float = ext.SubFormat.data1 == 3;
+            }
+            CoTaskMemFree(Some(p as *const c_void));
+            Some(DeviceFormat { rate, bits, channels, float })
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -126,6 +155,17 @@ mod imp {
     pub fn name_of(_id: &str) -> Option<String> {
         None
     }
+    pub fn device_format(_id: &str) -> Option<super::DeviceFormat> {
+        None
+    }
 }
 
-pub use imp::{list, name_of, set_default};
+pub use imp::{device_format, list, name_of, set_default};
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct DeviceFormat {
+    pub rate: u32,
+    pub bits: u16,
+    pub channels: u16,
+    pub float: bool,
+}

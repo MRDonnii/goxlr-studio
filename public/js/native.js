@@ -460,6 +460,36 @@ export async function discordRunning() {
   return true;
 }
 
+// Lydtjek (soundcheck.rs). The browser demo has Windows' default ducking (−80 %), the GoXLR's
+// System output at 63 % and Chat Mic at 70 %.
+const demoSoundcheck = { ducking: null, backup: false, levels: { 'out-goxlr-system': 0.63, 'in-goxlr-chat': 0.7 }, muted: {} };
+export async function soundcheckReport() {
+  if (isNative()) return invoke('soundcheck_report');
+  const fmt = { rate: 48000, bits: 24, channels: 2, float: false };
+  return {
+    ducking: demoSoundcheck.ducking,
+    ducking_backup: demoSoundcheck.backup,
+    endpoints: demoDevices.map((d) => ({ ...d, volume: demoSoundcheck.levels[d.id] ?? 1, muted: !!demoSoundcheck.muted[d.id], format: d.flow === 'render' ? fmt : { ...fmt, channels: 1 } })),
+  };
+}
+export async function soundcheckSetDucking(value) {
+  if (isNative()) return invoke('soundcheck_set_ducking', { value });
+  demoSoundcheck.backup = true;
+  demoSoundcheck.ducking = value;
+  return null;
+}
+export async function soundcheckRestoreDucking() {
+  if (isNative()) return invoke('soundcheck_restore_ducking');
+  demoSoundcheck.ducking = null;
+  return null;
+}
+export async function soundcheckSetEndpoint(id, volume = null, mute = null) {
+  if (isNative()) return invoke('soundcheck_set_endpoint', { id, volume, mute });
+  if (volume != null) demoSoundcheck.levels[id] = volume;
+  if (mute != null) demoSoundcheck.muted[id] = mute;
+  return null;
+}
+
 // Home Assistant via MQTT (mqtt.rs). The browser demo pretends to be connected and keeps what
 // would have been sent in window.studioDemo.mqtt (and .mqttCommand() acts as Home Assistant).
 const demoMqtt = { status: { enabled: false, connected: false, broker: '', error: null }, sent: [] };

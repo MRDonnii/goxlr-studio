@@ -6,6 +6,7 @@ import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene } from './views-misc.js';
 import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
+import { soundcheckView } from './views-soundcheck.js';
 import { deckView } from './views-deck.js';
 import { soundsView } from './views-sounds.js';
 import { migrateView } from './views-migrate.js';
@@ -35,6 +36,7 @@ const PAGES = [
   { id: 'hotkeys', title: 'Genveje', icon: 'key', view: hotkeysView },
   { id: 'deck', title: 'Stream Deck', icon: 'deck', view: deckView },
   { id: 'migrate', title: 'Overflytning', icon: 'move', view: migrateView },
+  { id: 'soundcheck', title: 'Lydtjek', icon: 'check', view: soundcheckView },
   { id: 'diag', title: 'Diagnose', icon: 'diag', view: diagView },
   { id: 'settings', title: 'Indstillinger', icon: 'settings', view: settingsView },
 ];

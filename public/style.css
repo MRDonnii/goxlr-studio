@@ -328,3 +328,13 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .mqtt-state { margin-top: 8px; }
 .mqtt-state.ok { color: var(--ok); }
 .mqtt-state.bad { color: var(--warn); }
+
+/* Lydtjek */
+.sc-item { align-items: flex-start; gap: 12px; }
+.sc-mark { width: 20px; text-align: center; font-weight: 700; margin-top: 1px; }
+.sc-warn .sc-mark { color: var(--warn); }
+.sc-info .sc-mark { color: #7dd3fc; }
+.sc-ok .sc-mark { color: var(--ok); }
+.sc-body { flex: 1; min-width: 0; }
+.sc-title { font-weight: 600; margin-bottom: 2px; }
+.sc-item .btn { flex-shrink: 0; }
