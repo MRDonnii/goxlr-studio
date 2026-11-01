@@ -42,8 +42,9 @@ export function createDemoStatus() {
           mic_gains: { Dynamic: 52, Condenser: 30, Jack: 20 },
           equaliser: { gain, frequency: freq },
           equaliser_mini: { gain: mgain, frequency: mfreq },
-          noise_gate: { threshold: -42, attack: 'Gate10ms', release: 'Gate200ms', enabled: true, attenuation: 80 },
-          compressor: { threshold: -18, ratio: 'Ratio3_2', attack: 'Comp5ms', release: 'Comp140ms', makeup_gain: 4 },
+          // Times and ratios are positions in the lists (micenums.js), as the real engine reports them.
+          noise_gate: { threshold: -42, attack: 0, release: 19, enabled: true, attenuation: 80 },
+          compressor: { threshold: -18, ratio: 8, attack: 4, release: 11, makeup_gain: 4 },
         },
         levels: { submix_supported: false, output_monitor: 'Headphones', volumes, submix: null, bleep: -20, deess: 25 },
         router: structuredClone(ROUTING_DEFAULT),

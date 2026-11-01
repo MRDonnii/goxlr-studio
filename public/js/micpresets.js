@@ -8,6 +8,7 @@
 import { coefficients, magnitudeDb } from './eq.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { MIC_MODELS, USB_ONLY } from './micmodels.js';
+import { GATE_TIMES, RATIOS, ATTACKS, RELEASES } from './micenums.js';
 
 export { MIC_MODELS, USB_ONLY };
 
@@ -115,13 +116,15 @@ export function micPresetCommands(model, mini, parts = {}) {
       out.push([mini ? 'SetEqMiniGain' : 'SetEqGain', b.band, b.gain]);
     }
   }
+  // Times and ratios go to the engine as their position in the list (micenums.js).
+  const at = (list, name) => list.indexOf(name);
   if (p.gate) {
     out.push(['SetGateActive', true], ['SetGateThreshold', s.gate.threshold], ['SetGateAttenuation', s.gate.attenuation],
-      ['SetGateAttack', s.gate.attack], ['SetGateRelease', s.gate.release]);
+      ['SetGateAttack', at(GATE_TIMES, s.gate.attack)], ['SetGateRelease', at(GATE_TIMES, s.gate.release)]);
   }
   if (p.comp) {
-    out.push(['SetCompressorThreshold', s.comp.threshold], ['SetCompressorRatio', s.comp.ratio], ['SetCompressorAttack', s.comp.attack],
-      ['SetCompressorReleaseTime', s.comp.release], ['SetCompressorMakeupGain', s.comp.makeup]);
+    out.push(['SetCompressorThreshold', s.comp.threshold], ['SetCompressorRatio', at(RATIOS, s.comp.ratio)], ['SetCompressorAttack', at(ATTACKS, s.comp.attack)],
+      ['SetCompressorReleaseTime', at(RELEASES, s.comp.release)], ['SetCompressorMakeupGain', s.comp.makeup]);
   }
   if (p.deess) out.push(['SetDeeser', s.deess]);
   return out;

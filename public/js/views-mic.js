@@ -1,5 +1,6 @@
 import { h, slider, segmented, selectBox, toggle, throttle, promptDialog, confirmDialog, toast, logActivity } from './ui.js';
 import { MIC_MODELS, USB_ONLY, micSettings, micPresetCommands, describeMic } from './micpresets.js';
+import { GATE_TIMES, RATIOS, ATTACKS, RELEASES, enumIndex } from './micenums.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { coefficients, magnitudeDb, formatFreq } from './eq.js';
@@ -9,18 +10,15 @@ const MINI_RANGES = [[30, 90], [100, 300], [310, 800], [800, 2500], [2600, 5000]
 // The hardware doesn't expose Q; this approximates the GoXLR's fixed band width for the drawing.
 const HW_Q = 1.3;
 
-const GATE_TIMES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000].map((t) => `Gate${t}ms`);
-const RATIOS = ['Ratio1_0', 'Ratio1_1', 'Ratio1_2', 'Ratio1_4', 'Ratio1_6', 'Ratio1_8', 'Ratio2_0', 'Ratio2_5', 'Ratio3_2', 'Ratio4_0', 'Ratio5_6', 'Ratio8_0', 'Ratio16_0', 'Ratio32_0', 'Ratio64_0'];
-const ATTACKS = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 23, 26, 30, 35, 40].map((t) => `Comp${t}ms`);
-const RELEASES = [0, 15, 25, 35, 45, 55, 65, 75, 85, 100, 115, 140, 170, 230, 340, 680, 1000, 1500, 2000, 3000].map((t) => `Comp${t}ms`);
 const ms = (s) => s.replace(/^(Gate|Comp)/, '').replace('ms', ' ms');
-const ratio = (s) => s.replace('Ratio', '').replace('_', '.') + ' : 1';
+const ratio = (s) => s.replace('Ratio', '').replace('_', ',') + ' : 1';
 
+// The engine reports and expects these as positions in the list (see micenums.js).
 function enumSlider(binder, { label, list, get, set, fmt }) {
   return slider(binder, {
     label, min: 0, max: list.length - 1,
-    get: () => Math.max(0, list.indexOf(get())),
-    set: (i) => set(list[i]),
+    get: () => enumIndex(list, get()),
+    set: (i) => set(i),
     fmt: (i) => fmt(list[i]),
   });
 }

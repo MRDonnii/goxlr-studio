@@ -63,3 +63,20 @@ test('the SM7dB gets +48 V for its preamp, USB-only mics are not on the list', (
   assert.ok(p.MIC_MODELS.length >= 50);
   assert.equal(new Set(p.MIC_MODELS.map((m) => m.id)).size, p.MIC_MODELS.length, 'ids are unique');
 });
+
+test('gate and compressor times go to the engine as list positions (serde_repr u8), not names', async () => {
+  const e = await import('../public/js/micenums.js');
+  // Same lengths as goxlr-types' enums.
+  assert.deepEqual([e.GATE_TIMES.length, e.RATIOS.length, e.ATTACKS.length, e.RELEASES.length], [46, 15, 20, 20]);
+  const cmds = Object.fromEntries(p.micPresetCommands(p.MIC_MODELS[0], false).map(([n, ...a]) => [n, a]));
+  assert.deepEqual(cmds.SetGateAttack, [0]); // Gate10ms
+  assert.deepEqual(cmds.SetGateRelease, [20]); // Gate250ms
+  assert.deepEqual(cmds.SetCompressorRatio, [8]); // Ratio3_2
+  assert.deepEqual(cmds.SetCompressorAttack, [4]); // Comp5ms
+  assert.deepEqual(cmds.SetCompressorReleaseTime, [9]); // Comp100ms
+  for (const [n, a] of Object.entries(cmds)) if (/^Set(Gate|Compressor)/.test(n)) assert.equal(typeof a[0] === 'string', false, n);
+  assert.equal(e.enumIndex(e.GATE_TIMES, 20), 20);
+  assert.equal(e.enumIndex(e.GATE_TIMES, 'Gate250ms'), 20);
+  assert.equal(e.enumIndex(e.RATIOS, 99), 14);
+  assert.equal(e.enumIndex(e.RATIOS, 'nope'), 0);
+});
