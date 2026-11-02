@@ -11,6 +11,15 @@ export const FILTER_TYPES = {
 
 /** Low/high cut steepness in dB per octave. 12 = one filter with your Q; steeper = Butterworth. */
 export const SLOPES = [12, 24, 36, 48];
+/** The slope choices for low/high cut: Butterworth, and Linkwitz-Riley for crossovers. */
+export const SLOPE_CHOICES = [...SLOPES.map((s) => [String(s), `${s} dB/okt`]), ['lr12', 'LR 12 dB/okt'], ['lr24', 'LR 24 dB/okt'], ['lr48', 'LR 48 dB/okt']];
+export const slopeValue = (b) => (b.lr ? `lr${b.slope || 12}` : String(b.slope || 12));
+/** Sets a band's slope from a SLOPE_CHOICES value. */
+export function setSlope(b, v) {
+  const lr = String(v).startsWith('lr');
+  const s = Number(String(v).replace('lr', '')) || 12;
+  if (lr) { b.lr = true; b.slope = s; } else { delete b.lr; b.slope = s; if (s <= 12) delete b.slope; }
+}
 
 /** Q of each 2nd-order section of a Butterworth filter of the given order (2, 4, 6, 8). */
 export function butterworthQs(order) {
@@ -20,6 +29,14 @@ export function butterworthQs(order) {
 
 /** The filters the engine really runs for a band: a steep low/high cut is several sections. */
 export function expandBand(b) {
+  // Linkwitz-Riley (a crossover's filter: −6 dB at Fc, low + high sum flat): two Butterworth filters
+  // of half the order in a row. LR 12 = one section with Q 0.5.
+  if ((b.type === 'HP' || b.type === 'LP') && b.lr) {
+    const slope = [12, 24, 48].includes(b.slope) ? b.slope : 24;
+    if (slope === 12) return [{ ...b, q: 0.5, slope: 12, lr: undefined }];
+    const qs = butterworthQs(slope / 12);
+    return [...qs, ...qs].map((q) => ({ ...b, q: Math.round(q * 10000) / 10000, slope: 12, lr: undefined }));
+  }
   if ((b.type === 'HP' || b.type === 'LP') && b.slope > 12) {
     return butterworthQs(b.slope / 6).map((q) => ({ ...b, q: Math.round(q * 10000) / 10000, slope: 12 }));
   }
