@@ -22,12 +22,15 @@
   .vol { display: grid; grid-template-columns: 1fr 64px 64px; gap: 8px; align-items: center; margin-bottom: 8px; }
   .vol span { color: var(--muted); }
   .err { color: var(--bad); }
+  .grid.media { grid-template-columns: repeat(3, 1fr); }
+  .grid.media button { font-size: 22px; }
 </style>
 </head>
 <body>
 <h1>GoXLR Studio</h1>
 <div class="sub" id="status">…</div>
 <button class="mute" id="mute">…</button>
+<h2 data-t="media">Medier</h2><div class="grid media" id="media"></div>
 <h2 data-t="profiles">Profil</h2><div class="grid" id="profiles"></div>
 <h2 data-t="scenes">Scener</h2><div class="grid" id="scenes"></div>
 <h2 data-t="eq">EQ</h2><div class="grid" id="eq"></div>
@@ -36,8 +39,8 @@
 (() => {
   const en = !/^da\b/i.test(navigator.language || '');
   const T = en
-    ? { profiles: 'Profile', scenes: 'Scenes', eq: 'EQ', volume: 'Volume', muted: 'Mic muted – tap to open', open: 'Mic open – tap to mute', on: 'EQ on', off: 'EQ off', offline: 'GoXLR not connected', lost: 'No contact with GoXLR Studio', Headphones: 'Headphones', Music: 'Music', Game: 'Game', Chat: 'Chat', System: 'System' }
-    : { profiles: 'Profil', scenes: 'Scener', eq: 'EQ', volume: 'Lydstyrke', muted: 'Mikrofon muted – tryk for at åbne', open: 'Mikrofon åben – tryk for at mute', on: 'EQ til', off: 'EQ fra', offline: 'GoXLR ikke forbundet', lost: 'Ingen forbindelse til GoXLR Studio', Headphones: 'Hovedtelefoner', Music: 'Musik', Game: 'Spil', Chat: 'Chat', System: 'System' };
+    ? { media: 'Media', profiles: 'Profile', scenes: 'Scenes', eq: 'EQ', volume: 'Volume', muted: 'Mic muted – tap to open', open: 'Mic open – tap to mute', on: 'EQ on', off: 'EQ off', offline: 'GoXLR not connected', lost: 'No contact with GoXLR Studio', Headphones: 'Headphones', Music: 'Music', Game: 'Game', Chat: 'Chat', System: 'System' }
+    : { media: 'Medier', profiles: 'Profil', scenes: 'Scener', eq: 'EQ', volume: 'Lydstyrke', muted: 'Mikrofon muted – tryk for at åbne', open: 'Mikrofon åben – tryk for at mute', on: 'EQ til', off: 'EQ fra', offline: 'GoXLR ikke forbundet', lost: 'Ingen forbindelse til GoXLR Studio', Headphones: 'Hovedtelefoner', Music: 'Musik', Game: 'Spil', Chat: 'Chat', System: 'System' };
   document.documentElement.lang = en ? 'en' : 'da';
   document.querySelectorAll('[data-t]').forEach((e) => { e.textContent = T[e.dataset.t]; });
   const token = new URLSearchParams(location.search).get('token') || '';
@@ -70,6 +73,7 @@
       return row;
     }));
   }
+  $('media').replaceChildren(...[['media:previous', '⏮'], ['media:play-pause', '⏯'], ['media:next', '⏭']].map(([id, label]) => el('button', { onclick: () => act(id) }, label)));
   load();
   setInterval(() => { if (!document.hidden) load(); }, 1500);
 })();

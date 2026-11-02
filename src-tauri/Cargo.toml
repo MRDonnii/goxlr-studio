@@ -39,6 +39,8 @@ goxlr-engine = { path = "goxlr-engine" }
 # Update check (latest.json from the release); same version and TLS as the GoXLR engine uses.
 reqwest = { version = "0.12.23", default-features = false, features = ["native-tls"] }
 windows = { version = "0.58", features = [
+  "Foundation",
+  "Media_Control",
   "Win32_Foundation",
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",

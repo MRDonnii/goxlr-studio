@@ -24,6 +24,7 @@ import { startHearing } from './hearing.js';
 import { obsFollowProfile } from './obs.js';
 import { setLanguage, resolveLanguage, t, language } from './i18n.js';
 import { applyTheme, watchTheme } from './theme.js';
+import { startMediaWatch } from './media.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 import { engineConfig, usesChannelEq, hasProfileSets } from './channeleq.js';
@@ -861,6 +862,7 @@ async function boot() {
   startDeviceTriggers(ctx);
   startMqtt(ctx);
   startHearing(ctx);
+  startMediaWatch(ctx);
   // Profilhistorik: a version of each changed profile every 5 minutes.
   setTimeout(() => snapshotProfiles(ctx), 20000);
   setInterval(() => snapshotProfiles(ctx), 5 * 60 * 1000);

@@ -9,6 +9,7 @@ mod driver;
 mod engine;
 mod history;
 mod keys;
+mod media;
 mod meters;
 mod midi;
 mod migrate;
@@ -120,6 +121,18 @@ async fn set_default_device(id: String, role: String) -> Result<(), String> {
 #[tauri::command]
 async fn output_eq_apply(eq: apo::OutputEq) -> Result<(), String> {
     blocking(move || apo::apply(&eq)).await
+}
+
+/// Medieknapper: what plays now (Windows' media controls).
+#[tauri::command]
+async fn media_now() -> Result<media::NowPlaying, String> {
+    blocking(|| Ok(media::now())).await
+}
+
+/// Play/pause, next, previous, stop.
+#[tauri::command]
+async fn media_control(cmd: String) -> Result<(), String> {
+    blocking(move || media::control(&cmd)).await
 }
 
 /// Fodpedal: start reading every MIDI input (pedals, controllers) – messages arrive as `midi` events.
@@ -832,6 +845,8 @@ pub fn run() {
             set_default_device,
             output_eq_apply,
             midi_start,
+            media_now,
+            media_control,
             midi_stop,
             midi_ports,
             output_eq_status,

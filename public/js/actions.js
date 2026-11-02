@@ -1,10 +1,11 @@
+import { MEDIA_COMMANDS } from './media.js';
 import { playSound, stopSounds, soundNames } from './soundboard.js';
 import { obsScene, streamSafeMusic } from './obs.js';
 import { toast, logActivity } from './ui.js';
 
 // Toast in the app, plus the on-screen display when the app is in the background.
 const notify = (ctx, text, kind = 'info') => (ctx.notify ? ctx.notify(text, kind) : toast(text, 'info'));
-import { storeSet, listAudioDevices, setDefaultDevice } from './native.js';
+import { storeSet, listAudioDevices, setDefaultDevice, mediaControl } from './native.js';
 import { applyScene } from './views-misc.js';
 import { BUILTIN_PRESETS } from './eq.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
@@ -127,6 +128,10 @@ export async function runAction(ctx, id, source = 'handling') {
     case 'hold': if (m) ctx.conn.command('SetCoughMuteState', arg === 'ptt' ? 'Unmuted' : pttMuteState(ctx)); return;
     case 'sound': return playSound(ctx, arg).then(() => notify(ctx, `▶ ${arg.replace(/\.[^.]+$/, '')}`)).catch((e) => notify(ctx, `Lyd: ${e.message || e}`, 'mute'));
     case 'sounds-stop': stopSounds(); return notify(ctx, 'Lyde stoppet');
+    case 'media': {
+      await mediaControl(arg).catch((e) => notify(ctx, `Medier: ${e.message || e}`, 'mute'));
+      return notify(ctx, MEDIA_COMMANDS.find(([c]) => c === arg)?.[1] || arg);
+    }
     case 'crossfeed-toggle':
     case 'loudness-toggle': {
       const k = kind === 'crossfeed-toggle' ? 'crossfeed' : 'loudness';
@@ -206,6 +211,7 @@ export async function actionCatalog(ctx) {
     ...sounds.map((x) => ({ id: `sound:${x.file}`, label: `Afspil "${x.name}"` })),
     { id: 'sounds-stop', label: 'Stop alle lyde' },
   ] : []);
+  g('Medier', MEDIA_COMMANDS.map(([c, label]) => ({ id: `media:${c}`, label })));
   g('Andet', [
     m?.effects ? { id: 'fx-toggle', label: 'Effekter til/fra' } : null,
     { id: 'ducking-toggle', label: 'Auto-ducking til/fra' },
@@ -245,6 +251,7 @@ export function actionLabel(ctx, id) {
     case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
     case 'hold': return arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
     case 'sounds-stop': return 'Stop alle lyde';
+    case 'media': return MEDIA_COMMANDS.find(([c]) => c === arg)?.[1] || arg;
     case 'mute-fader': return `Mute fader ${arg}`;
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;
     case 'eq-preset': return `EQ-preset "${arg}"`;

@@ -222,6 +222,17 @@ export async function apoListConfigs() {
   return invoke('apo_list_configs');
 }
 
+// Medieknapper (media.rs). The browser demo has a pretend player.
+const demoMedia = { available: true, playing: true, title: 'Demo-sang', artist: 'Demo-kunstner', app: 'Spotify', n: 1 };
+export async function mediaNow() { if (isNative()) return invoke('media_now'); return { ...demoMedia }; }
+export async function mediaControl(cmd) {
+  if (isNative()) return invoke('media_control', { cmd });
+  if (cmd === 'play-pause') demoMedia.playing = !demoMedia.playing;
+  if (cmd === 'next' || cmd === 'previous') { demoMedia.n += cmd === 'next' ? 1 : -1; demoMedia.title = `Demo-sang ${demoMedia.n}`; demoMedia.playing = true; }
+  if (cmd === 'stop') demoMedia.playing = false;
+  return null;
+}
+
 // Fodpedal: MIDI inputs (midi.rs). The browser demo has one pretend pedal (window.studioDemo.midi).
 export async function midiStart() { if (isNative()) return invoke('midi_start'); return null; }
 export async function midiPorts() { if (isNative()) return invoke('midi_ports'); return ['Demo MIDI-pedal']; }

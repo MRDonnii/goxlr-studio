@@ -1,3 +1,4 @@
+import { nowPlayingCard } from './media.js';
 import { FADER_LEDS, faderLeds, peakToMeter, dbToMeter, channelEndpoint, vuStep } from './extras.js';
 import { h, slider, segmented, selectBox, toggle, throttle, toast } from './ui.js';
 import { CHANNELS, INPUTS, OUTPUTS } from './demo.js';
@@ -85,6 +86,8 @@ export function mixerView(ctx) {
   const root = h('div', { class: 'grid' });
 
   root.append(quickSwitchCard(ctx));
+  const np = nowPlayingCard(ctx);
+  if (np) root.append(np);
 
   const strips = h('div', { class: 'strips' });
   // VU meters: the mic level comes from the GoXLR, the other channels from Windows' meter on the

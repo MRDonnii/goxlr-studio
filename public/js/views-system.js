@@ -7,6 +7,7 @@ import { mqttCard } from './mqtt.js';
 import { hearingCard } from './hearing.js';
 import { obsCard } from './obs.js';
 import { appearanceCard } from './theme.js';
+import { mediaCard } from './media.js';
 
 export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking', 'pedals'];
 
@@ -238,5 +239,5 @@ export function systemSettings(ctx) {
       h('a', { href: `${repo}/releases`, target: '_blank', rel: 'noopener' }, 'Udgivelser')),
     h('div', { class: 'hint' }, 'Motorerne er open source og indgår uændrede. Kildekoden til EQ-motoren ligger ved hver udgivelse.'));
 
-  return h('div', { class: 'grid cols-2' }, appearanceCard(ctx), discordCard, micSafetyCard, hearingCard(ctx), mqttCard(ctx), obsCard(ctx), osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
+  return h('div', { class: 'grid cols-2' }, appearanceCard(ctx), mediaCard(ctx, binder), discordCard, micSafetyCard, hearingCard(ctx), mqttCard(ctx), obsCard(ctx), osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
 }
