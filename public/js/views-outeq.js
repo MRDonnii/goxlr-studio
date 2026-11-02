@@ -340,8 +340,10 @@ export function outputEqView(ctx) {
   const other = () => (state.active === 'A' ? 'B' : 'A');
   const setOther = (eqNew, msg) => { state.slots[other()] = eqNew; persist(); apply(); redraw(); toast(msg, 'info'); };
   const bypass = h('input', { type: 'checkbox', onchange: () => { eq().enabled = bypass.checked; changed(); ctx.onStateChanged?.('eq-local'); } });
+  let syncPre = () => {};
   const syncTop = () => {
     if (document.activeElement !== preampIn) preampIn.value = eq().preamp;
+    syncPre();
     const head = headroomInfo(eq(), state.extras, guardOn());
     headBadge.textContent = head.text;
     headBadge.className = `badge ${head.kind === 'ok' ? 'ok' : head.kind === 'clip' ? 'warn' : head.kind === 'guard' ? 'info' : ''}`;
@@ -441,58 +443,133 @@ export function outputEqView(ctx) {
     h('label', { class: 'check-inline', title: 'Viser det, der spiller lige nu, bag EQ-kurven – så du kan se, hvor musikken eller spillet har sin energi.' }, specToggle, h('span', {}, 'Live-spektrum')),
     specSel, specStatus);
 
-  // ---- Sliders (grafisk EQ): Equalizer APO's GraphicEQ, the way Peace's sliders work ----
-  // The curve goes exactly through the sliders (straight lines between them on a log axis) and is
-  // added to the parametric bands. An imported curve (e.g. 127 points from AutoEQ) is shown on the
-  // sliders and turned into slider points when you move one.
+  // ---- Three ways to edit: Tabel, Sliders (like Peace) and Grafisk kurve ----
+  const fmtHz = (f) => (f >= 1000 ? `${String(Math.round(f / 100) / 10).replace('.', ',')}k` : String(Math.round(f * 10) / 10).replace('.', ','));
+  const fmtGain = (g) => `${g > 0 ? '+' : ''}${String(Math.round(g * 10) / 10).replace('.', ',')}`;
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  // Preamp as a slider column, as in Peace (shared by the two slider views; the toolbar has it too).
+  const preRange = h('input', { type: 'range', min: -30, max: 12, step: 0.1, 'aria-label': 'Preamp', 'data-testid': 'slider-preamp' });
+  const preNum = h('input', { type: 'number', min: -30, max: 12, step: 0.1, class: 'col-num', 'data-testid': 'slider-preamp-value' });
+  const setPre = (v, record) => { eq().preamp = Math.round(clamp(v, -30, 12) * 10) / 10; changed(record); };
+  preRange.addEventListener('input', () => { preNum.value = preRange.value; setPre(Number(preRange.value), false); });
+  preRange.addEventListener('change', () => setPre(Number(preRange.value), true));
+  preRange.addEventListener('dblclick', () => setPre(0, true));
+  preNum.addEventListener('change', () => setPre(Number(preNum.value), true));
+  syncPre = () => {
+    if (document.activeElement !== preNum) preNum.value = eq().preamp;
+    if (document.activeElement !== preRange) preRange.value = eq().preamp;
+  };
+  const preCol = h('div', { class: 'slider-col peace-col pre-col' }, h('span', { class: 'col-head' }, 'Preamp'), preNum, preRange, h('span', { class: 'slider-hz' }, 'dB'));
+
+  // Sliders like Peace: one column per band with on/off, gain (slider and value), frequency, Q,
+  // filter type and ear. These are the same bands as in Tabel.
+  const peaceBox = h('div', { class: 'slider-eq', 'data-testid': 'peace-eq' });
+  const PEACE_BW = { 10: 1, 15: 2 / 3, 31: 1 / 3 }; // octaves between the bands
+  const peaceQ = (n) => Math.round((Math.sqrt(2 ** n) / (2 ** n - 1)) * 1000) / 1000;
+  const makePeace = async (n) => {
+    const count = eq().bands.length;
+    if (count && !(await confirmDialog(`Erstat dine ${count} bånd med ${n} flade Peace-bånd (Q ${String(peaceQ(PEACE_BW[n])).replace('.', ',')})? Ctrl+Z fortryder.`, { ok: 'Erstat' }))) return;
+    eq().bands = SLIDER_SETS[n].map((f) => ({ ...newBand(f, 'PK'), q: peaceQ(PEACE_BW[n]) }));
+    selected = 0; changed(); renderBands();
+  };
+  const renderPeace = () => {
+    peaceBox.replaceChildren(...eq().bands.map((b, i) => {
+      const has = FILTER_TYPES[b.type].gain;
+      const pick = () => { if (selected !== i) { selected = i; redraw(); peaceBox.querySelectorAll('.peace-col').forEach((c, k) => c.classList.toggle('sel', k === i)); } };
+      const num = (key, min, max, step, disabled, testid) => {
+        const inp = h('input', { type: 'number', min, max, step, value: b[key], disabled, class: 'col-num', 'data-testid': testid });
+        inp.addEventListener('focus', pick);
+        inp.addEventListener('change', () => { b[key] = clamp(Number(inp.value), min, max); changed(); renderBands(); });
+        return inp;
+      };
+      const gainNum = num('gain', -24, 24, 0.1, !has, 'peace-gain-value');
+      const range = h('input', { type: 'range', min: -15, max: 15, step: 0.1, value: has ? b.gain : 0, disabled: !has, 'aria-label': `${fmtHz(b.freq)} Hz`, 'data-testid': 'peace-gain' });
+      range.addEventListener('pointerdown', pick);
+      range.addEventListener('input', () => { b.gain = Number(range.value); gainNum.value = b.gain; changed(false); });
+      range.addEventListener('change', () => { changed(true); renderBands(); });
+      range.addEventListener('dblclick', () => { b.gain = 0; changed(); renderBands(); });
+      const on = h('input', { type: 'checkbox', checked: b.enabled, title: 'Til/fra', onchange: () => { b.enabled = on.checked; changed(); renderBands(); } });
+      const type = h('select', { class: 'col-sel', 'data-testid': 'peace-type', onchange: () => { b.type = type.value; changed(); renderBands(); } },
+        Object.entries(FILTER_TYPES).map(([k, v]) => h('option', { value: k, selected: k === b.type }, v.label)));
+      const ear = h('select', { class: 'col-sel', title: 'Hvilket øre båndet gælder for', onchange: () => { if (ear.value === 'all') delete b.channel; else b.channel = ear.value; changed(); renderBands(); } },
+        Object.entries(EAR_LABEL).map(([k, v]) => h('option', { value: k, selected: (b.channel || 'all') === k }, v)));
+      const slope = FILTER_TYPES[b.type].slope
+        ? h('select', { class: 'col-sel', title: 'Hældning (dB pr. oktav)', onchange: (e) => { b.slope = Number(e.target.value); if (b.slope <= 12) delete b.slope; changed(); renderBands(); } },
+          SLOPES.map((sl) => h('option', { value: sl, selected: (b.slope || 12) === sl }, `${sl} dB/okt`)))
+        : null;
+      return h('div', { class: `slider-col peace-col ${i === selected ? 'sel' : ''}`, onclick: pick },
+        h('span', { class: 'col-head' }, h('span', { class: 'band-dot', style: { background: BAND_COLORS[i % BAND_COLORS.length] } }), String(i + 1), on),
+        gainNum, range,
+        h('label', { class: 'col-lbl' }, 'Hz'), num('freq', 20, 20000, 1, false, 'peace-freq'),
+        h('label', { class: 'col-lbl' }, 'Q'), num('q', 0.1, 30, 0.01, b.slope > 12, 'peace-q'), slope,
+        type, ear,
+        h('button', { class: 'btn sm', title: 'Slet bånd', onclick: (e) => { e.stopPropagation(); eq().bands.splice(i, 1); selected = Math.max(0, Math.min(selected, eq().bands.length - 1)); changed(); renderBands(); } }, '✕'));
+    }));
+    if (!eq().bands.length) peaceBox.append(h('div', { class: 'hint' }, 'Ingen bånd endnu – lav 10, 15 eller 31 Peace-bånd ovenfor, eller tryk "+ Bånd".'));
+    if (graphicActive(eq())) peaceBox.append(h('div', { class: 'hint peace-note' }, 'Der er også en grafisk kurve i dette preset (fx fra AutoEQ) – den lægges oven i båndene. Se "Grafisk kurve".'));
+  };
+
+  // Grafisk kurve: Equalizer APO's GraphicEQ – the curve goes exactly through the sliders (straight
+  // lines between them on a log axis) and is added to the bands. An imported curve (e.g. 127 points
+  // from AutoEQ) is shown on the sliders and turned into slider points when you move one.
   const sliderBox = h('div', { class: 'slider-eq', 'data-testid': 'slider-eq' });
   const sliderHint = h('div', { class: 'hint', 'data-testid': 'slider-hint' });
   const countSel = h('select', { 'data-testid': 'slider-count', onchange: () => { prefs.eqSliders = Number(countSel.value); ctx.savePrefs?.(); renderSliders(); } },
     [10, 15, 31].map((n) => h('option', { value: n }, `${n} bånd`)));
-  const viewBtns = {};
-  const setView = (v) => {
-    prefs.eqView = v; ctx.savePrefs?.();
-    for (const [k, b] of Object.entries(viewBtns)) b.classList.toggle('on', k === v);
-    bandsTable.style.display = v === 'sliders' ? 'none' : '';
-    sliderPanel.style.display = v === 'sliders' ? '' : 'none';
-    renderSliders();
-  };
-  viewBtns.bands = h('button', { class: 'btn sm', 'data-testid': 'eq-view-bands', onclick: () => setView('bands') }, 'Bånd (parametrisk)');
-  viewBtns.sliders = h('button', { class: 'btn sm', 'data-testid': 'eq-view-sliders', onclick: () => setView('sliders') }, 'Sliders (grafisk)');
-  const fmtHz = (f) => (f >= 1000 ? `${String(Math.round(f / 100) / 10).replace('.', ',')}k` : String(f).replace('.', ','));
-  const fmtGain = (g) => `${g > 0 ? '+' : ''}${String(Math.round(g * 10) / 10).replace('.', ',')}`;
-  renderSliders = () => {
-    if (prefs.eqView !== 'sliders') return;
+  const renderGraphic = () => {
     const set = SLIDER_SETS[prefs.eqSliders] || SLIDER_SETS[10];
     countSel.value = String(set.length);
     const pts = eq().graphic || [];
     const onSet = graphicOnSet(pts, set);
     sliderHint.textContent = pts.length && !onSet
       ? `Kurven har ${pts.length} punkter (fx fra AutoEQ eller Peace). Sliderne viser den på ${set.length} bånd – flytter du en, bliver kurven til ${set.length} slider-punkter.`
-      : eq().bands.some((b) => b.enabled) ? 'Sliderne lægges oven i de parametriske bånd. Grafen viser det hele.' : '';
+      : eq().bands.some((b) => b.enabled) ? 'Kurven lægges oven i de parametriske bånd. Grafen viser det hele.' : '';
     sliderBox.replaceChildren(...set.map((f, i) => {
-      const val = h('span', { class: 'slider-val' }, fmtGain(graphicGain(pts, f)));
-      const inp = h('input', { type: 'range', min: -15, max: 15, step: 0.5, value: graphicGain(pts, f), 'aria-label': `${fmtHz(f)} Hz`, 'data-testid': `slider-${i}` });
-      const write = (record) => {
-        const cur = eq().graphic || [];
-        const g = graphicOnSet(cur, set) ? cur.map((p) => [...p]) : resampleGraphic(cur, set);
-        g[i][1] = Number(inp.value);
+      const cur = () => (eq().graphic || []);
+      const write = (v, record) => {
+        const g = graphicOnSet(cur(), set) ? cur().map((p) => [...p]) : resampleGraphic(cur(), set);
+        g[i][1] = Math.round(clamp(v, -24, 24) * 10) / 10;
         eq().graphic = g;
-        val.textContent = fmtGain(g[i][1]);
         changed(record);
-        if (!record) redraw();
       };
-      inp.addEventListener('input', () => write(false));
-      inp.addEventListener('change', () => { write(true); renderSliders(); });
-      inp.addEventListener('dblclick', () => { inp.value = 0; write(true); renderSliders(); });
+      const val = h('input', { type: 'number', min: -24, max: 24, step: 0.1, value: Math.round(graphicGain(pts, f) * 10) / 10, class: 'col-num', 'data-testid': `slider-value-${i}` });
+      const inp = h('input', { type: 'range', min: -15, max: 15, step: 0.5, value: graphicGain(pts, f), 'aria-label': `${fmtHz(f)} Hz`, 'data-testid': `slider-${i}` });
+      inp.addEventListener('input', () => { val.value = inp.value; write(Number(inp.value), false); });
+      inp.addEventListener('change', () => { write(Number(inp.value), true); renderSliders(); });
+      inp.addEventListener('dblclick', () => { write(0, true); renderSliders(); });
+      val.addEventListener('change', () => { write(Number(val.value), true); renderSliders(); });
       return h('div', { class: 'slider-col' }, val, inp, h('span', { class: 'slider-hz' }, fmtHz(f)));
     }));
   };
-  const sliderPanel = h('div', { style: { display: 'none' } },
+
+  const viewBtns = {};
+  const view = () => (['bands', 'sliders', 'graphic'].includes(prefs.eqView) ? prefs.eqView : 'bands');
+  renderSliders = () => { if (view() === 'sliders') renderPeace(); else if (view() === 'graphic') renderGraphic(); };
+  const peaceTools = h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Lav Peace-bånd'),
+    ...[10, 15, 31].map((n) => h('button', { class: 'btn sm', 'data-testid': `peace-make-${n}`, onclick: () => makePeace(n) }, `${n} bånd`)),
+    h('span', { class: 'hint' }, 'Dobbeltklik på en slider = 0 dB'));
+  const graphicTools = h('div', {},
     h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Antal'), countSel,
-      h('button', { class: 'btn sm', 'data-testid': 'slider-reset', onclick: () => { delete eq().graphic; changed(); renderSliders(); } }, 'Nulstil sliders'),
+      h('button', { class: 'btn sm', 'data-testid': 'slider-reset', onclick: () => { delete eq().graphic; changed(); renderSliders(); } }, 'Nulstil kurven'),
       h('span', { class: 'hint' }, 'Dobbeltklik = 0 dB')),
-    sliderHint, sliderBox);
+    sliderHint);
+  const sliderArea = h('div', { class: 'slider-area' }, preCol, peaceBox, sliderBox);
+  const setView = (v) => {
+    prefs.eqView = v; ctx.savePrefs?.();
+    for (const [k, b] of Object.entries(viewBtns)) b.classList.toggle('on', k === v);
+    bandsTable.style.display = v === 'bands' ? '' : 'none';
+    sliderArea.style.display = v === 'bands' ? 'none' : '';
+    peaceTools.style.display = v === 'sliders' ? '' : 'none';
+    peaceBox.style.display = v === 'sliders' ? '' : 'none';
+    graphicTools.style.display = v === 'graphic' ? '' : 'none';
+    sliderBox.style.display = v === 'graphic' ? '' : 'none';
+    syncPre();
+    renderSliders();
+  };
+  viewBtns.bands = h('button', { class: 'btn sm', 'data-testid': 'eq-view-bands', onclick: () => setView('bands') }, 'Tabel');
+  viewBtns.sliders = h('button', { class: 'btn sm', 'data-testid': 'eq-view-sliders', title: 'Hvert bånd som en slider med gain, frekvens, Q og filtertype – som i Peace', onclick: () => setView('sliders') }, 'Sliders (som Peace)');
+  viewBtns.graphic = h('button', { class: 'btn sm', 'data-testid': 'eq-view-graphic', title: 'En præcis kurve gennem faste bånd (GraphicEQ) – fx fra AutoEQ', onclick: () => setView('graphic') }, 'Grafisk kurve');
   const bandsTable = h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Øre'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody);
 
   const editorBody = h('div', {},
@@ -500,9 +577,9 @@ export function outputEqView(ctx) {
     spectrumRow,
     h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
     chainLegend, earLegend,
-    h('div', { class: 'row eq-view', style: { margin: '10px 0 4px' } }, viewBtns.bands, viewBtns.sliders),
-    bandsTable, sliderPanel);
-  setView(prefs.eqView === 'sliders' ? 'sliders' : 'bands');
+    h('div', { class: 'row eq-view', style: { margin: '10px 0 4px' } }, viewBtns.bands, viewBtns.sliders, viewBtns.graphic),
+    peaceTools, graphicTools, bandsTable, sliderArea);
+  setView(view());
 
   // Blind test: X and Y are A and B in random order each round, the curve is hidden, and both
   // play at the same loudness. After 5 rounds: which one you chose.
