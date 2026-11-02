@@ -44,6 +44,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - **Klip-beskyttelse og headroom:** appen regner på hele kæden (EQ, Loudness og Crossfeed) og sænker selv lyden, hvis den ellers ville forvrænge. "Auto" sætter preamp lige under grænsen
 - Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik og lyder præcis som før (også GraphicEQ)
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
+- **Høretest:** find den svageste tone, du kan høre, på hvert øre, og få en personlig EQ til dine ører og dine hovedtelefoner
 - Crossfeed, loudness, mono og balance til hovedtelefoner
 - **Lyder det forkert?** Vælg fx "skarp" eller "mudret", og EQ'en justeres et lille skridt. Eksport og import af alle presets
 - **EQ pr. app:** fx Call of Duty med fodtrins-EQ og Spotify med musik-EQ på samme tid (Lyd pr. app → EQ pr. app)

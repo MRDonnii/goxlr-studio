@@ -46,6 +46,7 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 - **Clip protection and headroom:** the app calculates the whole chain (EQ, Loudness and Crossfeed) and lowers the level by itself if the sound would otherwise distort. "Auto" sets the preamp just below the limit
 - Presets, including your old Peace/Equalizer APO presets, imported with one click and sounding exactly as before (GraphicEQ too)
 - AutoEQ search that finds the correction for your exact headphones
+- **Hearing test:** find the faintest tone you can hear in each ear and get a personal EQ for your ears and your headphones
 - Crossfeed, loudness, mono and balance for headphones
 - **Sounds wrong?** Pick e.g. "harsh" or "muddy", and the EQ is adjusted one small step. Export and import all presets
 - **EQ per app:** e.g. Call of Duty with the footsteps EQ and Spotify with the music EQ at the same time (Per-app audio → EQ per app)
