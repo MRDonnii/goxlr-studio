@@ -38,14 +38,16 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 
 ![Playback EQ](docs/screenshots/afspilnings-eq.png)
 
-- Parametric EQ with a curve you drag, and undo/redo
+- Parametric EQ with a curve you drag, and undo/redo – or **sliders** with 10, 15 or 31 bands like in Peace
+- **Left and right ear separately**, band-pass/all-pass and steep low/high cuts (up to 48 dB/octave)
 - **Live spectrum** behind the curve: see where the music or the game has its energy while you adjust the EQ
 - **A/B at the same loudness:** the louder of A and B is turned down, so you hear the difference in sound and not just in volume. With the **blind test** you hear them as X and Y without knowing which is which
 - **Clip protection and headroom:** the app calculates the whole chain (EQ, Loudness and Crossfeed) and lowers the level by itself if the sound would otherwise distort. "Auto" sets the preamp just below the limit
-- Presets, including your old Peace/Equalizer APO presets, imported with one click
+- Presets, including your old Peace/Equalizer APO presets, imported with one click and sounding exactly as before (GraphicEQ too)
 - AutoEQ search that finds the correction for your exact headphones
 - Crossfeed, loudness, mono and balance for headphones
 - **Sounds wrong?** Pick e.g. "harsh" or "muddy", and the EQ is adjusted one small step. Export and import all presets
+- **EQ per app:** e.g. Call of Duty with the footsteps EQ and Spotify with the music EQ at the same time (Per-app audio → EQ per app)
 - **EQ per channel:** its own preset on Game, Music, Chat and System. Apps follow their channel, so Spotify gets the music EQ and the game the footsteps EQ – and every GoXLR profile can have its own set
 - EQ that follows the GoXLR profile, e.g. one preset for "Headset" and another for "Speakers"
 - Listening test in the app, so you can hear the difference with and without EQ

@@ -36,14 +36,16 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 
 ![Afspilnings-EQ](docs/screenshots/afspilnings-eq.png)
 
-- Parametrisk EQ med en kurve, du trækker i, og fortryd/gentag
+- Parametrisk EQ med en kurve, du trækker i, og fortryd/gentag – eller **sliders** med 10, 15 eller 31 bånd som i Peace
+- **Venstre og højre øre hver for sig**, Band-pass/All-pass og stejle low/high-cut (op til 48 dB/oktav)
 - **Live-spektrum** bag kurven: du ser, hvor musikken eller spillet har sin energi, mens du stiller på EQ'en
 - **A/B ved samme lydstyrke:** den højeste af A og B sænkes, så du hører forskellen i klang og ikke bare i lydstyrke. Med **blindtest** hører du dem som X og Y uden at vide, hvilken er hvilken
 - **Klip-beskyttelse og headroom:** appen regner på hele kæden (EQ, Loudness og Crossfeed) og sænker selv lyden, hvis den ellers ville forvrænge. "Auto" sætter preamp lige under grænsen
-- Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik
+- Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik og lyder præcis som før (også GraphicEQ)
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
 - Crossfeed, loudness, mono og balance til hovedtelefoner
 - **Lyder det forkert?** Vælg fx "skarp" eller "mudret", og EQ'en justeres et lille skridt. Eksport og import af alle presets
+- **EQ pr. app:** fx Call of Duty med fodtrins-EQ og Spotify med musik-EQ på samme tid (Lyd pr. app → EQ pr. app)
 - **EQ pr. kanal:** sit eget preset på Spil, Musik, Chat og System. Apps følger deres kanal, så Spotify får musik-EQ og spillet fodtrins-EQ – og hver GoXLR-profil kan have sit eget sæt
 - EQ der skifter med GoXLR-profilen, fx ét preset til "Headset" og et andet til "Speakers"
 - Lyttetest i appen, så du kan høre forskellen med og uden EQ
