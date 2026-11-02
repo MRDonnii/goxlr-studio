@@ -142,6 +142,7 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 - Auto-ducking that turns music and games down while you talk – or while your friends talk in Discord
 - **Hearing protection:** a reminder after a long time of loud sound and an optional ceiling for the headphones
 - **Profile history:** earlier versions of your GoXLR and mic profiles can be restored
+- **Themes:** light, dark (or automatic like Windows), Black (OLED), Northern lights, Sunset, Forest and Paper – and an optional accent colour
 - Start with Windows and close to the tray icon
 - Automatic updates
 - **Home Assistant** via MQTT: GoXLR Studio shows up as a device with mic mute, "Mic open" (e.g. for an ON AIR lamp), GoXLR profile, EQ preset, scene and volumes

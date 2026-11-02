@@ -135,6 +135,7 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - Auto-ducking, der skruer ned for musik og spil, mens du taler – eller mens vennerne taler i Discord
 - **Høreværn:** påmindelse efter lang tid med høj lyd og et valgfrit loft for hovedtelefonerne
 - **Profilhistorik:** tidligere versioner af dine GoXLR- og mikrofonprofiler kan gendannes
+- **Temaer:** lyst, mørkt (eller automatisk som Windows), Sort (OLED), Nordlys, Solnedgang, Skov og Papir – og valgfri accentfarve
 - Start med Windows og luk til bakke-ikonet
 - Automatiske opdateringer
 - **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
