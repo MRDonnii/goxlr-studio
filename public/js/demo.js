@@ -26,13 +26,19 @@ export function createDemoStatus() {
   const fader = (channel, text) => ({ channel, mute_type: 'All', mute_state: 'Unmuted', scribble: { file_name: null, bottom_text: text, left_text: null, inverted: false } });
   const presetNames = { Preset1: 'Studie', Preset2: 'Radio', Preset3: 'Robot', Preset4: 'Hal', Preset5: 'Telefon', Preset6: 'Dyb' };
   return {
-    config: { daemon_version: '1.2.4', platform: 'demo', http_settings: { port: 14564 } },
+    config: { daemon_version: '1.2.4', platform: 'demo', http_settings: { port: 14564 }, tts_enabled: false },
     firmware: {},
     paths: {
       profile_directory: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR-on-Linux\\GoXLR-Utility\\profiles',
       mic_profile_directory: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR-on-Linux\\GoXLR-Utility\\mic-profiles',
+      samples_directory: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR-on-Linux\\GoXLR-Utility\\samples',
+      icons_directory: 'C:\\Users\\demo\\AppData\\Roaming\\GoXLR-on-Linux\\GoXLR-Utility\\icons',
     },
-    files: { profiles: ['Headset', 'Speakers', 'Stream'], mic_profiles: ['SM7B', 'Standard'], presets: [], samples: {}, icons: [] },
+    files: {
+      profiles: ['Headset', 'Speakers', 'Stream'], mic_profiles: ['SM7B', 'Standard'], presets: ['Studie', 'Hal'],
+      samples: { 'Applaus.wav': { name: 'Applaus.wav', gain_pct: 100 }, 'Trommehvirvel.wav': { name: 'Trommehvirvel.wav', gain_pct: 100 }, 'Recorded/Optagelse 1.wav': { name: 'Recorded/Optagelse 1.wav', gain_pct: 100 } },
+      icons: ['mic.png', 'game.png', 'music.png'],
+    },
     mixers: {
       DEMO0001: {
         hardware: { serial_number: 'DEMO0001', device_type: (typeof location !== 'undefined' && /[?&]mini\b/.test(location.search)) ? 'Mini' : 'Full', colour_way: 'Black', versions: { firmware: [1, 5, 0, 0] }, manufactured_date: '', usb_device: {} },
@@ -65,17 +71,24 @@ export function createDemoStatus() {
         effects: {
           is_enabled: true, active_preset: 'Preset1', preset_names: presetNames,
           current: {
-            reverb: { style: 'Library', amount: 20, decay: 1000, raw_encoder: 0 },
-            echo: { style: 'Quarter', amount: 10, feedback: 30, tempo: 120, raw_encoder: 0 },
+            reverb: { style: 'Library', amount: 20, decay: 1000, early_level: -5, tail_level: -3, pre_delay: 10, lo_colour: 0, hi_colour: 0, hi_factor: 0, diffuse: 0, mod_speed: 0, mod_depth: 0, raw_encoder: 0 },
+            echo: { style: 'Quarter', amount: 10, feedback: 30, tempo: 120, delay_left: 500, delay_right: 500, feedback_left: 30, feedback_right: 30, feedback_xfb_l_to_r: 0, feedback_xfb_r_to_l: 0, raw_encoder: 0 },
             pitch: { style: 'Narrow', amount: 0, character: 50, raw_encoder: 0 },
             gender: { style: 'Medium', amount: 0, raw_encoder: 0 },
             megaphone: { is_enabled: false, style: 'Megaphone', amount: 50, post_gain: 0 },
-            robot: { is_enabled: false, style: 'Robot1' },
+            robot: { is_enabled: false, style: 'Robot1', low_gain: 0, low_freq: 40, low_width: 16, mid_gain: 0, mid_freq: 130, mid_width: 16, high_gain: 0, high_freq: 210, high_width: 16, waveform: 0, pulse_width: 50, threshold: -20, dry_mix: -36 },
             hard_tune: { is_enabled: false, style: 'Natural', amount: 50, rate: 50, window: 20, source: 'All' },
           },
         },
-        sampler: null,
-        settings: { mute_hold_duration: 500, vc_mute_also_mute_cm: true, enable_monitor_with_fx: false, reset_sampler_on_clear: true, lock_faders: false, fade_duration: 0, vod_mode: 'Routable' },
+        sampler: (typeof location !== 'undefined' && /[?&]mini\b/.test(location.search)) ? null : {
+          processing_state: { progress: null, last_error: null }, active_bank: 'A', clear_active: false, record_buffer: 0,
+          banks: Object.fromEntries(['A', 'B', 'C'].map((b) => [b, Object.fromEntries(['TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'].map((k, i) => [k, {
+            function: 'PlayNext', order: 'Sequential', is_playing: false, is_recording: false,
+            samples: b === 'A' && i === 0 ? [{ name: 'Applaus.wav', start_pct: 0, stop_pct: 100 }] : b === 'A' && i === 1 ? [{ name: 'Trommehvirvel.wav', start_pct: 5, stop_pct: 90 }] : [],
+          }]))])),
+        },
+        shutdown_commands: [], sleep_commands: [], wake_commands: [],
+        settings: { mute_hold_duration: 500, vc_mute_also_mute_cm: true, enable_monitor_with_fx: false, reset_sampler_on_clear: true, lock_faders: false, fade_duration: 0, vod_mode: 'Routable', display: { gate: 'Simple', compressor: 'Simple', equaliser: 'Simple', equaliser_fine: 'Simple' } },
         button_down: {},
         profile_name: 'Headset',
         mic_profile_name: 'SM7B',
@@ -149,8 +162,66 @@ export function applyDemoCommand(status, serial, cmd) {
     case 'SaveProfileAs': if (!status.files.profiles.includes(a[0])) status.files.profiles.push(a[0]); m.profile_name = a[0]; break;
     case 'SaveMicProfileAs': if (!status.files.mic_profiles.includes(a[0])) status.files.mic_profiles.push(a[0]); m.mic_profile_name = a[0]; break;
     case 'SetScribbleText': m.fader_status[a[0]].scribble = { ...(m.fader_status[a[0]].scribble || {}), bottom_text: a[1] }; break;
-    default: break;
+    case 'SetScribbleIcon': m.fader_status[a[0]].scribble = { ...(m.fader_status[a[0]].scribble || {}), file_name: a[1] }; break;
+    case 'SetScribbleNumber': m.fader_status[a[0]].scribble = { ...(m.fader_status[a[0]].scribble || {}), left_text: a[1] }; break;
+    case 'SetScribbleInvert': m.fader_status[a[0]].scribble = { ...(m.fader_status[a[0]].scribble || {}), inverted: a[1] }; break;
+    case 'SetCoughIsHold': m.cough_button.is_toggle = !a[0]; break;
+    case 'SetCoughMuteFunction': m.cough_button.mute_type = a[0]; break;
+    case 'SetSleepCommands': m.sleep_commands = a[0]; break;
+    case 'SetWakeCommands': m.wake_commands = a[0]; break;
+    case 'SetShutdownCommands': m.shutdown_commands = a[0]; break;
+    case 'SetVodMode': m.settings.vod_mode = a[0]; break;
+    case 'SetSamplerResetOnClear': m.settings.reset_sampler_on_clear = a[0]; break;
+    case 'SetSamplerFadeDuration': m.settings.fade_duration = a[0]; break;
+    case 'SetSamplerPreBufferDuration': if (m.sampler) m.sampler.record_buffer = a[0]; break;
+    case 'SetActiveSamplerBank': if (m.sampler) m.sampler.active_bank = a[0]; break;
+    case 'SetSamplerFunction': m.sampler.banks[a[0]][a[1]].function = a[2]; break;
+    case 'SetSamplerOrder': m.sampler.banks[a[0]][a[1]].order = a[2]; break;
+    case 'AddSample': m.sampler.banks[a[0]][a[1]].samples.push({ name: a[2], start_pct: 0, stop_pct: 100 }); break;
+    case 'RemoveSampleByIndex': m.sampler.banks[a[0]][a[1]].samples.splice(a[2], 1); break;
+    case 'SetSampleStartPercent': m.sampler.banks[a[0]][a[1]].samples[a[2]].start_pct = a[3]; break;
+    case 'SetSampleStopPercent': m.sampler.banks[a[0]][a[1]].samples[a[2]].stop_pct = a[3]; break;
+    case 'PlaySampleByIndex': case 'PlayNextSample': m.sampler.banks[a[0]][a[1]].is_playing = true; setTimeout(() => { m.sampler.banks[a[0]][a[1]].is_playing = false; }, 1500); break;
+    case 'StopSamplePlayback': m.sampler.banks[a[0]][a[1]].is_playing = false; break;
+    case 'NewMicProfile': if (!status.files.mic_profiles.includes(a[0])) status.files.mic_profiles.push(a[0]); m.mic_profile_name = a[0]; break;
+    case 'DeleteMicProfile': status.files.mic_profiles = status.files.mic_profiles.filter((x) => x !== a[0]); break;
+    case 'NewProfile': if (!status.files.profiles.includes(a[0])) status.files.profiles.push(a[0]); m.profile_name = a[0]; break;
+    case 'DeleteProfile': status.files.profiles = status.files.profiles.filter((x) => x !== a[0]); break;
+    case 'LoadEffectPreset': if (fx) fx.preset_names[fx.active_preset] = a[0]; break;
+    case 'SetSubMixLinked': if (m.levels.submix) m.levels.submix.inputs[a[0]].linked = a[1]; break;
+    case 'SetSubMixOutputMix': if (m.levels.submix) m.levels.submix.outputs[a[0]] = a[1]; break;
+    default: {
+      const f = FX_FIELDS[name];
+      if (f && fx) {
+        const [part, field] = f;
+        if (part === 'robot' && a.length === 2) fx.current.robot[`${{ Low: 'low', Medium: 'mid', High: 'high' }[a[0]]}_${field}`] = a[1];
+        else fx.current[part][field] = a[0];
+      }
+    }
   }
+}
+
+// Effect settings in the demo: command → [effect, field].
+const FX_FIELDS = {
+  SetReverbPreDelay: ['reverb', 'pre_delay'], SetReverbEarlyLevel: ['reverb', 'early_level'], SetReverbTailLevel: ['reverb', 'tail_level'],
+  SetReverbLowColour: ['reverb', 'lo_colour'], SetReverbHighColour: ['reverb', 'hi_colour'], SetReverbHighFactor: ['reverb', 'hi_factor'],
+  SetReverbDiffuse: ['reverb', 'diffuse'], SetReverbModSpeed: ['reverb', 'mod_speed'], SetReverbModDepth: ['reverb', 'mod_depth'], SetReverbDecay: ['reverb', 'decay'],
+  SetEchoDelayLeft: ['echo', 'delay_left'], SetEchoDelayRight: ['echo', 'delay_right'], SetEchoFeedbackLeft: ['echo', 'feedback_left'], SetEchoFeedbackRight: ['echo', 'feedback_right'],
+  SetEchoFeedbackXFBLtoR: ['echo', 'feedback_xfb_l_to_r'], SetEchoFeedbackXFBRtoL: ['echo', 'feedback_xfb_r_to_l'], SetEchoFeedback: ['echo', 'feedback'], SetEchoTempo: ['echo', 'tempo'],
+  SetPitchCharacter: ['pitch', 'character'], SetMegaphonePostGain: ['megaphone', 'post_gain'],
+  SetRobotGain: ['robot', 'gain'], SetRobotFreq: ['robot', 'freq'], SetRobotWidth: ['robot', 'width'], SetRobotWaveform: ['robot', 'waveform'],
+  SetRobotPulseWidth: ['robot', 'pulse_width'], SetRobotThreshold: ['robot', 'threshold'], SetRobotDryMix: ['robot', 'dry_mix'],
+  SetHardTuneWindow: ['hard_tune', 'window'], SetHardTuneSource: ['hard_tune', 'source'], SetHardTuneRate: ['hard_tune', 'rate'],
+  SetReverbStyle: ['reverb', 'style'], SetEchoStyle: ['echo', 'style'], SetPitchStyle: ['pitch', 'style'], SetGenderStyle: ['gender', 'style'],
+  SetMegaphoneStyle: ['megaphone', 'style'], SetRobotStyle: ['robot', 'style'], SetHardTuneStyle: ['hard_tune', 'style'],
+};
+
+/** Engine (daemon) commands in the demo. */
+export function applyDemoDaemon(status, cmd) {
+  const [name] = Object.keys(cmd);
+  const a = cmd[name];
+  if (name === 'SetTTSEnabled') status.config.tts_enabled = a[0];
+  if (name === 'SetSampleGainPct' && status.files.samples[a[0]]) status.files.samples[a[0]].gain_pct = a[1];
 }
 
 function groupOf(b) {

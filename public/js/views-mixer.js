@@ -207,8 +207,16 @@ function submixCard(ctx) {
     body.append(
       toggle(binder, { label: 'Submix aktiv', get: () => !!m().levels.submix, set: (v) => conn.command('SetSubMixEnabled', v) }),
       h('div', { class: 'hint' }, 'Separate niveauer til stream-mixet, så du kan have musik højt i ørerne og lavt på streamen.'),
-      ...['Mic', 'Game', 'Chat', 'Music', 'System', 'Console', 'LineIn', 'Sample'].map((c) =>
-        slider(binder, { label: CHANNEL_LABEL[c], min: 0, max: 255, get: () => m().levels.submix?.inputs?.[c]?.volume, set: (v) => conn.command('SetSubMixVolume', c, v), fmt: pct })),
+      ...['Mic', 'Game', 'Chat', 'Music', 'System', 'Console', 'LineIn', 'Sample'].map((c) => {
+        // "Følg" = the stream level follows the fader (linked), with the same ratio as now.
+        const link = h('input', { type: 'checkbox', title: 'Følg faderen', 'aria-label': `Følg faderen: ${CHANNEL_LABEL[c]}`, 'data-testid': `submix-link-${c}`, onchange: () => conn.command('SetSubMixLinked', c, link.checked) });
+        binder.add(() => { link.checked = !!m().levels.submix?.inputs?.[c]?.linked; });
+        return h('div', { class: 'submix-row' }, slider(binder, { label: CHANNEL_LABEL[c], min: 0, max: 255, get: () => m().levels.submix?.inputs?.[c]?.volume, set: (v) => conn.command('SetSubMixVolume', c, v), fmt: pct }),
+          h('label', { class: 'check-inline' }, link, h('span', {}, 'Følg')));
+      }),
+      h('div', { class: 'hint', style: { margin: '8px 0 4px' } }, 'Hvilket mix hver udgang får (A = faderne, B = submixet):'),
+      ...[['Headphones', 'Hovedtelefoner'], ['BroadcastMix', 'Stream'], ['ChatMic', 'Chat-mic'], ['Sampler', 'Sampler'], ['LineOut', 'Line Out']].map(([o, label]) =>
+        h('div', { class: 'row' }, h('label', {}, label), segmented(binder, { options: [['A', 'Mix A'], ['B', 'Mix B']], get: () => m().levels.submix?.outputs?.[o], set: (v) => conn.command('SetSubMixOutputMix', o, v) }))),
     );
   });
   return card;

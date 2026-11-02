@@ -436,3 +436,12 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .level-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; min-width: 60px; }
 .level-bar .level-fill { height: 100%; width: 0; background: var(--accent); transition: width .1s linear; }
 .game-chip { margin-top: 6px; font-size: 12px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sample-row input.num { width: 64px; }
+.sample-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.fx-advanced { margin-top: 8px; }
+.fx-advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.power-row { padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.power-row:last-of-type { border-bottom: 0; }
+.submix-row { display: flex; align-items: center; gap: 8px; }
+.submix-row > .row { flex: 1; min-width: 0; }
+input.num { width: 64px; }

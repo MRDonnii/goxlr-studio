@@ -46,9 +46,20 @@ export function effectsView(ctx) {
     toggles.append(b);
   }
 
-  const fxCard = (key, title, sliders) => h('div', { class: 'card' },
+  // Every setting GoXLR Utility has; the less used ones under "Avanceret" (ranges as the engine checks them).
+  const fxCard = (key, title, sliders, advanced = []) => h('div', { class: 'card' },
     h('h2', {}, title, selectBox(binder, { options: STYLE_LABELS[key].map((s) => [s, pretty(s)]), get: () => cur()[key].style, set: (v) => conn.command(STYLE_CMD[key], v) })),
-    ...sliders);
+    ...sliders,
+    advanced.length ? h('details', { class: 'fx-advanced', 'data-testid': `fx-advanced-${key}` }, h('summary', {}, 'Avanceret'), ...advanced) : null);
+  const sl = (label, min, max, get, cmd, fmt = (v) => `${v}`, step = 1) => slider(binder, { label, min, max, step, get, set: (v) => conn.command(...(Array.isArray(cmd) ? [...cmd, v] : [cmd, v])), fmt });
+  const db = (v) => `${v} dB`;
+  const msF = (v) => `${v} ms`;
+  const pctF = (v) => `${v} %`;
+  const presetFiles = selectBox(binder, { options: [], get: () => '', set: () => {} });
+  binder.add(() => {
+    const names = conn.status.files?.presets || [];
+    if (presetFiles.options.length !== names.length + 1) presetFiles.replaceChildren(h('option', { value: '' }, '— vælg fil —'), ...names.map((n) => h('option', { value: n }, n)));
+  });
 
   return h('div', { class: 'grid' },
     h('div', { class: 'grid cols-2' },
@@ -57,18 +68,38 @@ export function effectsView(ctx) {
           const inp = h('input', { type: 'text', maxlength: 24, placeholder: 'Nyt navn' });
           inp.addEventListener('change', () => { if (inp.value) conn.command('RenameActivePreset', inp.value); inp.value = ''; });
           return inp;
-        })())),
+        })()),
+        h('div', { class: 'row' }, h('label', {}, 'Fra fil'), presetFiles,
+          h('button', { class: 'btn sm', 'data-testid': 'fx-load-preset', onclick: () => { if (presetFiles.value) { conn.command('LoadEffectPreset', presetFiles.value); toast(`Effekt-preset "${presetFiles.value}" indlæst i den aktive plads`, 'info'); } } }, 'Indlæs')),
+        h('div', { class: 'hint' }, 'Effekt-presets (.preset) fra GoXLR’ens preset-mappe indlæses i den valgte plads.')),
       h('div', { class: 'card' }, h('h2', {}, 'Til/fra'), toggles,
         toggle(binder, { label: 'Hør effekter i hovedtelefoner', get: () => m().settings.enable_monitor_with_fx, set: (v) => conn.command('SetMonitorWithFx', v) }))),
     h('div', { class: 'grid cols-3' },
       fxCard('reverb', 'Reverb', [
         slider(binder, { label: 'Mængde', min: 0, max: 100, get: () => cur().reverb.amount, set: (v) => conn.command('SetReverbAmount', v), fmt: (v) => `${v} %` }),
         slider(binder, { label: 'Decay', min: 10, max: 10000, step: 10, get: () => cur().reverb.decay, set: (v) => conn.command('SetReverbDecay', v), fmt: (v) => `${v} ms` }),
+      ], [
+        sl('Pre-delay', 0, 100, () => cur().reverb.pre_delay, 'SetReverbPreDelay', msF),
+        sl('Tidlige refleksioner', -25, 0, () => cur().reverb.early_level, 'SetReverbEarlyLevel', db),
+        sl('Hale', -25, 0, () => cur().reverb.tail_level, 'SetReverbTailLevel', db),
+        sl('Bas-farve', -50, 50, () => cur().reverb.lo_colour, 'SetReverbLowColour'),
+        sl('Diskant-farve', -50, 50, () => cur().reverb.hi_colour, 'SetReverbHighColour'),
+        sl('Diskant-dæmpning', -25, 25, () => cur().reverb.hi_factor, 'SetReverbHighFactor'),
+        sl('Diffusion', -50, 50, () => cur().reverb.diffuse, 'SetReverbDiffuse'),
+        sl('Modulation (hastighed)', -25, 25, () => cur().reverb.mod_speed, 'SetReverbModSpeed'),
+        sl('Modulation (dybde)', -25, 25, () => cur().reverb.mod_depth, 'SetReverbModDepth'),
       ]),
       fxCard('echo', 'Echo', [
         slider(binder, { label: 'Mængde', min: 0, max: 100, get: () => cur().echo.amount, set: (v) => conn.command('SetEchoAmount', v), fmt: (v) => `${v} %` }),
         slider(binder, { label: 'Feedback', min: 0, max: 100, get: () => cur().echo.feedback, set: (v) => conn.command('SetEchoFeedback', v), fmt: (v) => `${v} %` }),
         slider(binder, { label: 'Tempo', min: 45, max: 300, get: () => cur().echo.tempo, set: (v) => conn.command('SetEchoTempo', v), fmt: (v) => `${v} BPM` }),
+      ], [
+        sl('Forsinkelse venstre', 0, 2500, () => cur().echo.delay_left, 'SetEchoDelayLeft', msF, 10),
+        sl('Forsinkelse højre', 0, 2500, () => cur().echo.delay_right, 'SetEchoDelayRight', msF, 10),
+        sl('Feedback venstre', 0, 100, () => cur().echo.feedback_left, 'SetEchoFeedbackLeft', pctF),
+        sl('Feedback højre', 0, 100, () => cur().echo.feedback_right, 'SetEchoFeedbackRight', pctF),
+        sl('Venstre → højre', 0, 100, () => cur().echo.feedback_xfb_l_to_r, 'SetEchoFeedbackXFBLtoR', pctF),
+        sl('Højre → venstre', 0, 100, () => cur().echo.feedback_xfb_r_to_l, 'SetEchoFeedbackXFBRtoL', pctF),
       ]),
       fxCard('pitch', 'Pitch', [
         slider(binder, { label: 'Mængde', min: -24, max: 24, get: () => cur().pitch.amount, set: (v) => conn.command('SetPitchAmount', v), fmt: (v) => `${v}` }),
@@ -79,10 +110,27 @@ export function effectsView(ctx) {
       ]),
       fxCard('megaphone', 'Megafon', [
         slider(binder, { label: 'Mængde', min: 0, max: 100, get: () => cur().megaphone.amount, set: (v) => conn.command('SetMegaphoneAmount', v), fmt: (v) => `${v} %` }),
+      ], [
+        sl('Gain efter', -20, 20, () => cur().megaphone.post_gain, 'SetMegaphonePostGain', db),
+      ]),
+      fxCard('robot', 'Robot', [
+        sl('Tørt signal', -36, 0, () => cur().robot.dry_mix, 'SetRobotDryMix', db),
+        sl('Tærskel', -36, 0, () => cur().robot.threshold, 'SetRobotThreshold', db),
+      ], [
+        sl('Bølgeform', 0, 2, () => cur().robot.waveform, 'SetRobotWaveform'),
+        sl('Pulsbredde', 0, 100, () => cur().robot.pulse_width, 'SetRobotPulseWidth', pctF),
+        ...[['Low', 'low', 'Lav', 0, 88], ['Medium', 'mid', 'Mellem', 86, 184], ['High', 'high', 'Høj', 182, 240]].flatMap(([range, k, label, f0, f1]) => [
+          sl(`${label}: gain`, -12, 12, () => cur().robot[`${k}_gain`], ['SetRobotGain', range], db),
+          sl(`${label}: frekvens`, f0, f1, () => cur().robot[`${k}_freq`], ['SetRobotFreq', range]),
+          sl(`${label}: bredde`, 0, 32, () => cur().robot[`${k}_width`], ['SetRobotWidth', range]),
+        ]),
       ]),
       fxCard('hard_tune', 'Hard Tune', [
         slider(binder, { label: 'Mængde', min: 0, max: 100, get: () => cur().hard_tune.amount, set: (v) => conn.command('SetHardTuneAmount', v), fmt: (v) => `${v} %` }),
         slider(binder, { label: 'Rate', min: 0, max: 100, get: () => cur().hard_tune.rate, set: (v) => conn.command('SetHardTuneRate', v), fmt: (v) => `${v} %` }),
+      ], [
+        sl('Vindue', 0, 600, () => cur().hard_tune.window, 'SetHardTuneWindow', msF),
+        h('div', { class: 'row' }, h('label', {}, 'Stemmer efter'), selectBox(binder, { options: [['All', 'Alt'], ['Music', 'Musik'], ['Game', 'Spil'], ['LineIn', 'Line in'], ['System', 'System']], get: () => cur().hard_tune.source, set: (v) => conn.command('SetHardTuneSource', v) })),
       ]),
     ));
 }
@@ -414,17 +462,24 @@ export function profilesView(ctx) {
     micKey = k;
     micList.replaceChildren(...names.map((n) => h('div', { class: `item ${n === m().mic_profile_name ? 'active' : ''}` },
       h('div', {}, n), h('div', { class: 'spacer' }),
-      n === m().mic_profile_name ? h('span', { class: 'badge ok' }, 'Aktiv') : null,
-      h('button', { class: 'btn sm', 'data-testid': 'mic-profile-history', onclick: () => showHistory(ctx, 'mic', n) }, 'Historik'))));
+      n === m().mic_profile_name ? h('span', { class: 'badge ok' }, 'Aktiv') : h('button', { class: 'btn sm', 'data-testid': 'mic-profile-load', onclick: () => conn.command('LoadMicProfile', n, true) }, 'Indlæs'),
+      h('button', { class: 'btn sm', 'data-testid': 'mic-profile-history', onclick: () => showHistory(ctx, 'mic', n) }, 'Historik'),
+      n !== m().mic_profile_name && h('button', { class: 'btn sm', 'data-testid': 'mic-profile-delete', onclick: async () => { if (await confirmDialog(`Slet mikrofonprofilen "${n}"?`, { ok: 'Slet', danger: true })) conn.command('DeleteMicProfile', n); } }, 'Slet'))));
     if (!names.length) micList.append(h('div', { class: 'hint' }, 'Ingen mikrofonprofiler.'));
   });
   return h('div', { class: 'grid cols-2' },
     h('div', { class: 'card' }, h('h2', {}, 'GoXLR-profiler',
       h('span', { class: 'row' },
         h('button', { class: 'btn sm', onclick: () => { conn.command('SaveProfile'); setTimeout(() => snapshotProfiles(ctx), 1500); } }, 'Gem aktiv'),
-        h('button', { class: 'btn sm', 'data-testid': 'profile-save-as', onclick: async () => { const n = await promptDialog('Navn på profil'); if (n) { conn.command('SaveProfileAs', n); setTimeout(() => snapshotProfiles(ctx), 1500); } } }, 'Gem som…'))),
+        h('button', { class: 'btn sm', 'data-testid': 'profile-save-as', onclick: async () => { const n = await promptDialog('Navn på profil'); if (n) { conn.command('SaveProfileAs', n); setTimeout(() => snapshotProfiles(ctx), 1500); } } }, 'Gem som…'),
+        h('button', { class: 'btn sm', 'data-testid': 'profile-new', title: 'En ny profil med GoXLR’ens standardindstillinger', onclick: async () => { const n = await promptDialog('Navn på den nye profil (starter fra standard)'); if (n) conn.command('NewProfile', n); } }, 'Ny'))),
     list),
-    h('div', { class: 'card' }, h('h2', {}, 'Mikrofonprofiler'), micList,
+    h('div', { class: 'card' }, h('h2', {}, 'Mikrofonprofiler',
+      h('span', { class: 'row' },
+        h('button', { class: 'btn sm', onclick: () => conn.command('SaveMicProfile') }, 'Gem aktiv'),
+        h('button', { class: 'btn sm', 'data-testid': 'mic-profile-save-as2', onclick: async () => { const n = await promptDialog('Navn på mikrofonprofil'); if (n) conn.command('SaveMicProfileAs', n); } }, 'Gem som…'),
+        h('button', { class: 'btn sm', 'data-testid': 'mic-profile-new', title: 'En ny mikrofonprofil med standardindstillinger', onclick: async () => { const n = await promptDialog('Navn på den nye mikrofonprofil (starter fra standard)'); if (n) conn.command('NewMicProfile', n); } }, 'Ny'))),
+      micList,
       h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Historik: GoXLR Studio gemmer automatisk de 30 seneste versioner af hver profil, hver gang den er ændret. "Gendan" lægger en gammel version tilbage – den nuværende gemmes først, så det kan fortrydes.')),
     h('div', { class: 'card' }, h('h2', {}, 'Om profiler'),
       h('div', { class: 'hint' }, 'GoXLR-profiler indeholder routing, faders, farver, effekter og sampler. Mikrofonprofiler (gain, EQ, gate, kompressor) ligger under Mikrofon. Scener i GoXLR Studio er hurtigere og kan også skifte Windows-enheder og afspilnings-EQ.')));

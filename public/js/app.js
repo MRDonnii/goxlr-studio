@@ -9,6 +9,8 @@ import { diagView } from './views-diag.js';
 import { soundcheckView } from './views-soundcheck.js';
 import { deckView } from './views-deck.js';
 import { pedalsView } from './views-pedals.js';
+import { samplerView } from './views-sampler.js';
+import { goxlrView } from './views-goxlr.js';
 import { loadPedals, startPedals, keyPedal, savePedals } from './pedals.js';
 import { soundsView } from './views-sounds.js';
 import { migrateView } from './views-migrate.js';
@@ -41,6 +43,7 @@ const PAGES = [
   { id: 'devices', title: 'Lydenheder', icon: 'routing', view: devicesView },
   { id: 'apps', title: 'Lyd pr. app', icon: 'apps', view: appsView },
   { id: 'effects', title: 'Effekter', icon: 'fx', view: effectsView, hidden: (m) => m?.hardware?.device_type === 'Mini' },
+  { id: 'sampler', title: 'Sampler', icon: 'pads', view: samplerView, hidden: (m) => m?.hardware?.device_type === 'Mini' },
   { id: 'scenes', title: 'Scener', icon: 'scenes', view: scenesView },
   { id: 'sounds', title: 'Lydbank', icon: 'sound', view: soundsView },
   { id: 'lighting', title: 'Lys', icon: 'light', view: lightingView },
@@ -51,6 +54,7 @@ const PAGES = [
   { id: 'migrate', title: 'Overflytning', icon: 'move', view: migrateView },
   { id: 'soundcheck', title: 'Lydtjek', icon: 'check', view: soundcheckView },
   { id: 'diag', title: 'Diagnose', icon: 'diag', view: diagView },
+  { id: 'goxlr', title: 'GoXLR-indstillinger', icon: 'device', view: goxlrView },
   { id: 'settings', title: 'Indstillinger', icon: 'settings', view: settingsView },
 ];
 

@@ -1,4 +1,4 @@
-import { createDemoStatus, applyDemoCommand } from './demo.js';
+import { createDemoStatus, applyDemoCommand, applyDemoDaemon } from './demo.js';
 
 function unescapePointer(seg) {
   return seg.replace(/~1/g, '/').replace(/~0/g, '~');
@@ -169,6 +169,18 @@ export class GoXLRConnection extends EventTarget {
       return;
     }
     const res = await this.request({ Command: [this.serial, commandJson(name, args)] });
+    if (res && res.Error) this.dispatchEvent(new CustomEvent('error', { detail: `${name}: ${res.Error}` }));
+  }
+
+  /** A command to the engine itself (DaemonCommand in GoXLR Utility), e.g. SetTTSEnabled. */
+  async daemon(name, ...args) {
+    if (this.mode === 'demo') {
+      applyDemoDaemon(this.status, { [name]: args });
+      this.emit();
+      return;
+    }
+    // A variant without values (e.g. ApplySampleChange) is just its name in serde's JSON.
+    const res = await this.request({ Daemon: args.length ? commandJson(name, args) : name });
     if (res && res.Error) this.dispatchEvent(new CustomEvent('error', { detail: `${name}: ${res.Error}` }));
   }
 

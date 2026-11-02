@@ -35,7 +35,7 @@ sha2 = "0.10"
 # Fodpedal: MIDI pedals and controllers (WinMM), read in the background.
 midir = "0.11"
 # GoXLR Utility's engine, run inside GoXLR Studio (see goxlr-engine/README.md).
-goxlr-engine = { path = "goxlr-engine" }
+goxlr-engine = { path = "goxlr-engine", features = ["tts"] }
 # Update check (latest.json from the release); same version and TLS as the GoXLR engine uses.
 reqwest = { version = "0.12.23", default-features = false, features = ["native-tls"] }
 windows = { version = "0.58", features = [

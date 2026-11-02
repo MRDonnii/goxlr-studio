@@ -11,4 +11,5 @@ Changes from upstream (marked `GoXLR Studio:` in the code):
 - `src/tray/windows.rs`: the hidden window is called "GoXLR Studio Engine" and its class may already be registered (engine started again).
 - `src/servers/http_server.rs` + `web-content/`: GoXLR Utility's web UI is not included (a short page points to GoXLR Studio). The HTTP/WebSocket API on 127.0.0.1:14564 is unchanged.
 - `Cargo.toml`: own manifest with the versions of the 1.2.4 workspace; HTTPS (firmware version check) uses Windows' own TLS (native-tls/schannel) instead of rustls; no Windows resource file (GoXLR Studio has its own).
+- `Cargo.toml`: the `tts` feature (read-aloud of button changes, switched on by GoXLR Studio) is built without `tolk` (screen-reader bridge that needs MSVC to compile); Windows speaks through WinRT.
 - Linux/macOS-only files are removed (GoXLR Studio is Windows-only).

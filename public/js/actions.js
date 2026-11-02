@@ -12,6 +12,8 @@ import { applyScene } from './views-misc.js';
 import { BUILTIN_PRESETS } from './eq.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
 
+const SAMPLER_PADS = [['TopLeft', 1], ['TopRight', 2], ['BottomLeft', 3], ['BottomRight', 4]];
+
 // The user's own presets; the built-in ones until the user has any (e.g. before importing Peace).
 export function eqPresetNames(ctx) {
   const mine = Object.keys(ctx.outputEq?.presets || {});
@@ -131,6 +133,8 @@ export async function runAction(ctx, id, source = 'handling') {
       return notify(ctx, hp.cap ? `Høreværn: hovedtelefoner højst ${hp.max} %` : 'Høreværn: intet loft', 'info');
     }
     case 'mic-limiter': return setLimiter(ctx, arg === 'on' ? true : arg === 'off' ? false : !limiterSettings(ctx).enabled);
+    case 'sampler-pad': { const [bank, pad] = arg.split('|'); if (m?.sampler) ctx.conn.command('PlayNextSample', bank, pad); return; }
+    case 'sampler-bank': if (m?.sampler) { ctx.conn.command('SetActiveSamplerBank', arg); notify(ctx, `Sampler: bank ${arg}`); } return;
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
     // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
@@ -225,6 +229,10 @@ export async function actionCatalog(ctx) {
     ...[50, 60, 70, 80].map((p) => ({ id: `hearing-cap:${p}`, label: `Loft for hovedtelefonerne: ${p} %` })),
     { id: 'hearing-cap:off', label: 'Intet loft for hovedtelefonerne' },
   ]);
+  g('Sampler', m?.sampler ? [
+    ...['A', 'B', 'C'].map((b) => ({ id: `sampler-bank:${b}`, label: `Sampler: bank ${b}` })),
+    ...['A', 'B', 'C'].flatMap((b) => SAMPLER_PADS.map(([k, n]) => ({ id: `sampler-pad:${b}|${k}`, label: `Afspil sampler-knap ${n} (bank ${b})` }))),
+  ] : []);
   g('Medier', MEDIA_COMMANDS.map(([c, label]) => ({ id: `media:${c}`, label })));
   g('Andet', [
     m?.effects ? { id: 'fx-toggle', label: 'Effekter til/fra' } : null,
@@ -267,6 +275,8 @@ export function actionLabel(ctx, id) {
     case 'hold': return arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
     case 'sounds-stop': return 'Stop alle lyde';
     case 'hearing-cap': return arg === 'off' ? 'Intet loft for hovedtelefonerne' : `Loft for hovedtelefonerne: ${arg} %`;
+    case 'sampler-bank': return `Sampler: bank ${arg}`;
+    case 'sampler-pad': { const [b, k] = arg.split('|'); return `Afspil sampler-knap ${SAMPLER_PADS.find(([x]) => x === k)?.[1] || k} (bank ${b})`; }
     case 'media': return MEDIA_COMMANDS.find(([c]) => c === arg)?.[1] || arg;
     case 'mute-fader': return `Mute fader ${arg}`;
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;
