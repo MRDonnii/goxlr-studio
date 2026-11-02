@@ -77,6 +77,11 @@ jobs:
           # Stream Deck-plugin: the folder zipped with the folder itself at the root, as Stream Deck wants it.
           Compress-Archive -Path streamdeck/com.goxlrstudio.sdPlugin -DestinationPath dist/GoXLR-Studio-plugin.zip
           Move-Item dist/GoXLR-Studio-plugin.zip dist/GoXLR-Studio.streamDeckPlugin
+          # The same plugin for Streonor / MiraBox StreamDock: its own manifest (the app can also install it itself).
+          New-Item -ItemType Directory sd-pack | Out-Null
+          Copy-Item -Recurse streamdeck/com.goxlrstudio.sdPlugin sd-pack/
+          Move-Item -Force sd-pack/com.goxlrstudio.sdPlugin/manifest.streamdock.json sd-pack/com.goxlrstudio.sdPlugin/manifest.json
+          Compress-Archive -Path sd-pack/com.goxlrstudio.sdPlugin -DestinationPath dist/GoXLR-Studio-StreamDock.zip
 
       - uses: actions/upload-artifact@v4
         with:

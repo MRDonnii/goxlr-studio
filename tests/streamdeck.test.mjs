@@ -17,3 +17,13 @@ test('the Stream Deck plugin follows the app version and has all its files', () 
   }
   assert.ok(manifest.Actions.every((a) => a.UUID.startsWith('com.goxlrstudio.')));
 });
+
+test('the Streonor / StreamDock manifest: same plugin, its own SDK version and knobs', () => {
+  const sd = JSON.parse(readFileSync(new URL('manifest.streamdock.json', dir)));
+  assert.equal(sd.Version, manifest.Version);
+  assert.equal(sd.SDKVersion, 1);
+  assert.equal(sd.CodePath, manifest.CodePath);
+  assert.deepEqual(sd.Actions.map((a) => a.UUID), manifest.Actions.map((a) => a.UUID), 'the same actions (keys keep working across both apps)');
+  assert.ok(sd.Actions.find((a) => a.UUID === 'com.goxlrstudio.volume').Controllers.includes('Knob'));
+  assert.ok(!sd.Actions.some((a) => a.Encoder), 'no Elgato encoder layout');
+});

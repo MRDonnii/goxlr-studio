@@ -32,5 +32,32 @@ fn main() {
         }
     }
 
+    // The Stream Deck / StreamDock plugin (../streamdeck), so the app can install it for Streonor.
+    let plugin = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("..").join("streamdeck").join("com.goxlrstudio.sdPlugin");
+    println!("cargo:rerun-if-changed={}", plugin.display());
+    let mut files = Vec::new();
+    collect(&plugin, &plugin, &mut files);
+    files.sort();
+    let mut code = String::from("pub static PLUGIN_FILES: &[(&str, &[u8])] = &[\n");
+    for rel in &files {
+        let abs = plugin.join(rel);
+        println!("cargo:rerun-if-changed={}", abs.display());
+        code.push_str(&format!("    ({:?}, include_bytes!({:?})),\n", rel.replace('\\', "/"), abs.display().to_string()));
+    }
+    code.push_str("];\n");
+    std::fs::write(out.join("plugin_files.rs"), code).unwrap();
+
     tauri_build::build()
+}
+
+fn collect(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect(root, &p, out);
+        } else if let Ok(rel) = p.strip_prefix(root) {
+            out.push(rel.display().to_string());
+        }
+    }
 }

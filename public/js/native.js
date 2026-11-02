@@ -370,6 +370,15 @@ export async function deviceFormat(id) {
   return { rate: 48000, bits: 24 };
 }
 
+// Streonor / MiraBox StreamDock plugin (streamdock.rs). The demo pretends the app is installed.
+let demoStreamdock = { plugins_dir: 'C:\\Users\\demo\\AppData\\Roaming\\HotSpot\\StreamDock\\plugins', installed: null, bundled: '0.9.1.0' };
+export async function streamdockInfo() { if (isNative()) return invoke('streamdock_info'); return { ...demoStreamdock }; }
+export async function streamdockInstall() {
+  if (isNative()) return invoke('streamdock_install');
+  demoStreamdock.installed = demoStreamdock.bundled;
+  return `${demoStreamdock.plugins_dir}\\com.goxlrstudio.sdPlugin`;
+}
+
 const demoB64 = (t) => btoa(t);
 export async function moveCollect(dirs) {
   if (isNative()) return invoke('move_collect', { dirs });

@@ -1,0 +1,64 @@
+{
+  "Name": "GoXLR Studio",
+  "Version": "0.9.1.0",
+  "Author": "GoXLR Studio",
+  "Description": "Styr GoXLR Studio fra Streonor / MiraBox StreamDock – med status på tasterne. Control GoXLR Studio from Streonor / MiraBox StreamDock, with status on the keys.",
+  "Category": "GoXLR Studio",
+  "CategoryIcon": "imgs/category",
+  "Icon": "imgs/plugin",
+  "CodePath": "plugin.html",
+  "SDKVersion": 1,
+  "URL": "https://github.com/MRDonnii/goxlr-studio",
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Software": {
+    "MinimumVersion": "2.9"
+  },
+  "Actions": [
+    {
+      "UUID": "com.goxlrstudio.action",
+      "Name": "GoXLR Studio-handling",
+      "Tooltip": "Kør en handling i GoXLR Studio (mute, profil, EQ, scene …) og vis om den er slået til.",
+      "Icon": "imgs/action",
+      "PropertyInspectorPath": "pi.html",
+      "SupportedInMultiActions": true,
+      "States": [
+        {
+          "Image": "imgs/key-off",
+          "TitleAlignment": "bottom",
+          "FontSize": "11"
+        },
+        {
+          "Image": "imgs/key-on",
+          "TitleAlignment": "bottom",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": [
+        "Keypad"
+      ]
+    },
+    {
+      "UUID": "com.goxlrstudio.volume",
+      "Name": "GoXLR Studio-lydstyrke",
+      "Tooltip": "Vis og skift en kanals lydstyrke – drej-knap på Stream Deck +, eller tryk for op/ned.",
+      "Icon": "imgs/action",
+      "PropertyInspectorPath": "pi-volume.html",
+      "Controllers": [
+        "Keypad",
+        "Knob"
+      ],
+      "States": [
+        {
+          "Image": "imgs/key-off",
+          "TitleAlignment": "bottom",
+          "FontSize": "11"
+        }
+      ]
+    }
+  ]
+}

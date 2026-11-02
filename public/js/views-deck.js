@@ -3,6 +3,7 @@ import { isNative, deckInfo, openUrl } from './native.js';
 import { actionCatalog } from './actions.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { deckLink, deckArgs, deckApiUrl } from './extras.js';
+import { streamdockInfo, streamdockInstall } from './native.js';
 
 // Keys handed out by "Giv tast": combinations no normal program uses and every Stream Deck program
 // can record by pressing them on the keyboard.
@@ -146,10 +147,31 @@ export function deckView(ctx) {
       h('li', {}, 'Træk "GoXLR Studio-handling" ud på en tast, sæt token ind, og vælg handlingen.')),
     h('div', { class: 'row', style: { flexWrap: 'wrap' } },
       h('a', { class: 'btn sm primary', 'data-testid': 'deck-plugin-download', href: 'https://github.com/MRDonnii/goxlr-studio/releases/latest/download/GoXLR-Studio.streamDeckPlugin', target: '_blank', rel: 'noopener' }, 'Hent Stream Deck-plugin')),
-    h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Til Elgatos Stream Deck-program (version 6 eller nyere). Andre programmer, fx Streonor, bruger metoderne herunder.'));
+    h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Til Elgatos Stream Deck-program (version 6 eller nyere). Streonor: se kortet ved siden af. Andre programmer bruger metoderne herunder.'));
+
+  // Streonor (a MiraBox StreamDock device): the same plugin, installed straight into its app.
+  const sdBody = h('div', { 'data-testid': 'streamdock' });
+  const renderSd = async () => {
+    const i = await streamdockInfo().catch(() => null);
+    const btn = h('button', { class: 'btn sm primary', 'data-testid': 'streamdock-install', disabled: !i?.plugins_dir, onclick: async () => {
+      btn.disabled = true;
+      try { await streamdockInstall(); toast('Pluginnet er lagt i Streonor/StreamDock – genstart programmet (luk det i bakken), så dukker "GoXLR Studio" op', 'info'); } catch (e) { toast(String(e?.message || e)); }
+      renderSd();
+    } }, i?.installed ? (i.installed === i.bundled ? 'Installér igen' : 'Opdatér pluginnet') : 'Installér pluginnet');
+    sdBody.replaceChildren(
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } }, btn,
+        h('span', { class: `badge ${i?.installed ? 'ok' : i?.plugins_dir ? '' : 'warn'}` },
+          i?.installed ? `Installeret (${i.installed})` : i?.plugins_dir ? 'Ikke installeret' : 'Streonor/StreamDock-programmet blev ikke fundet')),
+      h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Bagefter: genstart Streonor-programmet, træk "GoXLR Studio-handling" ud på en tast og sæt token ind (som ved Elgato ovenfor). Drejeknapperne kan styre en kanals lydstyrke med "GoXLR Studio-lydstyrke".'));
+  };
+  renderSd();
+  const streamdockCard = h('div', { class: 'card', 'data-testid': 'streamdock-card' },
+    h('h2', {}, 'Plugin til Streonor (MiraBox StreamDock) – med status'),
+    h('div', { class: 'hint', style: { marginBottom: '8px' } }, 'Streonor-decks bruger MiraBox’ StreamDock-program. GoXLR Studio kan lægge pluginnet direkte i det – så lyser tasterne også her, når det, de styrer, er slået til.'),
+    sdBody);
 
   return h('div', { class: 'grid' },
-    pluginCard,
+    h('div', { class: 'grid cols-2' }, pluginCard, streamdockCard),
     h('div', { class: 'card' },
       h('h2', {}, 'Stream Deck'),
       h('p', {}, 'Styr GoXLR Studio fra en Stream Deck – fx Streonor, Elgato eller Ulanzi. Hver handling i appen kan lægges på en tast. Vælg, hvordan dit Stream Deck-program skal starte den:'),

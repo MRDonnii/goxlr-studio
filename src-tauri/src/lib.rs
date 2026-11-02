@@ -25,6 +25,7 @@ mod sounds;
 mod surround;
 mod spectrum;
 mod store;
+mod streamdock;
 mod update;
 
 use serde::Deserialize;
@@ -363,6 +364,16 @@ fn clips_open_dir() -> Result<(), String> {
     let dir = clips::clips_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     migrate::open_path(dir.display().to_string())
+}
+
+#[tauri::command]
+fn streamdock_info() -> streamdock::Info {
+    streamdock::info()
+}
+
+#[tauri::command]
+async fn streamdock_install() -> Result<String, String> {
+    blocking(streamdock::install).await
 }
 
 #[tauri::command]
@@ -929,6 +940,8 @@ pub fn run() {
             migrate_autostarts,
             migrate_backup,
             move_collect,
+            streamdock_info,
+            streamdock_install,
             clips_start,
             clips_stop,
             clips_status,

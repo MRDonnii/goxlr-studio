@@ -4,6 +4,8 @@
 //  • "GoXLR Studio-lydstyrke": a channel's volume – a dial on Stream Deck + (turn = volume,
 //    press = mute), or a key (press = a step up, or down when set so).
 // Every second the plugin reads /state from GoXLR Studio's local API (127.0.0.1, token).
+// The same code runs in Streonor / MiraBox StreamDock (manifest.streamdock.json): its knobs are
+// controller "Knob" (no screen of their own), the events are the same.
 /* global GXS */
 let ws = null;
 let pluginUUID = '';
@@ -80,6 +82,7 @@ function render(context) {
     const f = faderFor(ch);
     const muted = f ? state.faders[f].muted : false;
     const name = c.settings.name || ch;
+    if (c.controller === 'Knob') return; // StreamDock knobs have no display
     if (c.controller === 'Encoder') {
       send({ event: 'setFeedback', context, payload: { title: name, value: muted ? t('muted') : `${pct} %`, indicator: { value: muted ? 0 : pct } } });
     } else if (!c.userTitle) setTitle(context, `${name}\n${muted ? t('muted') : `${pct} %`}`);
