@@ -22,5 +22,8 @@
  "Udlignet: {0}": "Evened out: {0}",
  "Aktiv: {0}": "Active: {0}",
  "Spiltilstand: {0}{1}": "Game mode: {0}{1}",
- "spiltilstand: {0}": "game mode: {0}"
+ "spiltilstand: {0}": "game mode: {0}",
+ "GoXLR-indstillinger": "GoXLR settings",
+ "{0} tændt": "{0} on",
+ "{0} muted": "{0} muted"
 }

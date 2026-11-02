@@ -118,7 +118,8 @@ export async function runAction(ctx, id, source = 'handling') {
       if (!m) return;
       const mute = m.fader_status[arg].mute_state === 'Unmuted';
       ctx.conn.command('SetFaderMuteState', arg, mute ? 'MutedToX' : 'Unmuted');
-      return notify(ctx, `${m.fader_status[arg].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[arg].channel] || `Fader ${arg}`} ${mute ? 'muted' : 'tændt'}`, mute ? 'mute' : 'ok');
+      const name = m.fader_status[arg].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[arg].channel] || `Fader ${arg}`;
+      return notify(ctx, mute ? `${name} muted` : `${name} tændt`, mute ? 'mute' : 'ok');
     }
     case 'discord-toggle': return ctx.discordToggle?.();
     case 'discord-deafen': return ctx.discordDeafen?.();
