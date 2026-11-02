@@ -13,7 +13,7 @@ import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChan
 import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
-import { roomCorrectionCard, speakersCard } from './views-room.js';
+import { roomCorrectionCard, speakersCard, offerProfileLink } from './views-room.js';
 import { dynamicsCard } from './dynamics.js';
 import { renamePreset, duplicatePreset, deletePresets, presetUses, copyName, decodeText } from './presetmanage.js';
 
@@ -397,7 +397,7 @@ export function outputEqView(ctx) {
       if (mod && !dot) active.append(h('span', { class: 'chip-mod' }, ' ●'));
       if (!mod && dot) dot.remove();
     }
-    for (const [k, b] of abBtns) b.classList.toggle('on', k === state.active);
+    for (const [k, b] of abBtns) { b.classList.toggle('on', k === state.active); b.title = state.slotNames?.[k] ? `${k}: ${state.slotNames[k]}` : k; }
     const m = abMatch(state);
     abInfo.textContent = abText(m, state.abMatch !== false);
     abInfo.className = `ab-info ${Math.abs(m.diff) >= 0.1 && state.abMatch !== false && !m.unmatched ? 'ok' : Math.abs(m.diff) >= 0.1 ? 'warn' : ''}`;
@@ -418,8 +418,28 @@ export function outputEqView(ctx) {
     h('button', { class: 'btn sm', title: 'Gentag (Ctrl+Y)', onclick: redo }, '↷'),
     h('button', { class: 'btn sm primary', onclick: () => { const b = newBand(1000); eq().bands.push(b); selected = eq().bands.length - 1; changed(); renderBands(); } }, '+ Bånd'),
   );
+  // Compare two saved presets: the one in use stays on this side, the chosen one goes to the other.
+  state.slotNames ??= {};
+  const abLoad = h('select', { class: 'ab-load', 'data-testid': 'eq-ab-load', title: 'Læg et gemt preset på den anden side (A/B), så du kan sammenligne to presets ved samme lydstyrke' });
+  const fillAbLoad = () => abLoad.replaceChildren(
+    h('option', { value: '' }, `Preset i ${other()}…`),
+    h('optgroup', { label: 'Mine' }, Object.keys(state.presets).map((n) => h('option', { value: `u:${n}` }, n))),
+    h('optgroup', { label: 'Indbyggede' }, Object.keys(BUILTIN_PRESETS).map((n) => h('option', { value: `b:${n}` }, n))));
+  abLoad.addEventListener('focus', fillAbLoad);
+  abLoad.addEventListener('change', () => {
+    const [k, ...r] = abLoad.value.split(':'); const n = r.join(':');
+    const src = k === 'u' ? state.presets[n] : BUILTIN_PRESETS[n];
+    if (src) {
+      const copy = structuredClone(src);
+      copy.bands = (copy.bands || []).map((b) => ({ ...newBand(b.freq, b.type), ...b, id: crypto.randomUUID() }));
+      state.slotNames[other()] = n;
+      setOther({ enabled: true, preamp: 0, ...copy }, `"${n}" ligger nu i ${other()} – skift med A/B`);
+    }
+    fillAbLoad();
+  });
+  fillAbLoad();
   const abRow = h('div', { class: 'row ab-row', style: { flexWrap: 'wrap' } },
-    h('span', { class: 'lbl', style: { minWidth: 0 } }, 'Sammenlign'), abSeg,
+    h('span', { class: 'lbl', style: { minWidth: 0 } }, 'Sammenlign'), abSeg, abLoad,
     h('button', { class: 'btn sm', onclick: () => setOther(structuredClone(eq()), `Kopieret til ${other()}`) }, 'Kopiér til den anden'),
     h('button', { class: 'btn sm', 'data-testid': 'eq-ab-flat', title: 'Sammenlign med og uden EQ: den anden bliver flad (ingen filtre)', onclick: () => setOther({ enabled: true, preamp: 0, bands: [] }, `${other()} er nu flad – uden EQ`) }, 'Gør den anden flad'),
     h('label', { class: 'check-inline', title: 'Den højeste af A og B sænkes, så de spiller lige højt (målt som LUFS). Ellers lyder den højeste næsten altid bedst – uden at være det.' }, matchBox, h('span', {}, 'Udlign lydstyrke')),
@@ -689,6 +709,7 @@ export function outputEqView(ctx) {
     copy.bands = copy.bands.map((b) => ({ ...newBand(b.freq, b.type), ...b, id: crypto.randomUUID() }));
     state.slots[state.active] = { enabled: true, preamp: 0, ...copy };
     state.presetName = name;
+    (state.slotNames ??= {})[state.active] = name || null;
     selected = 0;
     rebase(); changed(); renderBands();
     ctx.onStateChanged?.('eq-local');
@@ -820,7 +841,9 @@ export function outputEqView(ctx) {
         const clash = Object.keys(state.presets).find((k) => k.toLowerCase() === n.toLowerCase() && k !== n);
         if (clash) { toast(`Der findes allerede et preset, der hedder "${clash}"`); return; }
         if (state.presets[n] && n !== state.presetName && !(await confirmDialog(`Overskriv "${n}"?`, { ok: 'Overskriv' }))) return;
-        state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); apply(); renderChannels(); toast(`Gemt "${n}"`, 'info'); ctx.onStateChanged?.('eq');
+        state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); apply(); renderChannels(); toast(`Gemt "${n}"`, 'info');
+        await offerProfileLink(ctx, state, n);
+        ctx.onStateChanged?.('eq');
       } }, 'Gem som…'),
       h('button', { class: 'btn sm', 'data-testid': 'preset-rename-selected', onclick: () => { const { builtin, name } = selName(); if (builtin) toast('Indbyggede presets kan ikke omdøbes – kopiér det, så har du dit eget.'); else renameOne(name); } }, 'Omdøb…'),
       h('button', { class: 'btn sm', 'data-testid': 'preset-copy-selected', onclick: () => { const { builtin, name } = selName(); copyOne(name, builtin); } }, 'Kopiér'),

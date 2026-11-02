@@ -473,3 +473,7 @@ input.num { width: 64px; }
 .room-legend .lg-range::before { background: var(--graph-zero); height: 10px; opacity: .5; }
 .room-notes { display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin: 6px 0; }
 .room-filters { font-variant-numeric: tabular-nums; columns: 2; margin-bottom: 8px; }
+.room-legend .lg-check::before { background: var(--ok); }
+.room-row { flex-wrap: wrap; }
+.room-row select { font-size: 12px; padding: 2px 6px; max-width: 150px; }
+.ab-load { max-width: 220px; }

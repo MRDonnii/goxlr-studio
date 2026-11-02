@@ -3,7 +3,7 @@
 import { h, toast, promptDialog, confirmDialog } from './ui.js';
 import { storeGet, storeSet, firSave } from './native.js';
 import { readMeasurementFile, readCalFile } from './rew.js';
-import { GRID, toGrid, powerAverage, smooth, designCorrection, correctionNotes, applyCalibration, TARGETS, DEFAULT_MAX_BOOST } from './roomcorrect.js';
+import { GRID, toGrid, smooth, correctionNotes, applyCalibration, TARGETS, DEFAULT_MAX_BOOST, designRoom, roomNotes, guessChannel, measuredDistances } from './roomcorrect.js';
 import { speakerDelay } from './extras.js';
 import { toApoConfig, formatFreq } from './eq.js';
 import { fileBase64 } from './views-sampler.js';
@@ -11,6 +11,28 @@ import { fileBase64 } from './views-sampler.js';
 const HIGH_CHOICES = [2000, 5000, 8000, 12000, 20000];
 const LOW_CHOICES = [30, 40, 50, 60, 70, 80, 100, 120];
 const dec = (v, d = 1) => String(Math.round(v * 10 ** d) / 10 ** d).replace('.', ',');
+const CHANNELS = [['LR', 'L+R'], ['L', 'Venstre'], ['R', 'Højre']];
+const ROLES = [['design', 'Til korrektion'], ['check', 'Kontrol (målt med EQ)']];
+const SIDE_LABEL = { all: 'Begge', L: 'Venstre', R: 'Højre' };
+
+/**
+ * After a preset is saved: the GoXLR profile in use links to another preset ("Speakers" → the old
+ * one)? Ask whether the new one should follow that profile from now on.
+ */
+export async function offerProfileLink(ctx, state, name) {
+  const profile = ctx.conn?.mixer?.profile_name;
+  if (!profile) return;
+  state.profileLinks ??= {};
+  const linked = state.profileLinks[profile];
+  if (linked === name) return;
+  const text = linked
+    ? `GoXLR-profilen "${profile}" skifter i dag til EQ-presettet "${linked}". Skal den bruge "${name}" fremover?`
+    : `Skal GoXLR-profilen "${profile}" bruge "${name}" fremover, hver gang du skifter til den?`;
+  if (!(await confirmDialog(text, { ok: `Brug på ${profile}` }))) return;
+  state.profileLinks[profile] = name;
+  await storeSet('output-eq', state).catch(() => {});
+  toast(`"${profile}" bruger nu "${name}"`, 'info');
+}
 
 /** opts: { state (outputEq), save(), makePreset(eq, name) } */
 export function roomCorrectionCard(ctx, { state, save, makePreset }) {
@@ -36,7 +58,7 @@ export function roomCorrectionCard(ctx, { state, save, makePreset }) {
     for (const f of files) {
       try {
         for (const m of readMeasurementFile(await f.arrayBuffer(), f.name)) {
-          meas.push({ id: crypto.randomUUID(), name: m.name, date: m.date, calibrated: m.calibrated, on: true, curve: toGrid(m).map((x) => Math.round(x * 10) / 10) });
+          meas.push({ id: crypto.randomUUID(), name: m.name, date: m.date, calibrated: m.calibrated, on: true, channel: guessChannel(m.name), role: 'design', timing: m.timing || null, curve: toGrid(m).map((x) => Math.round(x * 10) / 10) });
           added++;
         }
       } catch (e) { toast(`${f.name}: ${String(e.message || e)}`); }
@@ -62,10 +84,13 @@ export function roomCorrectionCard(ctx, { state, save, makePreset }) {
   });
   const calBtn = h('button', { class: 'btn sm', 'data-testid': 'room-cal', title: 'Fx UMIK-1: hent filen til din mikrofons serienummer hos miniDSP. Brug 90°-filen, hvis mikrofonen pegede op mod loftet.', onclick: () => calIn.click() }, 'Læg kalibreringsfil på…');
   const uncalibrated = () => meas.some((m) => m.on && m.calibrated === false);
+  let room = null;
+  let side = 'all';
   const compute = () => {
-    const on = meas.filter((m) => m.on);
-    if (!on.length) { result = null; return; }
-    result = designCorrection(powerAverage(on.map((m) => m.curve)), { target: cfg.target, maxBoost: cfg.maxBoost, high: cfg.high, low: cfg.low });
+    room = designRoom(meas, { target: cfg.target, maxBoost: cfg.maxBoost, high: cfg.high, low: cfg.low, modes: cfg.modes });
+    const sides = Object.keys(room.sides);
+    if (!sides.includes(side)) side = sides[0] || 'all';
+    result = room.sides[side] || null;
   };
 
   const draw = () => {
@@ -99,11 +124,18 @@ export function roomCorrectionCard(ctx, { state, save, makePreset }) {
     };
     line(smooth(result.measured, 6), v('--muted', '#8a94a8'), 1.5);
     line(result.target, v('--accent-2', '#a855f7'), 1.5, [5, 4]);
-    line(smooth(result.predicted, 6), v('--accent', '#22d3ee'), 2);
+    line(smooth(result.predicted, 6), v('--accent', '#22d3ee'), 2, [2, 3]);
+    // A check measurement (made with the EQ on): what really came out – solid.
+    const check = room?.checks[side] || room?.checks.all;
+    if (check) line(smooth(check, 6), v('--ok', '#34d399'), 2);
   };
 
-  const legend = h('div', { class: 'room-legend hint' },
-    h('span', { class: 'lg lg-meas' }, 'Målt'), h('span', { class: 'lg lg-target' }, 'Målkurve'), h('span', { class: 'lg lg-pred' }, 'Med korrektion'), h('span', { class: 'lg lg-range' }, 'Rettes'));
+  const legend = h('div', { class: 'room-legend hint' });
+  const renderLegend = () => legend.replaceChildren(
+    h('span', { class: 'lg lg-meas' }, 'Målt (før)'), h('span', { class: 'lg lg-target' }, 'Målkurve'), h('span', { class: 'lg lg-pred' }, 'Beregnet med korrektion'),
+    room?.checks[side] || room?.checks.all ? h('span', { class: 'lg lg-check' }, 'Kontrolmåling (målt med EQ)') : '',
+    h('span', { class: 'lg lg-range' }, 'Rettes'));
+  const sideSeg = h('div', { class: 'seg', 'data-testid': 'room-side' });
 
   const sel = (opts, value, onchange, testid) => {
     const s = h('select', { 'data-testid': testid, onchange: () => onchange(s.value) }, opts.map(([v, l]) => h('option', { value: v, selected: String(v) === String(value) }, l)));
@@ -120,25 +152,36 @@ export function roomCorrectionCard(ctx, { state, save, makePreset }) {
     calBtn.style.display = meas.some((m) => m.calibrated === false) ? '' : 'none';
     list.replaceChildren(...meas.map((m) => {
       const cb = h('input', { type: 'checkbox', checked: m.on, onchange: () => { m.on = cb.checked; saveMeas(); render(); } });
-      return h('div', { class: 'preset-row' }, cb,
+      const chSel = sel(CHANNELS, m.channel || 'LR', (v) => { m.channel = v; saveMeas(); render(); }, 'room-meas-channel');
+      const roleSel = sel(ROLES, m.role || 'design', (v) => { m.role = v; saveMeas(); render(); }, 'room-meas-role');
+      chSel.title = 'Hvilken højttaler der spillede';
+      roleSel.title = 'Til korrektion = målt uden EQ. Kontrol = målt bagefter med EQ’en slået til – vises som den grønne kurve.';
+      return h('div', { class: 'preset-row room-row' }, cb,
         h('span', { class: 'preset-name', title: m.date || '' }, m.name, m.date ? h('span', { class: 'hint' }, ` ${m.date.split(' ')[0]}`) : ''),
+        chSel, roleSel,
+        m.timing?.usedRef ? h('span', { class: 'badge', title: 'Målt med timing-reference – ankomsttiden kan bruges til forsinkelse under Højttalere' }, 'tid') : null,
         m.calibrated === false ? h('span', { class: 'badge warn', title: 'REW brugte ingen kalibreringsfil til mikrofonen' }, 'ukalibreret') : m.cal ? h('span', { class: 'badge ok', title: m.cal }, 'kalibreret') : null,
         h('button', { class: 'btn sm ghost', title: 'Fjern målingen', 'aria-label': 'Fjern målingen', onclick: () => { meas = meas.filter((x) => x !== m); saveMeas(); render(); } }, '✕'));
     }));
     if (!meas.length) list.append(h('div', { class: 'hint' }, 'Ingen målinger endnu.'));
     compute();
-    notes.replaceChildren(...(result ? correctionNotes(result, { calibrated: uncalibrated() ? false : null }) : []).map((n) => h('div', {}, n)));
-    filters.replaceChildren(...(result?.bands || []).map((b) => h('div', {}, `${formatFreq(b.freq).replace('.', ',')}  ${b.gain > 0 ? '+' : ''}${dec(b.gain)} dB  Q ${dec(b.q, 2)}`)));
-    actions.replaceChildren(...(result?.bands.length ? [
+    const sides = Object.keys(room.sides);
+    sideSeg.replaceChildren(...(sides.length > 1 ? sides.map((k) => h('button', { class: k === side ? 'on' : '', onclick: () => { side = k; render(); } }, SIDE_LABEL[k])) : []));
+    sideSeg.style.display = sides.length > 1 ? '' : 'none';
+    renderLegend();
+    notes.replaceChildren(...[...roomNotes(room), ...(result ? correctionNotes(result, { calibrated: uncalibrated() ? false : null }) : [])].map((n) => h('div', {}, n)));
+    filters.replaceChildren(...room.bands.map((b) => h('div', {}, `${b.channel ? `${SIDE_LABEL[b.channel]}: ` : ''}${formatFreq(b.freq).replace('.', ',')}  ${b.gain > 0 ? '+' : ''}${dec(b.gain)} dB  Q ${dec(b.q, 2)}`)));
+    actions.replaceChildren(...(room.bands.length ? [
       h('button', { class: 'btn sm primary', 'data-testid': 'room-make-preset', onclick: async () => {
         const name = (await promptDialog('Navn på preset', 'Rumkorrektion', { ok: 'Lav preset' }))?.trim();
         if (!name) return;
         if (state.presets[name] && !(await confirmDialog(`Overskriv "${name}"?`, { ok: 'Overskriv' }))) return;
-        makePreset({ enabled: true, preamp: result.preamp, bands: result.bands.map((b) => ({ ...b })) }, name);
+        makePreset({ enabled: true, preamp: room.preamp, bands: room.bands.map((b) => ({ ...b })) }, name);
         toast(`"${name}" er lavet og i brug – sammenlign med A/B øverst på siden`, 'info');
+        await offerProfileLink(ctx, state, name);
       } }, 'Lav preset og brug det'),
       h('button', { class: 'btn sm', onclick: () => {
-        navigator.clipboard?.writeText(toApoConfig({ enabled: true, preamp: result.preamp, bands: result.bands })).then(() => toast('Kopieret som Equalizer APO-tekst', 'info'), () => toast('Kunne ikke kopiere'));
+        navigator.clipboard?.writeText(toApoConfig({ enabled: true, preamp: room.preamp, bands: room.bands })).then(() => toast('Kopieret som Equalizer APO-tekst', 'info'), () => toast('Kunne ikke kopiere'));
       } }, 'Kopiér som APO-tekst'),
     ] : []));
     requestAnimationFrame(draw);
@@ -159,9 +202,12 @@ export function roomCorrectionCard(ctx, { state, save, makePreset }) {
       h('label', {}, 'Ret op til'), sel(HIGH_CHOICES.map((f) => [f, formatFreq(f)]), cfg.high, (v) => { cfg.high = Number(v); save(); render(); }, 'room-high')),
     h('div', { class: 'row wrap' }, h('label', {}, 'Laveste frekvens'),
       sel([['auto', 'Automatisk'], ...LOW_CHOICES.map((f) => [f, `${f} Hz`])], cfg.low ?? 'auto', (v) => { cfg.low = v === 'auto' ? 'auto' : Number(v); save(); render(); }, 'room-low')),
+    h('div', { class: 'row wrap' }, h('label', {}, 'Rumtoppe'),
+      sel([['surround', 'Dæmp til bassen omkring (mindre rungen)'], ['target', 'Kun det, der er over målkurven']], cfg.modes || 'surround', (v) => { cfg.modes = v; save(); render(); }, 'room-modes')),
     h('div', { class: 'row' }, h('label', {}, 'Højst løft'), boost, boostVal),
     h('div', { class: 'hint' }, 'Lyder det tungt i bunden: sæt "Højst løft" ned (0 dB = kun toppe dæmpes) eller "Laveste frekvens" op. Under den frekvens løftes højst 1,5 dB.'),
-    canvas, legend, notes, filters, actions);
+    h('div', { class: 'row', style: { marginTop: '10px' } }, sideSeg), canvas, legend, notes, filters, actions,
+    h('div', { class: 'hint' }, 'Den stiplede kurve er beregnet – ikke målt. Mål bagefter igen med EQ’en slået til, importér målingen og vælg "Kontrol", så ser du, hvad der faktisk kom ud.'));
 }
 
 /** Højttalere: distance → delay, polarity, own FIR filter. opts: { state, save() } (save also applies). */
@@ -174,8 +220,9 @@ export function speakersCard(ctx, { state, save }) {
     const d = speakerDelay(ch.distL, ch.distR);
     delayText.textContent = d.ms ? `${d.channel === 'L' ? 'Venstre' : 'Højre'} højttaler venter ${dec(d.ms, 2)} ms, så lyden fra begge når dig samtidig.` : 'Samme afstand – ingen forsinkelse.';
   };
+  const distInputs = {};
   const dist = (key, label) => {
-    const i = h('input', { type: 'number', min: 0, max: 2000, step: 1, value: ch[key] || '', placeholder: 'cm', style: { width: '90px' }, 'data-testid': `speaker-${key}` });
+    const i = distInputs[key] = h('input', { type: 'number', min: 0, max: 2000, step: 1, value: ch[key] || '', placeholder: 'cm', style: { width: '90px' }, 'data-testid': `speaker-${key}` });
     i.addEventListener('change', () => { ch[key] = Math.max(0, Math.min(2000, Number(i.value) || 0)); showDelay(); save(); });
     return h('div', { class: 'row' }, h('label', {}, label), h('div', { class: 'spacer' }), i, h('span', { class: 'hint' }, 'cm'));
   };
@@ -184,6 +231,15 @@ export function speakersCard(ctx, { state, save }) {
     return h('div', { class: 'row' }, h('label', {}, label), h('div', { class: 'spacer' }), h('label', { class: 'switch' }, i, h('span')));
   };
   showDelay();
+  const fromMeas = h('button', { class: 'btn sm', 'data-testid': 'speaker-from-meas', title: 'Bruger ankomsttiderne fra REW-målinger af venstre og højre, lavet med timing-reference', onclick: async () => {
+    const m = await storeGet('room-measurements', []).catch(() => []);
+    const d = measuredDistances(Array.isArray(m) ? m : []);
+    if (!d) { toast('Kræver REW-målinger af venstre og højre hver for sig, lavet med timing-reference (loopback eller akustisk) – importér dem under Rumkorrektion.'); return; }
+    ch.distL = d.distL; ch.distR = d.distR;
+    distInputs.distL.value = d.distL; distInputs.distR.value = d.distR;
+    showDelay(); save();
+    toast(d.diffMs > 0 ? `Målt: højre når dig ${dec(Math.abs(d.diffMs), 2)} ms senere` : `Målt: venstre når dig ${dec(Math.abs(d.diffMs), 2)} ms senere`, 'info');
+  } }, 'Fra målinger');
 
   const firInfo = h('div', { class: 'hint', 'data-testid': 'fir-info' });
   const firSwitch = h('input', { type: 'checkbox', checked: !!fir.enabled, disabled: !fir.file, 'data-testid': 'fir-enabled', onchange: () => { fir.enabled = firSwitch.checked; save(); } });
@@ -211,6 +267,7 @@ export function speakersCard(ctx, { state, save }) {
   return h('div', { class: 'card', 'data-testid': 'speakers-card' }, h('h2', {}, 'Højttalere'),
     h('div', { class: 'hint' }, 'Afstand fra din lytteplads til hver højttaler. Står du tættere på den ene, venter den, så lyden fra begge rammer dig på samme tid – det giver et skarpere stereobillede.'),
     dist('distL', 'Venstre højttaler'), dist('distR', 'Højre højttaler'), delayText,
+    h('div', { class: 'row' }, fromMeas),
     h('h3', { style: { marginTop: '12px' } }, 'Polaritet'),
     flip('invertL', 'Vend venstre'), flip('invertR', 'Vend højre'),
     h('div', { class: 'hint' }, 'Hvis + og − er byttet om på den ene højttaler, forsvinder bassen og midten. Vend den ene – eller ret ledningen.'),
