@@ -1,5 +1,6 @@
 mod api;
 mod apo;
+mod fir;
 mod apps;
 mod audio;
 mod clips;
@@ -379,6 +380,11 @@ async fn streamdock_install() -> Result<String, String> {
 #[tauri::command]
 async fn move_collect(dirs: Vec<(String, String)>) -> Result<movepc::Collected, String> {
     blocking(move || Ok(movepc::collect(dirs))).await
+}
+
+#[tauri::command]
+async fn fir_save(name: String, data: String) -> Result<fir::WavInfo, String> {
+    blocking(move || fir::save(&name, &data)).await
 }
 
 #[tauri::command]
@@ -929,6 +935,7 @@ pub fn run() {
             set_close_to_tray,
             set_tray,
             apo_list_configs,
+            fir_save,
             set_hotkeys,
             app_sessions,
             set_app_device,

@@ -36,12 +36,33 @@ export function crossfeedLines({ level = -8, cutoff = 700, delay = 0.3 } = {}) {
 
 // Mono (both ears get the same – one earbud, or hearing loss on one side) and balance (dB; above
 // 0 = more to the right, the left side is lowered). Only lowers, so it never clips.
-export function channelLines({ mono = false, balance = 0 } = {}) {
+export function channelLines({ mono = false, balance = 0, distL = 0, distR = 0, invertL = false, invertR = false } = {}) {
   const out = [];
   if (mono) out.push('Channel: all', 'Copy: L=0.5*L+0.5*R R=0.5*L+0.5*R');
   const b = Math.max(-20, Math.min(20, Number(balance) || 0));
   if (b) out.push(`Channel: ${b > 0 ? 'L' : 'R'}`, `Preamp: ${(-Math.abs(b)).toFixed(1)} dB`, 'Channel: all');
+  // Højttalere: the nearer speaker waits for the sound of the farther one, so both arrive together.
+  const d = speakerDelay(distL, distR);
+  if (d.ms) out.push(`Channel: ${d.channel}`, `Delay: ${d.ms.toFixed(3)} ms`, 'Channel: all');
+  // Polarity: a speaker wired the wrong way round (+/− swapped) – the bass and the centre image go.
+  if (invertL || invertR) out.push('Channel: all', `Copy: ${[invertL ? 'L=-1*L' : null, invertR ? 'R=-1*R' : null].filter(Boolean).join(' ')}`);
   return out;
+}
+
+export const SPEED_OF_SOUND = 343; // m/s at 20 °C
+
+/** Distances to the speakers (cm) → which one to delay, and by how much (ms). Max 50 ms. */
+export function speakerDelay(distL, distR) {
+  const l = Math.max(0, Number(distL) || 0), r = Math.max(0, Number(distR) || 0);
+  if (!l || !r || l === r) return { channel: null, ms: 0 };
+  const ms = Math.min(50, (Math.abs(l - r) / 100 / SPEED_OF_SOUND) * 1000);
+  return { channel: l < r ? 'L' : 'R', ms: Math.round(ms * 1000) / 1000 };
+}
+
+/** Eget FIR-filter: the file in the engine's folder, used only at its own sample rate. */
+export function firLines(fir) {
+  if (!fir?.enabled || !fir.file || !/^fir-[A-Za-z0-9_-]+\.wav$/.test(fir.file)) return [];
+  return [`If: sampleRate == ${Math.round(Number(fir.rate) || 48000)}`, `Convolution: ${fir.file}`, 'EndIf:'];
 }
 
 // Gentle bass/treble lift for listening at low volume (amount 0–10 dB).
@@ -64,7 +85,7 @@ export function enginePayload(eq, extras = {}, target = null, offset = 0) {
     // A steep low/high cut is several filters in the engine (eq.js expandBand).
     bands: expandBands([...eq.bands, ...loud]),
     // Virtuelle højttalere replace crossfeed (both mix the channels); the engine adds them last.
-    extra: [...(extras.crossfeed?.enabled && !extras.surround?.enabled ? crossfeedLines(extras.crossfeed) : []), ...channelLines(extras.channels)],
+    extra: [...firLines(extras.fir), ...(extras.crossfeed?.enabled && !extras.surround?.enabled ? crossfeedLines(extras.crossfeed) : []), ...channelLines(extras.channels)],
     surround: extras.surround?.enabled ? { angle: Number(extras.surround.angle) || 30, room: Math.round(Number(extras.surround.room) || 0) } : null,
     target,
   };

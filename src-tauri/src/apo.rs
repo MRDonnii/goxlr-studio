@@ -73,6 +73,20 @@ pub struct ChannelEq {
 
 const EXTRA_ALLOWED: [&str; 5] = ["Copy:", "Channel:", "Filter:", "Delay:", "Preamp:"];
 
+/// Eget FIR-filter (fir.rs): only our own files in the config folder, only at a given sample rate.
+fn fir_line_ok(line: &str) -> bool {
+    if line == "EndIf:" {
+        return true;
+    }
+    if let Some(rate) = line.strip_prefix("If: sampleRate == ") {
+        return !rate.is_empty() && rate.len() <= 6 && rate.bytes().all(|b| b.is_ascii_digit());
+    }
+    if let Some(file) = line.strip_prefix("Convolution: fir-").and_then(|f| f.strip_suffix(".wav")) {
+        return !file.is_empty() && file.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    }
+    false
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct DeviceApo {
     pub id: String,
@@ -189,7 +203,7 @@ fn body(out: &mut String, preamp: f64, graphic: &[(f64, f64)], bands: &[Band], e
     }
     for line in extra {
         let line = line.trim();
-        if !line.contains(['\n', '\r']) && EXTRA_ALLOWED.iter().any(|p| line.starts_with(p)) {
+        if !line.contains(['\n', '\r']) && (EXTRA_ALLOWED.iter().any(|p| line.starts_with(p)) || fir_line_ok(line)) {
             out.push_str(line);
             out.push('\n');
         }
@@ -430,6 +444,17 @@ pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fir_lines_are_checked() {
+        assert!(fir_line_ok("If: sampleRate == 48000"));
+        assert!(fir_line_ok("Convolution: fir-Min-stue_48k.wav"));
+        assert!(fir_line_ok("EndIf:"));
+        assert!(!fir_line_ok("Convolution: ../../Windows/x.wav"));
+        assert!(!fir_line_ok("Convolution: fir-a b.wav"));
+        assert!(!fir_line_ok("If: 1 == 1"));
+        assert!(!fir_line_ok("Include: C:\\x.txt"));
+    }
 
     #[test]
     fn reads_ansi_utf16_and_utf8() {

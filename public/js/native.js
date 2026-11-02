@@ -219,6 +219,17 @@ export async function apoReadConfig() {
   return invoke('apo_read_config');
 }
 
+// Eget FIR-filter (fir.rs): the WAV goes into the engine's folder. The browser demo only reads its header.
+export async function firSave(name, data) {
+  if (isNative()) return invoke('fir_save', { name, data });
+  const b = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+  const dv = new DataView(b.buffer);
+  if (b.length < 44 || String.fromCharCode(...b.slice(0, 4)) !== 'RIFF') throw new Error('Filen er ikke en WAV-fil');
+  const stem = name.replace(/\.wav$/i, '').replace(/[^A-Za-z0-9_-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'filter';
+  const ch = dv.getUint16(22, true), rate = dv.getUint32(24, true), align = dv.getUint16(32, true);
+  return { file: `fir-${stem}.wav`, rate, channels: ch, frames: Math.floor((b.length - 44) / Math.max(1, align)) };
+}
+
 export async function apoListConfigs() {
   if (!isNative()) return [];
   return invoke('apo_list_configs');
