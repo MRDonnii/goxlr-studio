@@ -171,6 +171,13 @@ export function readRewMdat(buffer) {
       freqs: measFreqs(f, spl.length),
       spl: Array.from(spl),
       calibrated: !!String(cal.sourceName || cal.sourcePath || '').trim(),
+      // Timing: with a timing reference (loopback/acoustic) the impulse's peak is the sound's arrival time.
+      timing: (() => {
+        const ir = f.irData?.fields || {};
+        const usedRef = num(ir.usedTimingRef) === 1 || ir.usedTimingRef?.fields?.value === true || ir.usedTimingRef === true;
+        const peak = num(ir.origPeakTime);
+        return Number.isFinite(peak) ? { usedRef, peak } : null;
+      })(),
       output: String(f.outputName || ''),
       sampleRate: num(f.sampleRate) || 0,
     });

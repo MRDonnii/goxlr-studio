@@ -163,3 +163,57 @@ test('defaults are gentle: at most +3 dB, nothing when max boost is 0', () => {
   assert.equal(low.low, 100);
   assert.ok(!low.bands.some((b) => b.gain > 0 && b.freq < 125));
 });
+
+// ---------- 0.12.0: room modes, left/right, check measurements, timing ----------
+import { designRoom, roomNotes, guessChannel, measuredDistances } from '../public/js/roomcorrect.js';
+
+test('a room mode under the target: cut to its surroundings (at most 6 dB), or left alone', () => {
+  // Weak bass (−12 dB) with a mode at 80 Hz that still ends under the target.
+  const mode = bandResponse({ type: 'PK', freq: 80, gain: 9, q: 5 }, GRID);
+  const curve = GRID.map((f, i) => 85 + (f < 250 ? -12 : 0) + mode[i]);
+  const near80 = (r) => r.bands.filter((b) => Math.abs(Math.log2(b.freq / 80)) < 1 / 6 && b.gain < 0);
+  const surround = designCorrection(curve, {});
+  assert.ok(near80(surround).length, JSON.stringify(surround.bands));
+  assert.ok(near80(surround).every((b) => b.gain >= -6.05), 'never deeper than 6 dB');
+  assert.deepEqual(surround.modesUnder, surround.modes);
+  assert.ok(correctionNotes(surround).some((n) => /under målkurven/.test(n)));
+  const target = designCorrection(curve, { modes: 'target' });
+  assert.equal(near80(target).length, 0, JSON.stringify(target.bands));
+  assert.deepEqual(target.modes, []);
+});
+
+test('channel guesses from names', () => {
+  assert.deepEqual(['L', 'Venstre 2', 'Left', 'R', 'højre', 'L+R jun. 4', 'Måling 1'].map(guessChannel), ['L', 'L', 'L', 'R', 'R', 'LR', 'LR']);
+});
+
+test('left and right measured on their own get their own filters; L+R only is flagged', () => {
+  const left = roomCurve();
+  const right = roomCurve().map((v, i) => v + (GRID[i] > 3000 && GRID[i] < 4500 ? 6 : 0) + 2);
+  const stereo = designRoom([
+    { curve: left, channel: 'L', role: 'design' },
+    { curve: right, channel: 'R', role: 'design' },
+    { curve: right, channel: 'R', role: 'check' },
+  ]);
+  assert.equal(stereo.stereo, true);
+  assert.ok(stereo.bands.some((b) => b.channel === 'L') && stereo.bands.some((b) => b.channel === 'R'));
+  assert.ok(stereo.bands.some((b) => b.channel === 'R' && b.freq > 2500 && b.freq < 5000 && b.gain < 0), 'only the right side has the 3.5 kHz peak');
+  assert.ok(!stereo.bands.some((b) => b.channel === 'L' && b.freq > 2500 && b.freq < 5000 && b.gain < -1));
+  assert.equal(stereo.levelDiff, 2);
+  assert.ok(stereo.checks.R && !stereo.checks.L);
+  assert.ok(roomNotes(stereo).some((n) => /Højre spiller 2 dB højere/.test(n)));
+  const combined = designRoom([{ curve: left, channel: 'LR' }, { curve: right, channel: 'LR' }]);
+  assert.equal(combined.stereo, false);
+  assert.equal(combined.combinedOnly, true);
+  assert.ok(roomNotes(combined).some((n) => /L\+R/.test(n)));
+  assert.ok(combined.bands.every((b) => !b.channel));
+  assert.equal(designRoom([]).bands.length, 0);
+});
+
+test('arrival times from timing-referenced measurements → distances', () => {
+  const m = (channel, peak, usedRef = true) => ({ channel, timing: { usedRef, peak } });
+  assert.deepEqual(measuredDistances([m('L', 0.00875), m('R', 0.00992)]), { distL: 300, distR: 340, diffMs: 1.17 });
+  // A sound card's own delay in the times: only the difference is used.
+  assert.deepEqual(measuredDistances([m('L', 0.5), m('R', 0.501)]), { distL: 300, distR: 334, diffMs: 1 });
+  assert.equal(measuredDistances([m('L', 0.008, false), m('R', 0.009, false)]), null);
+  assert.equal(measuredDistances([m('L', 0.008)]), null);
+});

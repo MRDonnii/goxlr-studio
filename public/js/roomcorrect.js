@@ -103,6 +103,8 @@ export const DEFAULT_MAX_BOOST = 3;
 const BELOW_LOW_MAX = 1.5;
 // A bass peak this much over the bass around it is a room mode (it booms).
 const MODE_MIN = 3;
+// … and is cut at most this much (a deeper cut on a mode that is under the target thins the bass out).
+const MODE_MAX = 6;
 
 /**
  * The target in dB at f: a gentle bass lift (half of it at 120 Hz) and a gentle fall above 1 kHz.
@@ -144,6 +146,10 @@ export function designCorrection(measured, opts = {}) {
   const maxBoost = opts.maxBoost ?? DEFAULT_MAX_BOOST;
   const maxCut = opts.maxCut ?? 12;
   const maxFilters = opts.maxFilters ?? 12;
+  // Room modes: 'surround' = cut towards the bass around them (less boom, also when the bass as a
+  // whole is under the target), 'target' = only what is over the target (like any other peak).
+  const modeMode = opts.modes === 'target' ? 'target' : 'surround';
+  const modeMax = opts.modeMax ?? MODE_MAX;
   const high = Math.min(20000, opts.high ?? 8000);
   const ref = referenceLevel(measured);
   const m = measured.map((x) => x - ref);
@@ -187,7 +193,7 @@ export function designCorrection(measured, opts = {}) {
   const base = smooth(m, 1);
   const prom = (i) => fine[i] - base[i];
   const modeIdx = [];
-  for (let i = Math.max(lo, idx(25)); i <= idx(SCHROEDER); i++) {
+  for (let i = Math.max(lo, idx(25)); modeMode === 'surround' && i <= idx(SCHROEDER); i++) {
     const p = prom(i);
     if (p > MODE_MIN && p >= prom(i - 1) && p >= prom(i + 1) && p >= prom(i - 2) && p >= prom(i + 2)) modeIdx.push(i);
   }
@@ -199,7 +205,8 @@ export function designCorrection(measured, opts = {}) {
     while (a > 0 && prom(a - 1) > p / 2) a--;
     while (b < GRID.length - 1 && prom(b + 1) > p / 2) b++;
     const q = Math.min(10, Math.max(2, peakQ((b - a + 1) / PPO)));
-    const band = { enabled: true, type: 'PK', freq: GRID[i], gain: -Math.min(maxCut, p - 1), q, mode: true };
+    const under = fine[i] < target[i];
+    const band = { enabled: true, type: 'PK', freq: GRID[i], gain: -Math.min(under ? modeMax : maxCut, maxCut, p - 1), q, mode: true, under };
     addResp(band);
     bands.push(band);
   }
@@ -246,7 +253,7 @@ export function designCorrection(measured, opts = {}) {
         // A room mode: down to the bass around it (+1 dB) – and not over the target either.
         const r = Math.max(peakDev(i), fine[i] + eqAt[i] - base[i] - 1);
         addResp(b, -1);
-        b.gain = Math.max(-maxCut, Math.min(0, b.gain - 0.7 * r));
+        b.gain = Math.max(-Math.min(maxCut, b.under ? modeMax : maxCut), Math.min(0, b.gain - 0.7 * r));
         addResp(b);
         continue;
       }
@@ -272,6 +279,8 @@ export function designCorrection(measured, opts = {}) {
   return {
     bands: out,
     modes: bands.filter((b) => b.mode && b.gain <= -0.5).map((b) => Math.round(b.freq)).sort((a, b) => a - b),
+    // Room modes cut although they are under the target (they stand out from the bass around them).
+    modesUnder: bands.filter((b) => b.mode && b.gain <= -0.5 && b.under).map((b) => Math.round(b.freq)).sort((a, b) => a - b),
     preamp: -Math.round((boost + 0.5) * 10) / 10,
     low, high, reference: ref, target, measured: m, predicted,
     before: Math.round(err(m) * 10) / 10,
@@ -289,8 +298,93 @@ export function correctionNotes(res, { calibrated = null } = {}) {
   notes.push(`Retter fra ${res.low} Hz til ${res.high >= 1000 ? `${Math.round(res.high / 100) / 10} kHz` : `${res.high} Hz`}.`);
   if (res.low > 40) notes.push('Længere nede kan højttalerne ikke spille det, så der løftes ikke.');
   if (res.modes?.length) notes.push(`Rumtoppe i bassen ved ${res.modes.join(', ')} Hz dæmpes – det er dem, der får bassen til at runge.`);
+  if (res.modesUnder?.length) notes.push(`Rumtoppene ved ${res.modesUnder.join(', ')} Hz ligger under målkurven, men stikker op over bassen omkring dem – derfor dæmpes de alligevel (højst ${MODE_MAX} dB). Vil du hellere beholde dem, så vælg "Rumtoppe: kun over målkurven".`);
   const cuts = res.bands.filter((x) => x.gain < 0).length, boosts = res.bands.length - cuts;
   notes.push(`${res.bands.length} filtre: ${cuts} dæmper toppe, ${boosts} løfter brede huller (højst så meget, som du har valgt). Smalle huller fyldes ikke op – dem kan EQ ikke rette.`);
   notes.push(`Afvigelse fra målkurven: ${String(res.before).replace('.', ',')} dB før → ${String(res.after).replace('.', ',')} dB efter (1/6 oktav).`);
   return notes;
+}
+
+// ---------- Several measurements: left/right, check measurements, timing ----------
+
+/** Which speaker a measurement is of, from its name ("L", "Left", "Venstre", "R 2" …); 'LR' when unsure. */
+export function guessChannel(name) {
+  const n = String(name || '').toLowerCase();
+  if (/l\s*\+\s*r|\blr\b|both|begge|stereo/.test(n)) return 'LR';
+  if (/(^|[^a-zæøå])(l|left|venstre|v)([^a-zæøå]|$)/.test(n)) return 'L';
+  if (/(^|[^a-zæøå])(r|right|højre|h)([^a-zæøå]|$)/.test(n)) return 'R';
+  return 'LR';
+}
+
+/**
+ * The correction from all measurements: meas = [{ curve, channel: 'LR'|'L'|'R', role: 'design'|'check', on }].
+ * With measurements of both speakers on their own, each side gets its own filters (band.channel L/R);
+ * otherwise one correction from all of them. Check measurements (made with the EQ on) are only shown.
+ * Returns { stereo, sides: { all|L|R: result }, bands, preamp, levelDiff (R − L dB), checks: { side: curve } }.
+ */
+export function designRoom(meas, opts = {}) {
+  const use = meas.filter((m) => m.on !== false && m.role !== 'check');
+  const of = (ch) => use.filter((m) => (m.channel || 'LR') === ch).map((m) => m.curve);
+  const L = of('L'), R = of('R');
+  const stereo = L.length > 0 && R.length > 0;
+  const sides = {};
+  let bands = [];
+  if (stereo) {
+    sides.L = designCorrection(powerAverage(L), opts);
+    sides.R = designCorrection(powerAverage(R), opts);
+    bands = [...sides.L.bands.map((b) => ({ ...b, channel: 'L' })), ...sides.R.bands.map((b) => ({ ...b, channel: 'R' }))];
+  } else if (use.length) {
+    sides.all = designCorrection(powerAverage(use.map((m) => m.curve)), opts);
+    bands = sides.all.bands;
+  }
+  const res = Object.values(sides);
+  const checks = {};
+  for (const ch of ['LR', 'L', 'R']) {
+    const c = meas.filter((m) => m.on !== false && m.role === 'check' && (m.channel || 'LR') === ch).map((m) => m.curve);
+    if (c.length) { const avg = powerAverage(c); const ref = referenceLevel(avg); checks[ch === 'LR' ? 'all' : ch] = avg.map((v) => v - ref); }
+  }
+  return {
+    stereo,
+    combinedOnly: !stereo && use.length > 0,
+    sides,
+    bands,
+    preamp: res.length ? Math.min(...res.map((r) => r.preamp)) : 0,
+    levelDiff: stereo ? Math.round((referenceLevel(powerAverage(R)) - referenceLevel(powerAverage(L))) * 10) / 10 : null,
+    checks,
+  };
+}
+
+/** Notes for the whole set: L/R level difference, only L+R measurements. */
+export function roomNotes(room) {
+  const notes = [];
+  if (room.combinedOnly) notes.push('Alle målinger er af begge højttalere på én gang (L+R) – forskelle mellem dem kan gemme sig. Mål venstre og højre hver for sig og markér dem, så får hver side sin egen korrektion.');
+  if (room.stereo) notes.push('Venstre og højre er målt hver for sig – hver side får sine egne filtre.');
+  if (room.levelDiff != null && Math.abs(room.levelDiff) >= 1) {
+    const d = String(Math.abs(room.levelDiff)).replace('.', ',');
+    notes.push(room.levelDiff > 0
+      ? `Højre spiller ${d} dB højere end venstre i mellemtonen – ret det med Balance under Lytte-forbedringer (eller med forstærkeren).`
+      : `Venstre spiller ${d} dB højere end højre i mellemtonen – ret det med Balance under Lytte-forbedringer (eller med forstærkeren).`);
+  }
+  return notes;
+}
+
+/**
+ * Arrival times from measurements made with a timing reference (REW: loopback or acoustic) →
+ * distances in cm for the Højttalere card (sound travels 343 m/s). null when there is nothing to go on.
+ */
+export function measuredDistances(meas) {
+  const t = (ch) => {
+    const ts = meas.filter((m) => m.channel === ch && m.timing?.usedRef && Number.isFinite(m.timing.peak)).map((m) => m.timing.peak);
+    return ts.length ? ts.reduce((a, b) => a + b, 0) / ts.length : null;
+  };
+  const tl = t('L'), tr = t('R');
+  if (tl == null || tr == null) return null;
+  let distL = tl * 34300, distR = tr * 34300;
+  // A sound card's own delay can be in the times: keep only the difference, from a normal distance.
+  if (Math.max(distL, distR) > 2000 || Math.min(distL, distR) <= 0) {
+    const diff = (tr - tl) * 34300;
+    distL = 300 - Math.min(0, diff);
+    distR = 300 + Math.max(0, diff);
+  }
+  return { distL: Math.round(distL), distR: Math.round(distR), diffMs: Math.round((tr - tl) * 100000) / 100 };
 }
