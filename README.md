@@ -30,7 +30,7 @@ GoXLR'en er en mixer fra TC-Helicon. For at styre den fra Windows bruger man nor
 
 ### Mixer
 
-Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved hver kanal, mute og valg af kilde. Under dem ligger alle kanalers lydstyrke og mikrofonens niveau. Øverst skifter du Windows' standard-udgang og -mikrofon med ét klik, fx fra GoXLR "System" til dine højttalere. Topbjælken skifter GoXLR-profil, EQ-preset og scene.
+Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved hver kanal, mute og valg af kilde. Under dem ligger alle kanalers lydstyrke og mikrofonens niveau. Øverst skifter du Windows' standard-udgang og -mikrofon med ét klik, fx fra GoXLR "System" til dine højttalere. Topbjælken skifter GoXLR-profil, EQ-preset og scene. **Spiller nu** viser sangen fra Spotify, browseren m.fl. med afspil/pause, næste og forrige – og de tre findes også som handlinger til genveje, fodpedal, Stream Deck og mobilen.
 
 ### Afspilnings-EQ for hele Windows
 
@@ -49,6 +49,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - **Lyder det forkert?** Vælg fx "skarp" eller "mudret", og EQ'en justeres et lille skridt. Eksport og import af alle presets
 - **EQ pr. app:** fx Call of Duty med fodtrins-EQ og Spotify med musik-EQ på samme tid (Lyd pr. app → EQ pr. app)
 - **EQ pr. kanal:** sit eget preset på Spil, Musik, Chat og System. Apps følger deres kanal, så Spotify får musik-EQ og spillet fodtrins-EQ – og hver GoXLR-profil kan have sit eget sæt
+- **Lige lydniveau:** mål Spil, Musik og Chat, mens de spiller, og de højeste sænkes, så musikken ikke drukner spillet (intet hæves)
 - EQ der skifter med GoXLR-profilen, fx ét preset til "Headset" og et andet til "Speakers"
 - Lyttetest i appen, så du kan høre forskellen med og uden EQ
 
@@ -63,6 +64,8 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 Mikrofon-EQ'en kører i GoXLR'ens egen chip, så den bruger hverken CPU eller giver forsinkelse. Her finder du også gain, noise gate, kompressor og mikrofonprofiler.
 
 **Vælg din mikrofon** blandt 51 modeller, fx Røde NT1, Shure SM7B, Fifine K688 og Audio-Technica AT2020. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. EQ'en er en klar talestemme minus mikrofonens egen klang, tilpasset GoXLR'ens bånd. **Mikrofon-assistenten** lytter til dit rum og din stemme og sætter gain og noise gate, og med **Optag og lyt** hører du resultatet. Er du tilfreds, kan du **dele dine indstillinger** som en fil med en ven.
+
+**Limiter (beskyt mod råb):** ét klik gør GoXLR'ens kompressor til en limiter, så råb og grin ikke klipper på stream, i Discord eller i optagelser. Dine egne kompressor-indstillinger kommer tilbage, når den slås fra.
 
 ### Lyd pr. app
 
@@ -135,6 +138,9 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 
 ![Lyst tema](docs/screenshots/tema-lyst.png)
 
+- **Spiltilstand:** når et spil kører i fuld skærm, stopper Windows' notifikationslyde, og dine egne handlinger kan køre (fx EQ "Fodtrin") – alt kommer tilbage, når spillet slutter
+- **Tidsstyring:** fx kl. 22 → EQ "Sen aften" og loft på hovedtelefonerne, kl. 7 → tilbage igen
+- **Flyt til ny pc:** én fil med indstillinger, genveje, pedaler, regler, EQ-presets og tema – og GoXLR-profiler, mikrofonprofiler, samples og lydbanken. Åbn den på den nye pc, så er alt med
 - **Discord:** GoXLR'ens mute-knap muter også Discord, med det røde ikon
 - Auto-ducking, der skruer ned for musik og spil, mens du taler – eller mens vennerne taler i Discord
 - **Høreværn:** påmindelse efter lang tid med høj lyd og et valgfrit loft for hovedtelefonerne
@@ -148,7 +154,7 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - Lokalt API til fx Stream Deck
 - **Lydtjek**, der finder Windows-indstillinger, som ændrer lyden (fx at Windows skruer ned for spillet under opkald), og retter dem med ét klik
 - Dansk og engelsk: appen følger Windows' sprog og kan skiftes under Indstillinger
-- Backup og en side med **Diagnose**, hvor du kan kopiere eller gemme en rapport (uden adgangskoder), hvis noget driller
+- En side med **Diagnose**, hvor du kan kopiere eller gemme en rapport (uden adgangskoder), hvis noget driller
 - Effekter på den store GoXLR: reverb, echo, pitch, gender, megafon, robot og hardtune
 
 *Billederne er taget med appens demo-data i GoXLR Mini-layout.*

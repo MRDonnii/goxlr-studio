@@ -19,5 +19,8 @@
  "i morgen": "tomorrow",
  "Annullér": "Cancel",
  "Udlign:": "Even out:",
- "Udlignet: {0}": "Evened out: {0}"
+ "Udlignet: {0}": "Evened out: {0}",
+ "Aktiv: {0}": "Active: {0}",
+ "Spiltilstand: {0}{1}": "Game mode: {0}{1}",
+ "spiltilstand: {0}": "game mode: {0}"
 }
