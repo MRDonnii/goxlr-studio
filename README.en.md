@@ -38,7 +38,7 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 
 ![Playback EQ](docs/screenshots/afspilnings-eq.png)
 
-- Parametric EQ with a curve you drag, and undo/redo – or **sliders like in Peace** with gain, frequency, Q and filter type per band and a preamp slider
+- Parametric EQ with a curve you drag, and undo/redo – or **sliders** with gain, frequency, Q and filter type per band and a preamp slider
 - **Left and right ear separately**, band-pass/all-pass and steep low/high cuts (up to 48 dB/octave)
 - **Live spectrum** behind the curve: see where the music or the game has its energy while you adjust the EQ
 - **A/B at the same loudness:** the louder of A and B is turned down, so you hear the difference in sound and not just in volume. With the **blind test** you hear them as X and Y without knowing which is which

@@ -456,7 +456,7 @@ export function outputEqView(ctx) {
     h('label', { class: 'check-inline', title: 'Viser det, der spiller lige nu, bag EQ-kurven – så du kan se, hvor musikken eller spillet har sin energi.' }, specToggle, h('span', {}, 'Live-spektrum')),
     specSel, specStatus);
 
-  // ---- Three ways to edit: Tabel, Sliders (like Peace) and Grafisk kurve ----
+  // ---- Three ways to edit: Tabel, Sliders and Grafisk kurve ----
   const fmtHz = (f) => (f >= 1000 ? `${String(Math.round(f / 100) / 10).replace('.', ',')}k` : String(Math.round(f * 10) / 10).replace('.', ','));
   const fmtGain = (g) => `${g > 0 ? '+' : ''}${String(Math.round(g * 10) / 10).replace('.', ',')}`;
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -479,15 +479,15 @@ export function outputEqView(ctx) {
   };
   const preCol = h('div', { class: 'slider-col peace-col pre-col' }, h('span', { class: 'col-head' }, 'Preamp'), preNum, preRange, h('span', { class: 'slider-hz' }, 'dB'));
 
-  // Sliders like Peace: one column per band with on/off, gain (slider and value), frequency, Q,
+  // Sliders: one column per band with on/off, gain (slider and value), frequency, Q,
   // filter type and ear. These are the same bands as in Tabel.
   const peaceBox = h('div', { class: 'slider-eq', 'data-testid': 'peace-eq' });
-  const PEACE_BW = { 10: 1, 15: 2 / 3, 31: 1 / 3 }; // octaves between the bands
-  const peaceQ = (n) => Math.round((Math.sqrt(2 ** n) / (2 ** n - 1)) * 1000) / 1000;
+  const SLIDER_BW = { 10: 1, 15: 2 / 3, 31: 1 / 3 }; // octaves between the bands
+  const sliderQ = (n) => Math.round((Math.sqrt(2 ** n) / (2 ** n - 1)) * 1000) / 1000;
   const makePeace = async (n) => {
     const count = eq().bands.length;
-    if (count && !(await confirmDialog(`Erstat dine ${count} bånd med ${n} flade Peace-bånd (Q ${String(peaceQ(PEACE_BW[n])).replace('.', ',')})? Ctrl+Z fortryder.`, { ok: 'Erstat' }))) return;
-    eq().bands = SLIDER_SETS[n].map((f) => ({ ...newBand(f, 'PK'), q: peaceQ(PEACE_BW[n]) }));
+    if (count && !(await confirmDialog(`Erstat dine ${count} bånd med ${n} flade bånd (Q ${String(sliderQ(SLIDER_BW[n])).replace('.', ',')})? Ctrl+Z fortryder.`, { ok: 'Erstat' }))) return;
+    eq().bands = SLIDER_SETS[n].map((f) => ({ ...newBand(f, 'PK'), q: sliderQ(SLIDER_BW[n]) }));
     selected = 0; changed(); renderBands();
   };
   const renderPeace = () => {
@@ -523,7 +523,7 @@ export function outputEqView(ctx) {
         type, ear,
         h('button', { class: 'btn sm', title: 'Slet bånd', onclick: (e) => { e.stopPropagation(); eq().bands.splice(i, 1); selected = Math.max(0, Math.min(selected, eq().bands.length - 1)); changed(); renderBands(); } }, '✕'));
     }));
-    if (!eq().bands.length) peaceBox.append(h('div', { class: 'hint' }, 'Ingen bånd endnu – lav 10, 15 eller 31 Peace-bånd ovenfor, eller tryk "+ Bånd".'));
+    if (!eq().bands.length) peaceBox.append(h('div', { class: 'hint' }, 'Ingen bånd endnu – lav 10, 15 eller 31 bånd ovenfor, eller tryk "+ Bånd".'));
     if (graphicActive(eq())) peaceBox.append(h('div', { class: 'hint peace-note' }, 'Der er også en grafisk kurve i dette preset (fx fra AutoEQ) – den lægges oven i båndene. Se "Grafisk kurve".'));
   };
 
@@ -563,7 +563,7 @@ export function outputEqView(ctx) {
   const viewBtns = {};
   const view = () => (['bands', 'sliders', 'graphic'].includes(prefs.eqView) ? prefs.eqView : 'bands');
   renderSliders = () => { if (view() === 'sliders') renderPeace(); else if (view() === 'graphic') renderGraphic(); };
-  const peaceTools = h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Lav Peace-bånd'),
+  const peaceTools = h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Lav sliders'),
     ...[10, 15, 31].map((n) => h('button', { class: 'btn sm', 'data-testid': `peace-make-${n}`, onclick: () => makePeace(n) }, `${n} bånd`)),
     h('span', { class: 'hint' }, 'Dobbeltklik på en slider = 0 dB'));
   const graphicTools = h('div', {},
@@ -585,7 +585,7 @@ export function outputEqView(ctx) {
     renderSliders();
   };
   viewBtns.bands = h('button', { class: 'btn sm', 'data-testid': 'eq-view-bands', onclick: () => setView('bands') }, 'Tabel');
-  viewBtns.sliders = h('button', { class: 'btn sm', 'data-testid': 'eq-view-sliders', title: 'Hvert bånd som en slider med gain, frekvens, Q og filtertype – som i Peace', onclick: () => setView('sliders') }, 'Sliders (som Peace)');
+  viewBtns.sliders = h('button', { class: 'btn sm', 'data-testid': 'eq-view-sliders', title: 'Hvert bånd som en slider med gain, frekvens, Q og filtertype', onclick: () => setView('sliders') }, 'Sliders');
   viewBtns.graphic = h('button', { class: 'btn sm', 'data-testid': 'eq-view-graphic', title: 'En præcis kurve gennem faste bånd (GraphicEQ) – fx fra AutoEQ', onclick: () => setView('graphic') }, 'Grafisk kurve');
   const bandsTable = h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Øre'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody);
 

@@ -36,7 +36,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 
 ![Afspilnings-EQ](docs/screenshots/afspilnings-eq.png)
 
-- Parametrisk EQ med en kurve, du trækker i, og fortryd/gentag – eller **sliders som i Peace** med gain, frekvens, Q og filtertype pr. bånd og en preamp-slider
+- Parametrisk EQ med en kurve, du trækker i, og fortryd/gentag – eller **sliders** med gain, frekvens, Q og filtertype pr. bånd og en preamp-slider
 - **Venstre og højre øre hver for sig**, Band-pass/All-pass og stejle low/high-cut (op til 48 dB/oktav)
 - **Live-spektrum** bag kurven: du ser, hvor musikken eller spillet har sin energi, mens du stiller på EQ'en
 - **A/B ved samme lydstyrke:** den højeste af A og B sænkes, så du hører forskellen i klang og ikke bare i lydstyrke. Med **blindtest** hører du dem som X og Y uden at vide, hvilken er hvilken
