@@ -13,6 +13,7 @@ import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChan
 import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
+import { renamePreset, duplicatePreset, deletePresets, presetUses, copyName, decodeText } from './presetmanage.js';
 
 // An imported EQ counts when it has parametric bands or a GraphicEQ curve (Peace's sliders).
 const hasFilters = (eq) => !!(eq?.bands?.length || eq?.graphic?.length);
@@ -26,12 +27,23 @@ export function warnIgnored(what, ignored) {
 
 // Reads every Peace/APO preset file and stores the non-empty ones as presets. Returns the imported names.
 export async function importPeacePresets(ctx) {
-  const files = await apoListConfigs();
+  let files;
+  try { files = await apoListConfigs(); } catch (e) { throw new Error(`${String(e.message || e)} – vælg mappen med dine presets under EQ → Presets → "Importér mappe…".`); }
+  // config.txt itself (Equalizer APO's own editor, no Peace): read with its Include: lines.
+  try {
+    const cfg = await apoReadConfig();
+    if (cfg && !files.some((f) => f.text.trim() === cfg.trim())) files = [...files, { name: 'Equalizer APO (config.txt)', text: cfg, config: true }];
+  } catch { /* none */ }
   const names = [];
   const skipped = [];
+  const seen = [];
   for (const f of files) {
     const { eq: parsed, ignored } = parseApoConfigReport(f.text);
     if (!hasFilters(parsed)) continue;
+    // config.txt mostly just includes peace.txt – the same filters are not imported twice.
+    const key = JSON.stringify(parsed);
+    if (f.config && seen.includes(key)) continue;
+    seen.push(key);
     skipped.push(...ignored.map((x) => ({ ...x, line: `${f.name}: ${x.line}` })));
     let name = f.name.split(/[\\/]/).pop().replace(/ ParametricEQ$/i, '');
     if (/^peace$/i.test(name)) name = 'Peace (nuværende)';
@@ -679,47 +691,147 @@ export function outputEqView(ctx) {
     rebase(); changed(); renderBands();
     ctx.onStateChanged?.('eq-local');
   };
-  const fileIn = h('input', { type: 'file', accept: '.txt,.cfg,.json,text/plain,application/json', style: { display: 'none' }, 'data-testid': 'preset-file' });
-  fileIn.addEventListener('change', async () => {
-    const f = fileIn.files[0];
-    if (!f) return;
-    const text = await f.text();
-    // A GoXLR Studio preset file (all presets) – added next to yours, nothing is overwritten.
-    if (/^\s*\{/.test(text)) {
-      try {
-        const r = importPresets(state.presets, text);
-        state.presets = r.presets;
-        persist(); renderPresets(); ctx.onStateChanged?.('eq');
-        toast(`Importeret ${r.added.length} preset${r.added.length === 1 ? '' : 's'}: ${r.added.join(', ')}`, 'info');
-      } catch (e) { toast(String(e.message || e)); }
-      fileIn.value = '';
-      return;
+  // Import of files: one APO/AutoEQ file is loaded at once; several files or a folder (fx Peace's
+  // presets or a backup of Equalizer APO's config folder) are added as presets.
+  const importFiles = async (list) => {
+    const files = [...list].filter((f) => /\.(txt|cfg|peace|json)$/i.test(f.name) && f.size <= 512 * 1024);
+    if (!files.length) { toast('Fandt ingen preset-filer (.txt, .cfg, .peace eller .json).'); return; }
+    const many = files.length > 1;
+    const added = [];
+    const skipped = [];
+    const empty = [];
+    for (const f of files) {
+      const text = decodeText(await f.arrayBuffer());
+      // A GoXLR Studio preset file (all presets) – added next to yours, nothing is overwritten.
+      if (/^\s*\{/.test(text)) {
+        try { const r = importPresets(state.presets, text); state.presets = r.presets; added.push(...r.added); } catch (e) { toast(`${f.name}: ${String(e.message || e)}`); }
+        continue;
+      }
+      const path = f.webkitRelativePath || f.name;
+      if (many && /(^|[\\/])config\.txt$/i.test(path)) continue; // just Include: lines – the presets are the other files
+      const { eq: parsed, ignored } = parseApoConfigReport(text);
+      if (!hasFilters(parsed)) { empty.push(f.name); continue; }
+      skipped.push(...ignored.map((x) => ({ ...x, line: `${f.name}: ${x.line}` })));
+      let name = f.name.replace(/\.(txt|cfg|peace)$/i, '').replace(/ ParametricEQ$/i, '');
+      if (/^peace$/i.test(name)) name = 'Peace (nuværende)';
+      if (!many) {
+        warnIgnored(f.name, ignored);
+        state.presets[name] = parsed;
+        loadEq(parsed, name);
+        ctx.onStateChanged?.('eq');
+        toast(`Importeret "${name}" – ${parsed.bands.length} filtre`, 'info');
+        return;
+      }
+      const same = Object.keys(state.presets).find((k) => k.toLowerCase() === name.toLowerCase());
+      if (same && !presetModified(parsed, state.presets[same])) continue; // the same filters are there already
+      if (same) name = copyName(state.presets, same);
+      state.presets[name] = parsed;
+      added.push(name);
     }
-    const { eq: parsed, ignored } = parseApoConfigReport(text);
-    if (!hasFilters(parsed)) { toast('Fandt ingen filtre i filen.'); warnIgnored(f.name, ignored); return; }
-    warnIgnored(f.name, ignored);
-    const name = f.name.replace(/\.(txt|cfg)$/i, '').replace(/ ParametricEQ$/i, '');
-    state.presets[name] = parsed;
-    loadEq(parsed, name);
+    warnIgnored('Import', skipped);
+    if (!added.length) { toast(empty.length ? `Fandt ingen filtre i ${empty.length === 1 ? empty[0] : `de ${empty.length} filer`}.` : 'Ingen nye presets – de findes allerede.'); return; }
+    await storeSet('output-eq', state);
+    toast(`Importeret ${added.length} preset${added.length === 1 ? '' : 's'}: ${added.slice(0, 8).join(', ')}${added.length > 8 ? ' …' : ''}`, 'info');
     ctx.onStateChanged?.('eq');
-    toast(`Importeret "${name}" – ${parsed.bands.length} filtre`, 'info');
-    fileIn.value = '';
-  });
+  };
+  const fileIn = h('input', { type: 'file', multiple: true, accept: '.txt,.cfg,.peace,.json,text/plain,application/json', style: { display: 'none' }, 'data-testid': 'preset-file' });
+  fileIn.addEventListener('change', async () => { const fl = [...fileIn.files]; fileIn.value = ''; if (fl.length) await importFiles(fl); });
+  const folderIn = h('input', { type: 'file', multiple: true, webkitdirectory: true, style: { display: 'none' }, 'data-testid': 'preset-folder' });
+  folderIn.addEventListener('change', async () => { const fl = [...folderIn.files]; folderIn.value = ''; if (fl.length) await importFiles(fl); });
+
+  // ---- Your own presets: use, rename, copy, delete (one or several) ----
+  const others = () => ({ hotkeys: ctx.hotkeys, pedals: ctx.pedals, deviceTriggers: ctx.deviceTriggers, prefs: ctx.prefs });
+  const presetsChanged = async () => {
+    await storeSet('output-eq', state).catch(() => {});
+    apply();
+    ctx.onStateChanged?.('eq');
+  };
+  const renameOne = async (n) => {
+    const to = await promptDialog(`Nyt navn til "${n}"`, n, { ok: 'Omdøb' });
+    if (to == null || to.trim() === n) return;
+    const r = renamePreset(state, n, to, others());
+    if (!r.ok) { toast(r.error); return; }
+    // Genveje, fodpedaler, enhedsautomatik og tidsstyring that used the old name follow along.
+    if (r.moved) {
+      ctx.saveHotkeys?.();
+      if (ctx.pedals) storeSet('pedals', ctx.pedals).catch(() => {});
+      if (ctx.deviceTriggers) storeSet('device-triggers', ctx.deviceTriggers).catch(() => {});
+      ctx.savePrefs?.();
+    }
+    toast(`Omdøbt til "${to.trim()}"`, 'info');
+    await presetsChanged();
+  };
+  const copyOne = async (n, builtin = false) => {
+    const nn = duplicatePreset(state, n, builtin ? BUILTIN_PRESETS[n] : undefined);
+    if (!nn) return;
+    toast(`Kopieret til "${nn}"`, 'info');
+    await presetsChanged();
+  };
+  const deleteSome = async (names) => {
+    if (!names.length) return;
+    // The uses are translated one by one (t), so the list reads right in English too.
+    const uses = names.flatMap((n) => presetUses(state, n, others()).map((u) => `• ${n}: ${t(u)}`));
+    const head = names.length === 1 ? `Slet "${names[0]}"?` : `Slet ${names.length} presets?`;
+    const msg = uses.length ? `${head}\n\nBruges her:\n${uses.join('\n')}\n\nKoblinger til GoXLR-profiler, kanaler og apps fjernes. Genveje og handlinger skal du selv rette.` : head;
+    if (!(await confirmDialog(msg, { ok: 'Slet', danger: true }))) return;
+    const gone = deletePresets(state, names);
+    marked.clear();
+    toast(gone.length === 1 ? `Slettet "${gone[0]}"` : `Slettet ${gone.length} presets`, 'info');
+    await presetsChanged();
+  };
+  const marked = new Set();
+  const selName = () => { const [k, ...r] = presetSel.value.split(':'); return { builtin: k === 'b', name: r.join(':') }; };
+  const manageList = h('div', { class: 'preset-manage', 'data-testid': 'preset-manage' });
+  const deleteMarkedBtn = h('button', { class: 'btn sm danger', 'data-testid': 'preset-delete-marked', onclick: () => deleteSome([...marked]) });
+  const renderManage = () => {
+    const names = Object.keys(state.presets);
+    for (const n of [...marked]) if (!(n in state.presets)) marked.delete(n);
+    deleteMarkedBtn.textContent = marked.size ? `Slet markerede (${marked.size})` : 'Slet markerede';
+    deleteMarkedBtn.disabled = !marked.size;
+    manageList.replaceChildren(...names.map((n) => {
+      const cb = h('input', { type: 'checkbox', checked: marked.has(n), title: 'Markér (til "Slet markerede")', onchange: () => { if (cb.checked) marked.add(n); else marked.delete(n); renderManage(); } });
+      const icon = (txt, title, fn, id) => h('button', { class: 'btn sm ghost', title, 'aria-label': title, 'data-testid': id, onclick: fn }, txt);
+      return h('div', { class: `preset-row ${state.presetName === n ? 'on' : ''}` }, cb,
+        h('button', { class: 'preset-name', title: 'Brug dette preset', onclick: () => applyEqPreset(ctx, n, 'Presets-listen på EQ-siden') }, n, state.presetName === n ? h('span', { class: 'badge ok' }, 'i brug') : ''),
+        icon('✎', 'Omdøb', () => renameOne(n), 'preset-rename'),
+        icon('⧉', 'Kopiér', () => copyOne(n), 'preset-copy'),
+        icon('✕', 'Slet', () => deleteSome([n]), 'preset-remove'));
+    }));
+    if (!names.length) manageList.append(h('div', { class: 'hint' }, 'Ingen egne presets endnu – gem et med "Gem som…", kopiér et indbygget, eller importér dine Peace/APO-presets.'));
+  };
+  const peaceBtn = h('button', { class: 'btn sm primary', 'data-testid': 'preset-import-peace', onclick: async () => {
+    if (!isNative()) { toast('Peace/APO-presets kan kun hentes automatisk i Windows-appen – brug "Importér mappe…".'); return; }
+    peaceBtn.disabled = true;
+    try {
+      const { names, total } = await importPeacePresets(ctx);
+      toast(names.length ? `Importeret ${names.length} Peace/APO-presets: ${names.slice(0, 8).join(', ')}${names.length > 8 ? ' …' : ''}` : `Fandt ingen presets med filtre (${total} filer gennemset)`, names.length ? 'info' : 'error');
+      if (names.length) ctx.onStateChanged?.('eq');
+    } catch (e) { toast(String(e.message || e)); }
+    peaceBtn.disabled = false;
+  } }, 'Hent Peace/APO-presets');
   const presetsCard = h('div', { class: 'card' }, h('h2', {}, 'Presets'),
     h('div', { class: 'row', style: { flexWrap: 'wrap' } }, presetSel,
-      h('button', { class: 'btn sm', onclick: () => { const [k, ...r] = presetSel.value.split(':'); const n = r.join(':'); loadEq(k === 'u' ? state.presets[n] : BUILTIN_PRESETS[n], k === 'u' ? n : null); } }, 'Indlæs'),
+      h('button', { class: 'btn sm', onclick: () => { const { builtin, name } = selName(); loadEq(builtin ? BUILTIN_PRESETS[name] : state.presets[name], builtin ? null : name); } }, 'Indlæs'),
       h('button', { class: 'btn sm', 'data-testid': 'preset-save-as', onclick: async () => {
-        const n = await promptDialog('Navn på preset', state.presetName || '', { ok: 'Gem' });
+        const n = (await promptDialog('Navn på preset', state.presetName || '', { ok: 'Gem' }))?.trim();
         if (!n) return;
+        const clash = Object.keys(state.presets).find((k) => k.toLowerCase() === n.toLowerCase() && k !== n);
+        if (clash) { toast(`Der findes allerede et preset, der hedder "${clash}"`); return; }
+        if (state.presets[n] && n !== state.presetName && !(await confirmDialog(`Overskriv "${n}"?`, { ok: 'Overskriv' }))) return;
         state.presets[n] = structuredClone(eq()); state.presetName = n; persist(); apply(); renderChannels(); toast(`Gemt "${n}"`, 'info'); ctx.onStateChanged?.('eq');
       } }, 'Gem som…'),
-      h('button', { class: 'btn sm', 'data-testid': 'preset-delete', onclick: async () => {
-        const [k, ...r] = presetSel.value.split(':'); const n = r.join(':');
-        if (k !== 'u' || !(await confirmDialog(`Slet "${n}"?`, { ok: 'Slet', danger: true }))) return;
-        delete state.presets[n]; if (state.presetName === n) state.presetName = null; persist(); apply(); renderChannels(); ctx.onStateChanged?.('eq');
-      } }, 'Slet')),
+      h('button', { class: 'btn sm', 'data-testid': 'preset-rename-selected', onclick: () => { const { builtin, name } = selName(); if (builtin) toast('Indbyggede presets kan ikke omdøbes – kopiér det, så har du dit eget.'); else renameOne(name); } }, 'Omdøb…'),
+      h('button', { class: 'btn sm', 'data-testid': 'preset-copy-selected', onclick: () => { const { builtin, name } = selName(); copyOne(name, builtin); } }, 'Kopiér'),
+      h('button', { class: 'btn sm', 'data-testid': 'preset-delete', onclick: () => { const { builtin, name } = selName(); if (builtin) toast('Indbyggede presets kan ikke slettes.'); else deleteSome([name]); } }, 'Slet')),
+    h('h3', { style: { marginTop: '12px' } }, 'Mine presets'),
+    manageList,
+    h('div', { class: 'row wrap' }, deleteMarkedBtn,
+      h('button', { class: 'btn sm', 'data-testid': 'preset-mark-all', onclick: () => { const all = Object.keys(state.presets); if (marked.size === all.length) marked.clear(); else all.forEach((n) => marked.add(n)); renderManage(); } }, 'Markér alle/ingen')),
+    h('h3', { style: { marginTop: '12px' } }, 'Importér og eksportér'),
     h('div', { class: 'row wrap' },
-      h('button', { class: 'btn sm', 'data-testid': 'preset-import-file', onclick: () => fileIn.click() }, 'Importér (APO, AutoEQ, presetfil)…'),
+      peaceBtn,
+      h('button', { class: 'btn sm', 'data-testid': 'preset-import-file', onclick: () => fileIn.click() }, 'Importér filer (APO, AutoEQ, Peace, presetfil)…'),
+      h('button', { class: 'btn sm', 'data-testid': 'preset-import-folder', title: 'Fx Equalizer APO’s config-mappe eller en backup af den – alle presets i mappen importeres.', onclick: () => folderIn.click() }, 'Importér mappe…'),
       h('button', { class: 'btn sm', onclick: async () => {
         const txt = await promptDialog('Indsæt Equalizer APO-konfiguration (Preamp/Filter-linjer):', '', { ok: 'Indsæt', input: { multiline: true, placeholder: 'Preamp: -6 dB\nFilter 1: ON PK Fc 100 Hz Gain 3 dB Q 1.41' } });
         if (!txt) return;
@@ -739,8 +851,9 @@ export function outputEqView(ctx) {
         const a = h('a', { href: URL.createObjectURL(blob), download: `${state.presetName || 'GoXLR Studio'} ParametricEQ.txt` });
         a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
       } }, 'Eksportér (APO-format)'),
-      fileIn),
-    h('div', { class: 'hint' }, 'Dine gamle Equalizer APO-filer og AutoEQ-profiler til hovedtelefoner (ParametricEQ.txt) kan importeres direkte.'));
+      fileIn, folderIn),
+    h('div', { class: 'hint' }, '"Hent Peace/APO-presets" finder dem selv – også efter Equalizer APO er afinstalleret (fra GoXLR Studios backups). Ellers vælg filerne eller mappen. AutoEQ-profiler (ParametricEQ.txt) kan også importeres.'));
+  renderManage();
   renderPresets();
 
   // ---- EQ engine: GoXLR Studio's built-in engine, or a separately installed Equalizer APO ----
@@ -753,18 +866,6 @@ export function outputEqView(ctx) {
   const targetWarn = h('div', { class: 'target-warn', 'data-testid': 'eq-target-warning' });
   const soundBox = h('div', { class: 'sound-notes', 'data-testid': 'engine-sound-notes' });
   const renderSound = (notes = []) => soundBox.replaceChildren(...notes.map((l) => h('div', { class: l.startsWith('⚠') ? 'bad' : l.startsWith('✓') ? 'ok' : '' }, l)));
-  const importApoBtn = h('button', { class: 'btn sm', onclick: async () => {
-    try {
-      const text = await apoReadConfig();
-      const { eq: parsed, ignored } = parseApoConfigReport(text);
-      warnIgnored('Peace/APO-opsætningen', ignored);
-      if (!hasFilters(parsed)) { toast('Fandt ingen filtre i din Peace/APO-opsætning.'); return; }
-      state.presets['Min Peace-opsætning'] = parsed;
-      loadEq(parsed, 'Min Peace-opsætning');
-      ctx.onStateChanged?.('eq');
-      toast(`Importeret ${parsed.bands.length} filtre fra din Peace/APO-opsætning`, 'info');
-    } catch (e) { toast(String(e)); }
-  } }, 'Importér nuværende Peace-opsætning');
   const setTarget = (id, name) => {
     state.target = id || null; state.target_name = id ? name || null : null;
     // A choice made here is the user's own (fejl 2: older versions kept one silently).
@@ -848,7 +949,6 @@ export function outputEqView(ctx) {
       list.push(btn('Gendan lyd', '', () => ctx.runAction('restore-sound', 'EQ-siden'), 'engine-restore-sound'));
       list.push(btn('Fjern EQ-motor', '', async () => { if (await confirmDialog('Fjern GoXLR Studios EQ-motor fra alle udgange?', { ok: 'Fjern', danger: true })) run({ action: 'uninstall' }, 'Fjerner EQ-motoren…'); }));
     }
-    if (info.external_config) list.push(importApoBtn);
     engineActions.replaceChildren(...list);
   };
   const renderDevices = () => {

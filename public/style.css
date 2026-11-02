@@ -449,3 +449,15 @@ input.num { width: 64px; }
 .app-volume { display: flex; align-items: center; gap: 6px; min-width: 180px; }
 .app-volume input[type=range] { width: 110px; }
 .deck-steps { margin: 8px 0; padding-left: 20px; line-height: 1.7; }
+
+/* EQ: Mine presets (omdøb/kopiér/slet) */
+.preset-manage { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; margin: 6px 0 8px; border: 1px solid var(--line); border-radius: 9px; padding: 4px; }
+.preset-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 7px; min-width: 0; }
+.preset-row:hover { background: var(--panel-2); }
+.preset-row.on .preset-name { color: var(--accent); }
+.preset-row .preset-name { all: unset; cursor: pointer; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; padding: 3px 0; }
+.preset-row .preset-name .badge { margin-left: 6px; }
+.preset-row .btn.ghost { background: transparent; border-color: transparent; padding: 2px 7px; }
+.preset-row .btn.ghost:hover { border-color: var(--line-hover); }
+.btn.danger:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
+.btn:disabled { opacity: .5; cursor: default; }
