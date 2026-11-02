@@ -100,6 +100,10 @@ Put any action on a key of a Stream Deck, e.g. Streonor, Elgato or Ulanzi. The *
 
 The link also starts GoXLR Studio if the app isn't running.
 
+### Foot pedal
+
+Use a foot pedal as a button – e.g. push-to-talk with your foot. USB pedals that send a key, the Elgato Stream Deck Pedal and MIDI pedals/controllers. Each pedal can run an action when pressed, work while held (push-to-talk/-mute), do two different things on a short press and a hold – and a MIDI fader can control a channel's volume. Press "+ Add pedal" and step on it.
+
 ### Soundboard
 
 Add sounds and play them on the GoXLR's Sample channel – with the GoXLR's routing they reach Discord and your stream. Works on the GoXLR Mini too, which has no sampler of its own.

@@ -98,6 +98,10 @@ Læg enhver handling på en tast på en Stream Deck, fx Streonor, Elgato eller U
 
 Linket starter også GoXLR Studio, hvis appen ikke kører.
 
+### Fodpedal
+
+Brug en fodpedal som knap – fx push-to-talk med foden. USB-pedaler, der sender en tast, Elgato Stream Deck Pedal og MIDI-pedaler/-controllere. Hver pedal kan køre en handling ved tryk, virke mens den holdes (push-to-talk/-mute), gøre to forskellige ting ved kort tryk og hold – og en MIDI-fader kan styre en kanals lydstyrke. Tryk "+ Tilføj pedal" og træd på den.
+
 ### Scener
 
 ![Scener](docs/screenshots/scener.png)
