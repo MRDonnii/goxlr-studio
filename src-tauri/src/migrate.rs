@@ -112,7 +112,7 @@ fn read_small(p: &Path, max: u64) -> Option<String> {
         return None;
     }
     let bytes = std::fs::read(p).ok()?;
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+    Some(crate::apo::decode_text(&bytes))
 }
 
 /// Profile files of one type anywhere in a GoXLR folder (two levels deep).

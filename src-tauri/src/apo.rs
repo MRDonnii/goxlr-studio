@@ -290,7 +290,55 @@ pub fn original_config_dirs() -> Vec<PathBuf> {
     backups.sort();
     backups.reverse();
     dirs.extend(backups.into_iter().map(|b| b.join("config")).filter(|p| p.is_dir()));
+    // The Overflytning page's full backups (%APPDATA%\GoXLR Studio\backup\<tid>) hold a copy too –
+    // the only one left when Equalizer APO was uninstalled some other way.
+    let mut full: Vec<PathBuf> = std::fs::read_dir(crate::migrate::backup_root())
+        .map(|rd| rd.flatten().map(|e| e.path().join("Equalizer APO config")).filter(|p| p.is_dir()).collect())
+        .unwrap_or_default();
+    full.sort();
+    full.reverse();
+    dirs.extend(full);
     dirs
+}
+
+/// Reads a text file the way Notepad does: UTF-16 or UTF-8 with a BOM, UTF-8, otherwise ANSI
+/// (Windows-1252). Peace saves its presets as ANSI, so a device name like "Højttalere" made
+/// `read_to_string` fail and the preset was skipped without a word.
+pub fn read_text(path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(decode_text(&bytes))
+}
+
+pub fn decode_text(bytes: &[u8]) -> String {
+    let utf16 = |b: &[u8], le: bool| {
+        let units: Vec<u16> = b.chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
+        String::from_utf16_lossy(&units)
+    };
+    if let Some(b) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return utf16(b, true);
+    }
+    if let Some(b) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return utf16(b, false);
+    }
+    let b = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    // UTF-16 without a BOM: every other byte of ASCII text is 0.
+    if b.len() >= 4 && b.len() % 2 == 0 && b.iter().skip(1).step_by(2).take(64).all(|&x| x == 0) && b[0] != 0 {
+        return utf16(b, true);
+    }
+    match std::str::from_utf8(b) {
+        Ok(s) => s.to_string(),
+        Err(_) => b.iter().map(|&c| cp1252(c)).collect(),
+    }
+}
+
+fn cp1252(c: u8) -> char {
+    const HIGH: [char; 32] = [
+        '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž', '\u{8f}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}', 'ž', 'Ÿ',
+    ];
+    match c {
+        0x80..=0x9F => HIGH[(c - 0x80) as usize],
+        _ => c as char,
+    }
 }
 
 pub fn original_config_dir() -> Option<PathBuf> {
@@ -298,20 +346,29 @@ pub fn original_config_dir() -> Option<PathBuf> {
 }
 
 pub fn read_current_config() -> Result<String, String> {
-    let dir = original_config_dir().ok_or("Fandt ingen Equalizer APO-opsætning")?;
-    // Older GoXLR Studio versions replaced config.txt and kept the original next to it.
-    let old = dir.join("config.txt.goxlr-studio-backup");
-    let main = if old.exists() { old } else { dir.join("config.txt") };
-    let mut out = String::new();
-    expand(&main, &dir, &mut out, 0)?;
-    Ok(out)
+    let dirs = original_config_dirs();
+    if dirs.is_empty() {
+        return Err("Fandt ingen Equalizer APO-opsætning".into());
+    }
+    let mut last = String::new();
+    for dir in dirs {
+        // Older GoXLR Studio versions replaced config.txt and kept the original next to it.
+        let old = dir.join("config.txt.goxlr-studio-backup");
+        let main = if old.exists() { old } else { dir.join("config.txt") };
+        let mut out = String::new();
+        match expand(&main, &dir, &mut out, 0) {
+            Ok(()) => return Ok(out),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
 }
 
 fn expand(file: &Path, base: &Path, out: &mut String, depth: u8) -> Result<(), String> {
     if depth > 8 {
         return Ok(());
     }
-    let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let text = read_text(file)?;
     out.push_str(&format!("# ---- {} ----\n", file.display()));
     for line in text.lines() {
         if let Some(rest) = line.trim().trim_start_matches('\u{feff}').strip_prefix("Include:") {
@@ -351,7 +408,7 @@ pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
                     }
                     continue;
                 }
-                let is_txt = p.extension().map(|x| x.eq_ignore_ascii_case("txt")).unwrap_or(false);
+                let is_txt = p.extension().map(|x| x.eq_ignore_ascii_case("txt") || x.eq_ignore_ascii_case("peace")).unwrap_or(false);
                 let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
                 if !is_txt || name.eq_ignore_ascii_case("config") || p.metadata().map(|m| m.len() > 512 * 1024).unwrap_or(true) {
                     continue;
@@ -360,7 +417,7 @@ pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
                 if out.iter().any(|c| c.name.eq_ignore_ascii_case(&rel)) {
                     continue;
                 }
-                if let Ok(text) = std::fs::read_to_string(&p) {
+                if let Ok(text) = read_text(&p) {
                     out.push(ConfigFile { name: rel, text });
                 }
             }
@@ -373,6 +430,21 @@ pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_ansi_utf16_and_utf8() {
+        // Peace writes ANSI: "Device: Højttalere" with ø = 0xF8.
+        let ansi = b"Device: H\xf8jttalere\r\nPreamp: -3 dB\r\nFilter1: ON PK Fc 100 Hz Gain 2 dB Q 1.4\r\n";
+        let t = decode_text(ansi);
+        assert!(t.contains("Højttalere") && t.contains("Filter1: ON PK"), "{t}");
+        let utf16: Vec<u8> = [0xFF, 0xFE].into_iter().chain("Preamp: -2 dB æ".encode_utf16().flat_map(|u| u.to_le_bytes())).collect();
+        assert_eq!(decode_text(&utf16), "Preamp: -2 dB æ");
+        let nobom: Vec<u8> = "Preamp: -2 dB".encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        assert_eq!(decode_text(&nobom), "Preamp: -2 dB");
+        let bom: Vec<u8> = [0xEF, 0xBB, 0xBF].into_iter().chain("Preamp: 1 dB ø".bytes()).collect();
+        assert_eq!(decode_text(&bom), "Preamp: 1 dB ø");
+        assert_eq!(decode_text(b"\x96"), "–");
+    }
 
     #[test]
     fn config_is_ascii() {
