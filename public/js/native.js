@@ -103,6 +103,8 @@ export async function engineInfo() {
     schema_required: 2,
     denoise_bundled: true,
     denoise_installed: demoEngine.kind === 'builtin',
+    dynamics_bundled: true,
+    dynamics_installed: demoEngine.kind === 'builtin',
   };
 }
 
@@ -459,6 +461,9 @@ export async function appInfo() {
 // The newest release (GitHub's API shape). The app reads latest.json from the release – no hourly
 // limit – and falls back to GitHub's API itself; the browser demo asks the API directly.
 const RELEASES_API = 'https://api.github.com/repos/MRDonnii/goxlr-studio/releases/latest';
+/** Does this build only install updates from a correctly signed release (update.rs)? */
+export async function updateSigned() { return isNative() ? invoke('update_signed') : false; }
+
 export async function latestRelease() {
   if (isNative()) return invoke('update_check');
   const r = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });

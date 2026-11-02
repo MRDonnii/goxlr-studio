@@ -1,4 +1,5 @@
 import { expandBands } from './eq.js';
+import { dynamicsPayload } from './dynamicsmodel.js';
 // Pure helpers (no DOM) shared by the views and covered by tests/extras.test.mjs.
 
 // ---------- devices ----------
@@ -87,6 +88,7 @@ export function enginePayload(eq, extras = {}, target = null, offset = 0) {
     // Virtuelle højttalere replace crossfeed (both mix the channels); the engine adds them last.
     extra: [...firLines(extras.fir), ...(extras.crossfeed?.enabled && !extras.surround?.enabled ? crossfeedLines(extras.crossfeed) : []), ...channelLines(extras.channels)],
     surround: extras.surround?.enabled ? { angle: Number(extras.surround.angle) || 30, room: Math.round(Number(extras.surround.room) || 0) } : null,
+    dynamics: dynamicsPayload(extras.dynamics),
     target,
   };
 }
@@ -98,7 +100,7 @@ export const PRESET_FILE_TYPE = 'goxlr-studio-eq-presets';
 export function exportPresets(presets, version = '') {
   const clean = Object.fromEntries(Object.entries(presets || {}).map(([n, eq]) => [n, {
     enabled: eq.enabled !== false, preamp: Number(eq.preamp) || 0,
-    bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q, slope, channel }) => ({ enabled, type, freq, gain, q, ...(slope > 12 ? { slope } : {}), ...(channel === 'L' || channel === 'R' ? { channel } : {}) })),
+    bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q, slope, lr, channel }) => ({ enabled, type, freq, gain, q, ...(slope > 12 || lr ? { slope: slope || 12 } : {}), ...(lr ? { lr: true } : {}), ...(channel === 'L' || channel === 'R' ? { channel } : {}) })),
     ...(eq.graphic?.length ? { graphic: eq.graphic } : {}),
   }]));
   return JSON.stringify({ type: PRESET_FILE_TYPE, version: 1, app: version, presets: clean }, null, 1);
@@ -117,7 +119,7 @@ export function importPresets(existing, text) {
   for (const [name, eq] of Object.entries(data.presets)) {
     const bands = (eq?.bands || []).filter(validBand).slice(0, 30).map((b) => ({
       enabled: b.enabled !== false, type: b.type, freq: +b.freq, gain: Math.max(-30, Math.min(30, +b.gain || 0)), q: +b.q,
-      ...([24, 36, 48].includes(+b.slope) ? { slope: +b.slope } : {}),
+      ...(b.lr === true && ['HP', 'LP'].includes(b.type) ? { lr: true, slope: [12, 24, 48].includes(+b.slope) ? +b.slope : 24 } : [24, 36, 48].includes(+b.slope) ? { slope: +b.slope } : {}),
       ...(b.channel === 'L' || b.channel === 'R' ? { channel: b.channel } : {}),
     }));
     let n = String(name).trim().slice(0, 80) || 'Preset';

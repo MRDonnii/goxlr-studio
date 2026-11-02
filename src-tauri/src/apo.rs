@@ -53,6 +53,31 @@ pub struct OutputEq {
     /// Remove noise from the voices (RNNoise VST plugin, see engine::DENOISE_DLL).
     #[serde(default)]
     pub denoise: bool,
+    /// Dynamik: GoXLR Studio's own limiter/compressor plugin (plugins/dynamics), last on every output.
+    #[serde(default)]
+    pub dynamics: Option<Dynamics>,
+}
+
+/// The plugin's 8 parameters, normalised 0–1 in its order (Thresh, Ratio, Attack, Release, Makeup,
+/// LimOn, Ceiling, LimRel – see plugins/dynamics/src/lib.rs).
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct Dynamics {
+    pub params: [f64; 8],
+}
+
+pub const DYNAMICS_PARAMS: [&str; 8] = ["Thresh", "Ratio", "Attack", "Release", "Makeup", "LimOn", "Ceiling", "LimRel"];
+
+/// The "VSTPlugin:" line for the Dynamik plugin (parameters by name, as Equalizer APO sets them).
+pub fn dynamics_line(dll: &str, d: &Dynamics) -> String {
+    let mut line = String::from("VSTPlugin: Library");
+    line.push_str(" \"");
+    line.push_str(dll);
+    line.push('"');
+    for (n, v) in DYNAMICS_PARAMS.iter().zip(d.params.iter()) {
+        line.push_str(&format!(" {n} {:.4}", v.clamp(0.0, 1.0)));
+    }
+    line.push('\n');
+    line
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -140,11 +165,13 @@ pub fn render_with(eq: &OutputEq, device_name: Option<&str>, name_of: &dyn Fn(&s
         if !main.is_empty() {
             out.push_str(&format!("Device: {}\n", main.join("; ")));
             body(&mut out, eq.preamp, &eq.graphic, &eq.bands, &eq.extra, eq.surround, eq.denoise);
+            push_dynamics(&mut out, eq.dynamics);
         }
         for c in eq.channels.iter().filter(|c| c.enabled) {
             if let Some(sel) = selector(&c.target, name_of) {
                 out.push_str(&format!("Device: {sel}\n"));
                 body(&mut out, c.preamp, &c.graphic, &c.bands, &c.extra, c.surround, c.denoise);
+                push_dynamics(&mut out, eq.dynamics);
             }
         }
         return out;
@@ -162,7 +189,15 @@ pub fn render_with(eq: &OutputEq, device_name: Option<&str>, name_of: &dyn Fn(&s
         return out;
     }
     body(&mut out, eq.preamp, &eq.graphic, &eq.bands, &eq.extra, eq.surround, eq.denoise);
+    push_dynamics(&mut out, eq.dynamics);
     out
+}
+
+/// Dynamik last in a section: after the EQ, FIR, crossfeed and virtual speakers.
+fn push_dynamics(out: &mut String, d: Option<Dynamics>) {
+    if let Some(d) = d {
+        out.push_str(&dynamics_line(&engine::dynamics_path().display().to_string(), &d));
+    }
 }
 
 /// "GraphicEQ: 31 2; 62 1.5; …" – numbers rounded to 2 decimals, without trailing zeros.
@@ -244,6 +279,10 @@ pub fn apply(eq: &OutputEq) -> Result<(), String> {
     if !crate::engine::denoise_path().exists() {
         eq.denoise = false;
         eq.channels.iter_mut().for_each(|c| c.denoise = false);
+    }
+    // Dynamik only where its plugin is installed (added by "Test EQ-motoren" on older installs).
+    if !crate::engine::dynamics_path().exists() {
+        eq.dynamics = None;
     }
     let eq = &eq;
     let text = render_with(eq, name.as_deref(), &|id| crate::audio::name_of(id));
@@ -446,6 +485,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dynamics_line_names_every_parameter() {
+        let l = dynamics_line("C:\\Program Files\\GoXLR Studio Engine\\goxlr_studio_dynamics.dll", &Dynamics { params: [0.75, 0.0, 0.5, 0.5, 0.0, 1.0, 2.0, -1.0] });
+        assert_eq!(l, "VSTPlugin: Library \"C:\\Program Files\\GoXLR Studio Engine\\goxlr_studio_dynamics.dll\" Thresh 0.7500 Ratio 0.0000 Attack 0.5000 Release 0.5000 Makeup 0.0000 LimOn 1.0000 Ceiling 1.0000 LimRel 0.0000\n");
+    }
+
+    #[test]
     fn fir_lines_are_checked() {
         assert!(fir_line_ok("If: sampleRate == 48000"));
         assert!(fir_line_ok("Convolution: fir-Min-stue_48k.wav"));
@@ -485,6 +530,7 @@ mod tests {
             surround: None,
             denoise: false,
             graphic: vec![],
+            dynamics: None,
         };
         let text = render(&eq, None);
         assert!(text.is_ascii(), "{text}");
@@ -506,6 +552,7 @@ mod tests {
             surround: None,
             denoise: false,
             graphic: vec![],
+            dynamics: None,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().skip(2).collect();
@@ -540,6 +587,7 @@ mod tests {
             surround: None,
             denoise: false,
             graphic: vec![(100.0, 3.0), (1000.0, -2.0)],
+            dynamics: None,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().skip(2).take(3).collect();
@@ -559,6 +607,7 @@ mod tests {
             surround: None,
             denoise: false,
             graphic: vec![],
+            dynamics: None,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().collect();
@@ -579,6 +628,7 @@ mod tests {
             graphic: vec![],
             surround: Some(crate::surround::Surround { angle: 30.0, room: 1 }),
             denoise: false,
+            dynamics: Some(Dynamics { params: [0.5, 0.0, 0.5, 0.5, 0.0, 1.0, 0.9167, 0.5] }),
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().collect();
@@ -588,9 +638,13 @@ mod tests {
         let conv = lines.iter().position(|l| l.starts_with("Convolution: surround-a30-r1-")).expect(&text);
         assert!(conv > main && conv < chan, "{text}");
         // Noise removal on the channel only, first in its section and only at 48 kHz.
-        let vst = lines.iter().position(|l| l.starts_with("VSTPlugin: Library")).expect(&text);
+        let vst = lines.iter().position(|l| l.starts_with("VSTPlugin: Library") && l.contains("rnnoise")).expect(&text);
         assert!(vst > chan && lines[vst - 1] == "If: sampleRate == 48000" && lines[vst + 1] == "EndIf:", "{text}");
-        assert_eq!(lines.iter().filter(|l| l.starts_with("VSTPlugin")).count(), 1);
+        assert_eq!(lines.iter().filter(|l| l.contains("rnnoise")).count(), 1);
+        // Dynamik last in every section.
+        let dynl: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains("goxlr_studio_dynamics.dll")).map(|(i, _)| i).collect();
+        assert_eq!(dynl.len(), 2, "{text}");
+        assert!(dynl[0] == chan - 1 && dynl[1] == lines.len() - 1, "{text}");
         assert!(main < chan);
         assert!(lines[main..chan].contains(&"Preamp: -2.0 dB") && lines[main..chan].iter().any(|l| l.starts_with("Copy:")));
         assert!(lines[chan..].contains(&"Preamp: -3.0 dB") && !lines[chan..].iter().any(|l| l.starts_with("Copy:")));

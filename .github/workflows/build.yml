@@ -57,6 +57,36 @@ jobs:
           "ENGINE_DIR=$((Resolve-Path engine).Path)" >> $env:GITHUB_ENV
           "ENGINE_VERSION=1.4.2" >> $env:GITHUB_ENV
 
+      # Dynamik: GoXLR Studio's own limiter/compressor VST plugin (plugins/dynamics), tested and built
+      # here and embedded next to the EQ engine like the noise-suppression plugin.
+      - name: Build Dynamik plugin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # From its own folder, so its .cargo/config.toml (static C runtime) applies.
+          Push-Location plugins/dynamics
+          cargo test
+          if ($LASTEXITCODE -ne 0) { throw 'Dynamik tests failed' }
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw 'Dynamik build failed' }
+          Pop-Location
+          Copy-Item plugins/dynamics/target/release/goxlr_studio_dynamics.dll $env:ENGINE_DIR
+
+      # Signed updates: with the repository secret UPDATE_SIGNING_KEY (base64 of 32 random bytes,
+      # an ed25519 private key) the matching public key is built into the app, and latest.json is
+      # signed below. Without the secret everything works as before (unsigned).
+      - name: Update signing key
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:KEY) { Write-Host 'No UPDATE_SIGNING_KEY – updates are not signed'; exit 0 }
+          python -m pip install --quiet cryptography==43.0.3
+          $pub = python -c "import base64,os;from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as K;from cryptography.hazmat.primitives import serialization as s;k=K.from_private_bytes(base64.b64decode(os.environ['KEY'].strip()));print(base64.b64encode(k.public_key().public_bytes(s.Encoding.Raw,s.PublicFormat.Raw)).decode())"
+          if ($LASTEXITCODE -ne 0 -or -not $pub) { throw 'UPDATE_SIGNING_KEY is not a valid key (base64 of 32 bytes)' }
+          Write-Host "Update public key: $pub"
+          "UPDATE_PUBKEY=$pub" >> $env:GITHUB_ENV
+
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
@@ -137,6 +167,16 @@ jobs:
             assets = $assets
           } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM dist/latest.json
           Get-Content dist/latest.json
+
+      - name: Sign latest.json
+        if: steps.rel.outputs.publish == 'true' && env.UPDATE_PUBKEY != ''
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          python -c "import base64,os;from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as K;k=K.from_private_bytes(base64.b64decode(os.environ['KEY'].strip()));d=open('dist/latest.json','rb').read();open('dist/latest.json.sig','w').write(base64.b64encode(k.sign(d)).decode())"
+          if ($LASTEXITCODE -ne 0) { throw 'Signing latest.json failed' }
+          Get-Content dist/latest.json.sig
 
       - name: Release
         if: steps.rel.outputs.publish == 'true'

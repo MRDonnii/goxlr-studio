@@ -9,6 +9,8 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(bundled_engine)");
     println!("cargo:rerun-if-env-changed=ENGINE_DIR");
     println!("cargo:rerun-if-env-changed=ENGINE_VERSION");
+    // Signed updates (update.rs): the public key CI derives from its secret signing key.
+    println!("cargo:rerun-if-env-changed=UPDATE_PUBKEY");
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     if let Ok(dir) = std::env::var("ENGINE_DIR") {
@@ -17,7 +19,8 @@ fn main() {
         if files.iter().all(|f| dir.join(f).is_file()) {
             let mut code = String::from("pub static ENGINE_FILES: &[(&str, &[u8])] = &[\n");
             // Optional: the noise-suppression VST plugin for the chat (only when CI fetched it).
-            let optional = ["rnnoise_stereo.dll"];
+            // … and GoXLR Studio's own limiter/compressor plugin (plugins/dynamics).
+            let optional = ["rnnoise_stereo.dll", "goxlr_studio_dynamics.dll"];
             for f in files.iter().chain(optional.iter().filter(|f| dir.join(f).is_file())) {
                 let p = dir.join(f);
                 println!("cargo:rerun-if-changed={}", p.display());

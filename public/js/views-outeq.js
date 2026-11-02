@@ -1,6 +1,6 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
-import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, EAR_LABEL, usesEars, onEar, expandBands, SLIDER_SETS, graphicGain, resampleGraphic, graphicActive, graphicOnSet, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
+import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, SLOPE_CHOICES, slopeValue, setSlope, EAR_LABEL, usesEars, onEar, expandBands, SLIDER_SETS, graphicGain, resampleGraphic, graphicActive, graphicOnSet, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
 import { chainResponse, chainLoudness, safePreamp, floorBase, balancedPreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
 import { t, language } from './i18n.js';
@@ -14,6 +14,7 @@ import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
 import { roomCorrectionCard, speakersCard } from './views-room.js';
+import { dynamicsCard } from './dynamics.js';
 import { renamePreset, duplicatePreset, deletePresets, presetUses, copyName, decodeText } from './presetmanage.js';
 
 // An imported EQ counts when it has parametric bands or a GraphicEQ curve (Peace's sliders).
@@ -336,9 +337,9 @@ export function outputEqView(ctx) {
           Object.entries(EAR_LABEL).map(([k, v]) => h('option', { value: k, selected: (b.channel || 'all') === k }, v)))),
         h('td', {}, num('freq', 20, 20000, 1), ' Hz'),
         h('td', {}, num('gain', -24, 24, 0.1, !FILTER_TYPES[b.type].gain), ' dB'),
-        h('td', {}, num('q', 0.1, 30, 0.01, b.slope > 12), FILTER_TYPES[b.type].slope
-          ? h('select', { class: 'slope-sel', title: 'Hældning (dB pr. oktav)', 'data-testid': 'band-slope', onchange: (e) => { b.slope = Number(e.target.value); if (b.slope <= 12) delete b.slope; changed(); renderBands(); } },
-            SLOPES.map((sl) => h('option', { value: sl, selected: (b.slope || 12) === sl }, `${sl} dB/okt`)))
+        h('td', {}, num('q', 0.1, 30, 0.01, b.slope > 12 || !!b.lr), FILTER_TYPES[b.type].slope
+          ? h('select', { class: 'slope-sel', title: 'Hældning (dB pr. oktav) – LR = Linkwitz-Riley, til delefiltre', 'data-testid': 'band-slope', onchange: (e) => { setSlope(b, e.target.value); changed(); renderBands(); } },
+            SLOPE_CHOICES.map(([v, l]) => h('option', { value: v, selected: slopeValue(b) === v }, l)))
           : null, warnIcon),
         h('td', {}, h('button', { class: 'btn sm', title: 'Slet bånd', onclick: (e) => { e.stopPropagation(); eq().bands.splice(i, 1); selected = Math.max(0, Math.min(selected, eq().bands.length - 1)); changed(); renderBands(); } }, '✕')));
     }));
@@ -534,14 +535,14 @@ export function outputEqView(ctx) {
       const ear = h('select', { class: 'col-sel', title: 'Hvilket øre båndet gælder for', onchange: () => { if (ear.value === 'all') delete b.channel; else b.channel = ear.value; changed(); renderBands(); } },
         Object.entries(EAR_LABEL).map(([k, v]) => h('option', { value: k, selected: (b.channel || 'all') === k }, v)));
       const slope = FILTER_TYPES[b.type].slope
-        ? h('select', { class: 'col-sel', title: 'Hældning (dB pr. oktav)', onchange: (e) => { b.slope = Number(e.target.value); if (b.slope <= 12) delete b.slope; changed(); renderBands(); } },
-          SLOPES.map((sl) => h('option', { value: sl, selected: (b.slope || 12) === sl }, `${sl} dB/okt`)))
+        ? h('select', { class: 'col-sel', title: 'Hældning (dB pr. oktav) – LR = Linkwitz-Riley, til delefiltre', onchange: (e) => { setSlope(b, e.target.value); changed(); renderBands(); } },
+          SLOPE_CHOICES.map(([v, l]) => h('option', { value: v, selected: slopeValue(b) === v }, l)))
         : null;
       return h('div', { class: `slider-col peace-col ${i === selected ? 'sel' : ''}`, onclick: pick },
         h('span', { class: 'col-head' }, h('span', { class: 'band-dot', style: { background: BAND_COLORS[i % BAND_COLORS.length] } }), String(i + 1), on),
         gainNum, range,
         h('label', { class: 'col-lbl' }, 'Hz'), num('freq', 20, 20000, 1, false, 'peace-freq'),
-        h('label', { class: 'col-lbl' }, 'Q'), num('q', 0.1, 30, 0.01, b.slope > 12, 'peace-q'), slope,
+        h('label', { class: 'col-lbl' }, 'Q'), num('q', 0.1, 30, 0.01, b.slope > 12 || !!b.lr, 'peace-q'), slope,
         type, ear,
         h('button', { class: 'btn sm', title: 'Slet bånd', onclick: (e) => { e.stopPropagation(); eq().bands.splice(i, 1); selected = Math.max(0, Math.min(selected, eq().bands.length - 1)); changed(); renderBands(); } }, '✕'));
     }));
@@ -1134,7 +1135,8 @@ export function outputEqView(ctx) {
         },
       }),
       speakersCard(ctx, { state, save: () => { storeSet('output-eq', state); apply(); } })),
-    h('div', { class: 'grid cols-3' }, chatDenoiseCard(ctx, { state, save: () => storeSet('output-eq', state), apply: () => ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`)) })));
+    h('div', { class: 'grid cols-3' }, chatDenoiseCard(ctx, { state, save: () => storeSet('output-eq', state), apply: () => ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`)) }),
+      dynamicsCard(ctx, { state, save: () => { storeSet('output-eq', state); apply(); } })));
 }
 
 // The Lyttetest's GraphicEQ: an 8192-tap linear-phase FIR from the curve (Hann-windowed), cached.

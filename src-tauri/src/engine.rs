@@ -68,6 +68,15 @@ pub fn denoise_bundled() -> bool {
     ENGINE_FILES.iter().any(|(n, _)| *n == DENOISE_DLL)
 }
 
+/// Dynamik: GoXLR Studio's own limiter/compressor VST plugin (plugins/dynamics, built in CI).
+pub const DYNAMICS_DLL: &str = "goxlr_studio_dynamics.dll";
+pub fn dynamics_path() -> PathBuf {
+    install_dir().join(DYNAMICS_DLL)
+}
+pub fn dynamics_bundled() -> bool {
+    ENGINE_FILES.iter().any(|(n, _)| *n == DYNAMICS_DLL)
+}
+
 /// Files this build carries that an older install doesn't have yet (e.g. the noise-suppression
 /// plugin added in 0.8.0) are added; nothing is overwritten or re-registered.
 fn add_missing_files(log: &mut Vec<String>) {
@@ -412,6 +421,8 @@ pub struct EngineInfo {
     pub denoise_bundled: bool,
     #[serde(default)]
     pub denoise_installed: bool,
+    pub dynamics_bundled: bool,
+    pub dynamics_installed: bool,
 }
 
 fn fx_key(guid: &str) -> String {
@@ -488,6 +499,8 @@ pub fn info() -> EngineInfo {
         schema_required: ENGINE_SCHEMA,
         denoise_bundled: denoise_bundled(),
         denoise_installed: denoise_path().exists(),
+        dynamics_bundled: dynamics_bundled(),
+        dynamics_installed: dynamics_path().exists(),
     }
 }
 
