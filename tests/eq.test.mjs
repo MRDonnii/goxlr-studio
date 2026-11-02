@@ -56,10 +56,27 @@ test('JSON patch applies daemon updates', () => {
   assert.equal(doc.mixers['S1/x'], true);
 });
 
-test('Peace GraphicEQ lines become peaking bands', () => {
+test('Peace/AutoEQ GraphicEQ lines are kept as the exact curve', async () => {
+  const { totalResponse, graphicGain, resampleGraphic, SLIDER_SETS, graphicOnSet } = await import('../public/js/eq.js');
   const eq = parseApoConfig('Preamp: -3 dB\nGraphicEQ: 25 0; 40 0; 63 4; 100 2; 160 0; 250 -2; 400 0');
-  assert.deepEqual(eq.bands.map((b) => [b.freq, b.gain]), [[63, 4], [100, 2], [250, -2]]);
-  assert.ok(eq.bands.every((b) => b.q > 0.5 && b.q < 10));
+  assert.equal(eq.bands.length, 0);
+  assert.equal(eq.graphic.length, 7);
+  // Straight lines between the points on a log axis, the end values beyond them (Equalizer APO).
+  assert.equal(graphicGain(eq.graphic, 63), 4);
+  assert.ok(Math.abs(graphicGain(eq.graphic, Math.sqrt(63 * 100)) - 3) < 1e-9);
+  assert.equal(graphicGain(eq.graphic, 10), 0);
+  assert.equal(graphicGain(eq.graphic, 20000), 0);
+  assert.ok(Math.abs(totalResponse(eq, [63])[0] - 1) < 1e-9);
+  // Out to the engine and back unchanged; two GraphicEQ lines add up.
+  assert.deepEqual(parseApoConfig(toApoConfig(eq)).graphic, eq.graphic);
+  const two = parseApoConfig('GraphicEQ: 100 2; 1000 2\nGraphicEQ: 100 1; 1000 -1');
+  assert.deepEqual(two.graphic, [[100, 3], [1000, 1]]);
+  // A 127-point curve shown on 31 sliders.
+  const on31 = resampleGraphic(eq.graphic, SLIDER_SETS[31]);
+  assert.ok(graphicOnSet(on31, SLIDER_SETS[31]) && !graphicOnSet(eq.graphic, SLIDER_SETS[31]));
+  assert.equal(on31.find((p) => p[0] === 63)[1], 4);
+  // Danish comma decimals only when no period is used.
+  assert.deepEqual(parseApoConfig('GraphicEQ: 100 1,5; 1000 -2,5').graphic, [[100, 1.5], [1000, -2.5]]);
 });
 
 test('GoXLR commands are sent the way serde reads them (one value is not a list)', () => {

@@ -146,6 +146,6 @@ export function blindVerdict(picks) {
 
 /** True when the two slots would sound the same (nothing to compare). */
 export function slotsEqual(a, b) {
-  const key = (eq) => JSON.stringify([!!eq?.enabled, +(eq?.preamp || 0), (eq?.bands || []).filter((x) => x.enabled !== false).map((x) => [x.type, +x.freq, +(x.gain || 0), +x.q])]);
+  const key = (eq) => JSON.stringify([!!eq?.enabled, +(eq?.preamp || 0), (eq?.bands || []).filter((x) => x.enabled !== false).map((x) => [x.type, +x.freq, +(x.gain || 0), +x.q, +(x.slope || 12), x.channel || 'all']), eq?.graphic || []]);
   return key(a) === key(b);
 }

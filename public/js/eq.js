@@ -116,9 +116,54 @@ export const onEar = (b, ear) => !b.channel || b.channel === 'all' || b.channel 
 /** True when some band is for one ear only (then left and right differ). */
 export const usesEars = (eq) => !!eq?.bands?.some((b) => b.enabled !== false && (b.channel === 'L' || b.channel === 'R'));
 
+// ---------- GraphicEQ (Peace's sliders, AutoEQ's GraphicEQ.txt) ----------
+// Equalizer APO plays "GraphicEQ: f g; f g …" as a filter that follows the points exactly: straight
+// lines between them on a log-frequency axis, the end values beyond them (helpers/GainIterator.cpp).
+export function graphicGain(points, f) {
+  if (!points?.length) return 0;
+  if (f <= points[0][0]) return points[0][1];
+  const last = points[points.length - 1];
+  if (f >= last[0]) return last[1];
+  let i = 1;
+  while (points[i][0] < f) i++;
+  const [f0, g0] = points[i - 1], [f1, g1] = points[i];
+  if (g0 === g1) return g0;
+  return g0 + ((Math.log(f) - Math.log(f0)) / (Math.log(f1) - Math.log(f0))) * (g1 - g0);
+}
+
+/** Slider frequencies: 10 bands an octave apart, 15 at 2/3 octave, 31 at 1/3 octave (ISO). */
+export const SLIDER_SETS = {
+  10: [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+  15: [25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 16000],
+  31: [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000],
+};
+
+/** The curve sampled at other frequencies (e.g. a 127-point AutoEQ curve on 31 sliders). */
+export const resampleGraphic = (points, freqs) => freqs.map((f) => [f, Math.round(graphicGain(points, f) * 10) / 10]);
+export const graphicActive = (eq) => !!eq?.graphic?.some((p) => Math.abs(p[1]) > 0.001);
+/** True when the curve's points are exactly a slider set's frequencies. */
+export const graphicOnSet = (points, set) => !!points?.length && points.length === set.length && points.every((p, i) => Math.abs(p[0] - set[i]) < 0.01);
+
+/** "f g; f g" numbers as Equalizer APO reads them (a comma is a decimal mark only if no period is used). */
+export function parseGraphic(text) {
+  const value = String(text).includes('.') ? String(text) : String(text).replace(/,/g, '.');
+  const nums = (value.match(/[-+0-9.eE]+/g) || []).map(Number);
+  const pts = [];
+  for (let i = 0; i + 1 < nums.length; i += 2) if (Number.isFinite(nums[i]) && Number.isFinite(nums[i + 1])) pts.push([nums[i], nums[i + 1]]);
+  return pts.sort((a, b) => a[0] - b[0]);
+}
+
+/** Two GraphicEQ lines one after the other add up – as one curve on all their points. */
+export function addGraphic(a, b) {
+  if (!a?.length) return b;
+  const fs = [...new Set([...a, ...b].map((p) => p[0]))].sort((x, y) => x - y);
+  return fs.map((f) => [f, Math.round((graphicGain(a, f) + graphicGain(b, f)) * 100) / 100]);
+}
+
 /** dB response for one ear ('L' or 'R'); bands for both ears count for both. */
 export function totalResponse(eq, freqs, ear = 'L') {
   const out = new Array(freqs.length).fill(eq.preamp || 0);
+  if (eq.graphic?.length) for (let i = 0; i < out.length; i++) out[i] += graphicGain(eq.graphic, freqs[i]);
   for (const band of eq.bands) {
     if (!band.enabled || !onEar(band, ear)) continue;
     const r = bandResponse(band, freqs);
@@ -233,8 +278,9 @@ export function parseApoConfigReport(text) {
     }
     if (name === 'graphiceq' && ear !== 'all') { skip(line, 'GraphicEQ for kun ét øre importeres ikke'); continue; }
     if (name === 'graphiceq') {
-      const value = rest.includes('.') ? rest : rest.replace(/,/g, '.');
-      eq.bands.push(...graphicEqToBands(value));
+      // Kept as the exact curve (before 0.5.8 it was approximated with peaks – up to 9 dB off).
+      const pts = parseGraphic(rest);
+      if (pts.length) eq.graphic = addGraphic(eq.graphic, pts); else skip(line, 'kunne ikke læse værdien');
       continue;
     }
     if (name !== 'filter') {
@@ -288,26 +334,10 @@ export function ignoredText(ignored, max = 3) {
   return ignored.length > max ? `${shown} og ${ignored.length - max} mere` : shown;
 }
 
-// GraphicEQ lists "freq gain" points; approximate each non-flat point with a peak sized to its neighbours.
-function graphicEqToBands(spec) {
-  const pts = spec.split(';').map((p) => p.trim().split(/\s+/).map(Number)).filter((p) => p.length >= 2 && p.every(Number.isFinite));
-  const out = [];
-  pts.forEach(([f, g], i) => {
-    if (Math.abs(g) < 0.05 || f < 15 || f > 22000) return;
-    const lo = pts[i - 1]?.[0] ?? f / 2;
-    const hi = pts[i + 1]?.[0] ?? f * 2;
-    const n = Math.max(Math.log2(hi / lo) / 2, 0.1);
-    const band = newBand(f, 'PK');
-    band.gain = g;
-    band.q = Math.round((Math.sqrt(Math.pow(2, n)) / (Math.pow(2, n) - 1)) * 1000) / 1000;
-    out.push(band);
-  });
-  return out;
-}
-
 export function toApoConfig(eq) {
   const fmt = (n, d = 2) => Number(n.toFixed(d)).toString();
   const lines = [`Preamp: ${fmt(eq.preamp, 1)} dB`];
+  if (eq.graphic?.length) lines.push(`GraphicEQ: ${eq.graphic.map(([f, g]) => `${fmt(f)} ${fmt(g)}`).join('; ')}`);
   let i = 0;
   const filter = (b) => {
     let line = `Filter ${++i}: ${b.enabled ? 'ON' : 'OFF'} ${APO_EXPORT_TYPE[b.type] || b.type} Fc ${fmt(b.freq, 1)} Hz`;

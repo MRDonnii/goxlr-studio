@@ -1,6 +1,6 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
-import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, EAR_LABEL, usesEars, onEar, expandBands, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
+import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, EAR_LABEL, usesEars, onEar, expandBands, SLIDER_SETS, graphicGain, resampleGraphic, graphicActive, graphicOnSet, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
 import { chainResponse, chainLoudness, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
 import { t, language } from './i18n.js';
@@ -10,6 +10,9 @@ import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChan
 import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
+
+// An imported EQ counts when it has parametric bands or a GraphicEQ curve (Peace's sliders).
+const hasFilters = (eq) => !!(eq?.bands?.length || eq?.graphic?.length);
 
 /** A warning toast when an import left lines out (Delay, Copy, Convolution …), so nothing disappears silently. */
 export function warnIgnored(what, ignored) {
@@ -25,7 +28,7 @@ export async function importPeacePresets(ctx) {
   const skipped = [];
   for (const f of files) {
     const { eq: parsed, ignored } = parseApoConfigReport(f.text);
-    if (!parsed.bands.length) continue;
+    if (!hasFilters(parsed)) continue;
     skipped.push(...ignored.map((x) => ({ ...x, line: `${f.name}: ${x.line}` })));
     let name = f.name.split(/[\\/]/).pop().replace(/ ParametricEQ$/i, '');
     if (/^peace$/i.test(name)) name = 'Peace (nuværende)';
@@ -135,7 +138,7 @@ function autoEqCard(ctx) {
       const r = await fetch(autoEqUrl(e));
       if (!r.ok) throw new Error(`AutoEQ svarede ${r.status}`);
       const { eq: parsed, ignored } = parseApoConfigReport(await r.text());
-      if (!parsed.bands.length) throw new Error('Filen indeholdt ingen filtre');
+      if (!hasFilters(parsed)) throw new Error('Filen indeholdt ingen filtre');
       warnIgnored('AutoEQ', ignored);
       const name = `AutoEQ: ${e.name}`;
       ctx.outputEq.presets[name] = parsed;
@@ -310,7 +313,9 @@ export function outputEqView(ctx) {
           : null, warnIcon),
         h('td', {}, h('button', { class: 'btn sm', title: 'Slet bånd', onclick: (e) => { e.stopPropagation(); eq().bands.splice(i, 1); selected = Math.max(0, Math.min(selected, eq().bands.length - 1)); changed(); renderBands(); } }, '✕')));
     }));
+    renderSliders();
   };
+  let renderSliders = () => {};
 
   const preampIn = h('input', { type: 'number', min: -30, max: 12, step: 0.1 });
   preampIn.addEventListener('change', () => { eq().preamp = Number(preampIn.value); changed(); });
@@ -436,12 +441,68 @@ export function outputEqView(ctx) {
     h('label', { class: 'check-inline', title: 'Viser det, der spiller lige nu, bag EQ-kurven – så du kan se, hvor musikken eller spillet har sin energi.' }, specToggle, h('span', {}, 'Live-spektrum')),
     specSel, specStatus);
 
+  // ---- Sliders (grafisk EQ): Equalizer APO's GraphicEQ, the way Peace's sliders work ----
+  // The curve goes exactly through the sliders (straight lines between them on a log axis) and is
+  // added to the parametric bands. An imported curve (e.g. 127 points from AutoEQ) is shown on the
+  // sliders and turned into slider points when you move one.
+  const sliderBox = h('div', { class: 'slider-eq', 'data-testid': 'slider-eq' });
+  const sliderHint = h('div', { class: 'hint', 'data-testid': 'slider-hint' });
+  const countSel = h('select', { 'data-testid': 'slider-count', onchange: () => { prefs.eqSliders = Number(countSel.value); ctx.savePrefs?.(); renderSliders(); } },
+    [10, 15, 31].map((n) => h('option', { value: n }, `${n} bånd`)));
+  const viewBtns = {};
+  const setView = (v) => {
+    prefs.eqView = v; ctx.savePrefs?.();
+    for (const [k, b] of Object.entries(viewBtns)) b.classList.toggle('on', k === v);
+    bandsTable.style.display = v === 'sliders' ? 'none' : '';
+    sliderPanel.style.display = v === 'sliders' ? '' : 'none';
+    renderSliders();
+  };
+  viewBtns.bands = h('button', { class: 'btn sm', 'data-testid': 'eq-view-bands', onclick: () => setView('bands') }, 'Bånd (parametrisk)');
+  viewBtns.sliders = h('button', { class: 'btn sm', 'data-testid': 'eq-view-sliders', onclick: () => setView('sliders') }, 'Sliders (grafisk)');
+  const fmtHz = (f) => (f >= 1000 ? `${String(Math.round(f / 100) / 10).replace('.', ',')}k` : String(f).replace('.', ','));
+  const fmtGain = (g) => `${g > 0 ? '+' : ''}${String(Math.round(g * 10) / 10).replace('.', ',')}`;
+  renderSliders = () => {
+    if (prefs.eqView !== 'sliders') return;
+    const set = SLIDER_SETS[prefs.eqSliders] || SLIDER_SETS[10];
+    countSel.value = String(set.length);
+    const pts = eq().graphic || [];
+    const onSet = graphicOnSet(pts, set);
+    sliderHint.textContent = pts.length && !onSet
+      ? `Kurven har ${pts.length} punkter (fx fra AutoEQ eller Peace). Sliderne viser den på ${set.length} bånd – flytter du en, bliver kurven til ${set.length} slider-punkter.`
+      : eq().bands.some((b) => b.enabled) ? 'Sliderne lægges oven i de parametriske bånd. Grafen viser det hele.' : '';
+    sliderBox.replaceChildren(...set.map((f, i) => {
+      const val = h('span', { class: 'slider-val' }, fmtGain(graphicGain(pts, f)));
+      const inp = h('input', { type: 'range', min: -15, max: 15, step: 0.5, value: graphicGain(pts, f), 'aria-label': `${fmtHz(f)} Hz`, 'data-testid': `slider-${i}` });
+      const write = (record) => {
+        const cur = eq().graphic || [];
+        const g = graphicOnSet(cur, set) ? cur.map((p) => [...p]) : resampleGraphic(cur, set);
+        g[i][1] = Number(inp.value);
+        eq().graphic = g;
+        val.textContent = fmtGain(g[i][1]);
+        changed(record);
+        if (!record) redraw();
+      };
+      inp.addEventListener('input', () => write(false));
+      inp.addEventListener('change', () => { write(true); renderSliders(); });
+      inp.addEventListener('dblclick', () => { inp.value = 0; write(true); renderSliders(); });
+      return h('div', { class: 'slider-col' }, val, inp, h('span', { class: 'slider-hz' }, fmtHz(f)));
+    }));
+  };
+  const sliderPanel = h('div', { style: { display: 'none' } },
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Antal'), countSel,
+      h('button', { class: 'btn sm', 'data-testid': 'slider-reset', onclick: () => { delete eq().graphic; changed(); renderSliders(); } }, 'Nulstil sliders'),
+      h('span', { class: 'hint' }, 'Dobbeltklik = 0 dB')),
+    sliderHint, sliderBox);
+  const bandsTable = h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Øre'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody);
+
   const editorBody = h('div', {},
     h('div', { class: 'eq-wrap live', style: { marginTop: '12px' } }, specCanvas, canvas),
     spectrumRow,
     h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
     chainLegend, earLegend,
-    h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Øre'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody));
+    h('div', { class: 'row eq-view', style: { margin: '10px 0 4px' } }, viewBtns.bands, viewBtns.sliders),
+    bandsTable, sliderPanel);
+  setView(prefs.eqView === 'sliders' ? 'sliders' : 'bands');
 
   // Blind test: X and Y are A and B in random order each round, the curve is hidden, and both
   // play at the same loudness. After 5 rounds: which one you chose.
@@ -532,7 +593,7 @@ export function outputEqView(ctx) {
       return;
     }
     const { eq: parsed, ignored } = parseApoConfigReport(text);
-    if (!parsed.bands.length) { toast('Fandt ingen filtre i filen.'); warnIgnored(f.name, ignored); return; }
+    if (!hasFilters(parsed)) { toast('Fandt ingen filtre i filen.'); warnIgnored(f.name, ignored); return; }
     warnIgnored(f.name, ignored);
     const name = f.name.replace(/\.(txt|cfg)$/i, '').replace(/ ParametricEQ$/i, '');
     state.presets[name] = parsed;
@@ -561,7 +622,7 @@ export function outputEqView(ctx) {
         if (!txt) return;
         const { eq: parsed, ignored } = parseApoConfigReport(txt);
         warnIgnored('Indsat tekst', ignored);
-        if (!parsed.bands.length) { toast('Fandt ingen filtre.'); return; }
+        if (!hasFilters(parsed)) { toast('Fandt ingen filtre.'); return; }
         loadEq(parsed, null);
       } }, 'Indsæt tekst'),
       h('button', { class: 'btn sm', 'data-testid': 'preset-export-all', title: 'Alle dine presets i én fil – til backup eller til en ven. Importeres med "Importér".', onclick: () => {
@@ -594,7 +655,7 @@ export function outputEqView(ctx) {
       const text = await apoReadConfig();
       const { eq: parsed, ignored } = parseApoConfigReport(text);
       warnIgnored('Peace/APO-opsætningen', ignored);
-      if (!parsed.bands.length) { toast('Fandt ingen filtre i din Peace/APO-opsætning.'); return; }
+      if (!hasFilters(parsed)) { toast('Fandt ingen filtre i din Peace/APO-opsætning.'); return; }
       state.presets['Min Peace-opsætning'] = parsed;
       loadEq(parsed, 'Min Peace-opsætning');
       ctx.onStateChanged?.('eq');
@@ -844,6 +905,28 @@ export function outputEqView(ctx) {
     h('div', { class: 'grid cols-3' }, autoEqCard(ctx)));
 }
 
+// The Lyttetest's GraphicEQ: an 8192-tap linear-phase FIR from the curve (Hann-windowed), cached.
+let impulseCache = { key: '', buf: null };
+function graphicImpulse(ac, points) {
+  const key = `${ac.sampleRate}|${JSON.stringify(points)}`;
+  if (impulseCache.key === key) return impulseCache.buf;
+  const N = 8192, half = N / 2, fs = ac.sampleRate;
+  const mag = new Float64Array(half + 1);
+  for (let k = 0; k <= half; k++) mag[k] = Math.pow(10, graphicGain(points, Math.max(k * fs / N, 1)) / 20);
+  const cos = new Float64Array(N);
+  for (let m = 0; m < N; m++) cos[m] = Math.cos((2 * Math.PI * m) / N);
+  const buf = ac.createBuffer(1, N, fs);
+  const h = buf.getChannelData(0);
+  for (let n = 0; n < N; n++) {
+    const t = n - half;
+    let sum = mag[0] + mag[half] * (t % 2 ? -1 : 1);
+    for (let k = 1; k < half; k++) sum += 2 * mag[k] * cos[(((k * t) % N) + N) % N];
+    h[n] = (sum / N) * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / (N - 1)));
+  }
+  impulseCache = { key, buf };
+  return buf;
+}
+
 function makePreview(getEq, bypassGainDb = () => 0) {
   let ac = null, src = null, chainIn = null, out = null, bypassed = false, kind = null, buffer = null, analyser = null;
   const status = h('span', { class: 'hint' });
@@ -916,6 +999,13 @@ function makePreview(getEq, bypassGainDb = () => 0) {
         }
         return n;
       };
+      // GraphicEQ (sliders): a linear-phase FIR that follows the curve, like the engine's filter.
+      if (graphicActive(eq)) {
+        const conv = ac.createConvolver();
+        conv.normalize = false;
+        conv.buffer = graphicImpulse(ac, eq.graphic);
+        node.connect(conv); node = conv; chainIn.push(conv);
+      }
       node = chain(node, eq.bands.filter((b) => onEar(b, 'all') && b.channel !== 'L' && b.channel !== 'R'));
       // Venstre/højre øre: split, filter each side, merge.
       if (usesEars(eq)) {

@@ -76,6 +76,7 @@ export function exportPresets(presets, version = '') {
   const clean = Object.fromEntries(Object.entries(presets || {}).map(([n, eq]) => [n, {
     enabled: eq.enabled !== false, preamp: Number(eq.preamp) || 0,
     bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q, slope, channel }) => ({ enabled, type, freq, gain, q, ...(slope > 12 ? { slope } : {}), ...(channel === 'L' || channel === 'R' ? { channel } : {}) })),
+    ...(eq.graphic?.length ? { graphic: eq.graphic } : {}),
   }]));
   return JSON.stringify({ type: PRESET_FILE_TYPE, version: 1, app: version, presets: clean }, null, 1);
 }
@@ -98,7 +99,9 @@ export function importPresets(existing, text) {
     }));
     let n = String(name).trim().slice(0, 80) || 'Preset';
     for (let i = 2; n in out; i++) n = `${String(name).trim().slice(0, 74)} (${i})`;
-    out[n] = { enabled: eq?.enabled !== false, preamp: Math.max(-30, Math.min(12, Number(eq?.preamp) || 0)), bands };
+    const graphic = Array.isArray(eq?.graphic) ? eq.graphic.filter((p) => Array.isArray(p) && Number.isFinite(+p[0]) && +p[0] >= 1 && +p[0] <= 48000 && Number.isFinite(+p[1]))
+      .slice(0, 1000).map(([f, g]) => [+f, Math.max(-30, Math.min(30, +g))]).sort((a, b) => a[0] - b[0]) : [];
+    out[n] = { enabled: eq?.enabled !== false, preamp: Math.max(-30, Math.min(12, Number(eq?.preamp) || 0)), bands, ...(graphic.length ? { graphic } : {}) };
     added.push(n);
   }
   return { presets: out, added };
@@ -110,6 +113,7 @@ const bandKey = (b) => [b.enabled !== false, b.type, +b.freq, +(b.gain || 0), +b
 export function presetModified(eq, preset) {
   if (!preset) return false;
   if (Math.abs((eq.preamp || 0) - (preset.preamp || 0)) > 0.01) return true;
+  if (JSON.stringify(eq.graphic || []) !== JSON.stringify(preset.graphic || [])) return true;
   const a = eq.bands.map(bandKey);
   const b = (preset.bands || []).map(bandKey);
   return a.length !== b.length || a.some((k, i) => k !== b[i]);
