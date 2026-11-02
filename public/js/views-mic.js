@@ -1,6 +1,7 @@
 import { h, slider, segmented, selectBox, toggle, throttle, promptDialog, confirmDialog, toast, logActivity } from './ui.js';
 import { MIC_MODELS, USB_ONLY, micSettings, micPresetCommands, describeMic } from './micpresets.js';
 import { GATE_TIMES, RATIOS, ATTACKS, RELEASES, enumIndex } from './micenums.js';
+import { limiterBox } from './miclimiter.js';
 import { analyzeMicTest, micSnapshot, snapshotCommands, SPEECH_TARGET, micShareFile, readMicShare } from './micassist.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
@@ -335,6 +336,7 @@ export function micView(ctx) {
     enumSlider(binder, { label: 'Attack', list: ATTACKS, get: () => mic().compressor.attack, set: (v) => conn.command('SetCompressorAttack', v), fmt: ms }),
     enumSlider(binder, { label: 'Release', list: RELEASES, get: () => mic().compressor.release, set: (v) => conn.command('SetCompressorReleaseTime', v), fmt: ms }),
     slider(binder, { label: 'Make-up gain', min: -6, max: 24, get: () => mic().compressor.makeup_gain, set: (v) => conn.command('SetCompressorMakeupGain', v), fmt: (v) => `${v} dB` }),
+    limiterBox(ctx, binder),
   );
 
   const profiles = h('div', { class: 'card' }, h('h2', {}, 'Mikrofonprofil'));

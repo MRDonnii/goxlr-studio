@@ -1,5 +1,6 @@
 import { MEDIA_COMMANDS } from './media.js';
 import { HEARING_DEFAULTS } from './hearing.js';
+import { setLimiter, limiterSettings } from './miclimiter.js';
 import { playSound, stopSounds, soundNames } from './soundboard.js';
 import { obsScene, streamSafeMusic } from './obs.js';
 import { toast, logActivity } from './ui.js';
@@ -129,6 +130,7 @@ export async function runAction(ctx, id, source = 'handling') {
       ctx.savePrefs?.();
       return notify(ctx, hp.cap ? `Høreværn: hovedtelefoner højst ${hp.max} %` : 'Høreværn: intet loft', 'info');
     }
+    case 'mic-limiter': return setLimiter(ctx, arg === 'on' ? true : arg === 'off' ? false : !limiterSettings(ctx).enabled);
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
     // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
@@ -197,6 +199,7 @@ export async function actionCatalog(ctx) {
   g('Scener', ctx.scenes.map((s) => ({ id: `scene:${s.id}`, label: `Scene "${s.name}"` })));
   g('Mute', [
     { id: 'mute-mic', label: 'Mute/unmute mikrofon (cough)' },
+    { id: 'mic-limiter', label: 'Mikrofon-limiter til/fra' },
     { id: 'cough:MutedToX', label: 'Mute mikrofon' },
     { id: 'cough:Unmuted', label: 'Unmute mikrofon' },
     ...['A', 'B', 'C', 'D'].map((f) => ({ id: `mute-fader:${f}`, label: `Mute fader ${f}${m ? ` (${m.fader_status[f].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[f].channel]})` : ''}` })),
@@ -259,6 +262,7 @@ export function actionLabel(ctx, id) {
     case 'vol-down': return `${CHANNEL_LABEL[arg] || arg} ned`;
     case 'cough': return arg === 'Unmuted' ? 'Unmute mikrofon' : 'Mute mikrofon';
     case 'mute-mic': return 'Mute/unmute mikrofon';
+    case 'mic-limiter': return arg === 'on' ? 'Mikrofon-limiter til' : arg === 'off' ? 'Mikrofon-limiter fra' : 'Mikrofon-limiter til/fra';
     case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
     case 'hold': return arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
     case 'sounds-stop': return 'Stop alle lyde';
