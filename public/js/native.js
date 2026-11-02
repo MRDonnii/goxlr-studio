@@ -324,6 +324,17 @@ export async function migrateBackup(stamp, goxlrDirs, studioJson) {
   return { path: `C:\\Users\\demo\\AppData\\Roaming\\GoXLR Studio\\backup\\${stamp}`, files: 42, bytes: 1234567 };
 }
 
+const demoB64 = (t) => btoa(t);
+export async function moveCollect(dirs) {
+  if (isNative()) return invoke('move_collect', { dirs });
+  return { files: [['profiles', 'Headset.goxlr'], ['profiles', 'Speakers.goxlr'], ['mic-profiles', 'Standard.goxlrMicProfile'], ['sounds', 'Applaus.mp3']]
+    .map(([kind, name]) => ({ kind, name, data: demoB64(`demo ${name}`) })), skipped: [] };
+}
+export async function moveRestore(files, dirs, stamp) {
+  if (isNative()) return invoke('move_restore', { files, dirs, stamp });
+  return { written: files.length, same: 0, skipped: [], backup: null };
+}
+
 export async function migrateCopyProfiles(files, dest) {
   if (isNative()) return invoke('migrate_copy_profiles', { files, dest });
   return files.length;

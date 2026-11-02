@@ -13,6 +13,7 @@ mod media;
 mod meters;
 mod midi;
 mod migrate;
+mod movepc;
 mod mqtt;
 mod obs;
 mod osd;
@@ -317,6 +318,16 @@ async fn migrate_scan() -> Result<migrate::Scan, String> {
 #[tauri::command]
 async fn migrate_backup(stamp: String, goxlr_dirs: Vec<(String, String)>, studio_json: String) -> Result<migrate::BackupResult, String> {
     blocking(move || migrate::backup(&stamp, goxlr_dirs, &studio_json)).await
+}
+
+#[tauri::command]
+async fn move_collect(dirs: Vec<(String, String)>) -> Result<movepc::Collected, String> {
+    blocking(move || Ok(movepc::collect(dirs))).await
+}
+
+#[tauri::command]
+async fn move_restore(files: Vec<movepc::MoveFile>, dirs: Vec<(String, String)>, stamp: String) -> Result<movepc::Restored, String> {
+    blocking(move || movepc::restore(files, dirs, &stamp)).await
 }
 
 #[tauri::command]
@@ -866,6 +877,8 @@ pub fn run() {
             migrate_scan,
             migrate_autostarts,
             migrate_backup,
+            move_collect,
+            move_restore,
             migrate_copy_profiles,
             migrate_disable_startup,
             migrate_stop_ahk,

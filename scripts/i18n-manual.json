@@ -9,5 +9,13 @@
  "{0} (aktiv)": "{0} (active)",
  "{0} dB/okt": "{0} dB/oct",
  "+ Ny": "+ New",
- "Kl.": "At"
+ "Kl.": "At",
+ "GoXLR-profil": "GoXLR profile",
+ "GoXLR-profiler": "GoXLR profiles",
+ "Hent alt fra filen (lavet {0})?": "Get everything from the file (made {0})?",
+ "Indstillinger + {0}.": "Settings + {0}.",
+ "Dine nuværende indstillinger overskrives. Profiler med samme navn, men andet indhold, gemmes i backup-mappen først.": "Your current settings are overwritten. Profiles with the same name but other content are saved in the backup folder first.",
+ "i dag": "today",
+ "i morgen": "tomorrow",
+ "Annullér": "Cancel"
 }

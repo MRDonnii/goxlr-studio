@@ -1,6 +1,6 @@
 import { h, toggle, toast, confirmDialog } from './ui.js';
 import { takeoverMessage } from './extras.js';
-import { isNative, storeGet, storeSet, startDaemon, showOsd, daemonInfo, daemonTakeover } from './native.js';
+import { isNative, startDaemon, showOsd, daemonInfo, daemonTakeover } from './native.js';
 import { DEFAULT_DISCORD_KEY, DEFAULT_DISCORD_DEAF_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { mqttCard } from './mqtt.js';
@@ -9,8 +9,9 @@ import { obsCard } from './obs.js';
 import { appearanceCard } from './theme.js';
 import { mediaCard } from './media.js';
 import { scheduleCard } from './schedule.js';
+import { moveCard } from './movepc.js';
 
-export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking', 'pedals'];
+export { BACKUP_KEYS } from './movepc.js';
 
 export function newToken() {
   const b = new Uint8Array(18);
@@ -134,33 +135,6 @@ export function systemSettings(ctx) {
   renderApi();
   renderRemote();
 
-  // ---- backup ----
-  const fileIn = h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' } });
-  fileIn.addEventListener('change', async () => {
-    const f = fileIn.files[0];
-    fileIn.value = '';
-    if (!f) return;
-    try {
-      const data = JSON.parse(await f.text());
-      if (data.app !== 'goxlr-studio' || !data.data) throw new Error('Ikke en GoXLR Studio-backup');
-      if (!(await confirmDialog(`Gendan backup fra ${new Date(data.created).toLocaleString('da-DK')}? Dine nuværende indstillinger overskrives.`, { ok: 'Gendan' }))) return;
-      for (const k of BACKUP_KEYS) if (k in data.data) await storeSet(k, data.data[k]);
-      toast('Backup gendannet – genindlæser', 'info');
-      setTimeout(() => location.reload(), 600);
-    } catch (e) { toast(`Backup: ${e.message || e}`); }
-  });
-  const backupCard = h('div', { class: 'card' }, h('h2', {}, 'Backup'),
-    h('div', { class: 'row', style: { flexWrap: 'wrap' } },
-      h('button', { class: 'btn sm primary', onclick: async () => {
-        const data = {};
-        for (const k of BACKUP_KEYS) data[k] = await storeGet(k, null);
-        const blob = new Blob([JSON.stringify({ app: 'goxlr-studio', version: ctx.updateState?.current || null, created: new Date().toISOString(), data }, null, 2)], { type: 'application/json' });
-        const a = h('a', { href: URL.createObjectURL(blob), download: `GoXLR Studio backup ${new Date().toISOString().slice(0, 10)}.json` });
-        a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      } }, 'Eksportér alle indstillinger'),
-      h('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Importér backup…'), fileIn),
-    h('div', { class: 'hint' }, 'Genveje, scener, app-regler, EQ-presets og indstillinger i én fil – til en ny pc eller før du eksperimenterer. GoXLR-profiler ligger i GoXLR Utility og er ikke med.'));
-
   // ---- Discord ----
   p.discord ??= { enabled: false, accel: DEFAULT_DISCORD_KEY, cough: true, fader: true };
   const dc = p.discord;
@@ -240,5 +214,5 @@ export function systemSettings(ctx) {
       h('a', { href: `${repo}/releases`, target: '_blank', rel: 'noopener' }, 'Udgivelser')),
     h('div', { class: 'hint' }, 'Motorerne er open source og indgår uændrede. Kildekoden til EQ-motoren ligger ved hver udgivelse.'));
 
-  return h('div', { class: 'grid cols-2' }, appearanceCard(ctx), mediaCard(ctx, binder), scheduleCard(ctx, binder), discordCard, micSafetyCard, hearingCard(ctx), mqttCard(ctx), obsCard(ctx), osdCard, daemonCard, updCard, backupCard, apiCard, aboutCard);
+  return h('div', { class: 'grid cols-2' }, appearanceCard(ctx), mediaCard(ctx, binder), scheduleCard(ctx, binder), discordCard, micSafetyCard, hearingCard(ctx), mqttCard(ctx), obsCard(ctx), osdCard, daemonCard, updCard, moveCard(ctx), apiCard, aboutCard);
 }

@@ -5,7 +5,7 @@ use base64::Engine;
 use serde::Serialize;
 use std::path::PathBuf;
 
-const EXTENSIONS: &[&str] = &["mp3", "wav", "ogg", "oga", "opus", "flac", "m4a", "aac", "webm"];
+pub const EXTENSIONS: &[&str] = &["mp3", "wav", "ogg", "oga", "opus", "flac", "m4a", "aac", "webm"];
 const MAX_BYTES: usize = 20 * 1024 * 1024;
 
 #[derive(Serialize, Debug, PartialEq)]
