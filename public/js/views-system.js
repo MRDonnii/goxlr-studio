@@ -1,6 +1,6 @@
 import { h, toggle, toast, confirmDialog } from './ui.js';
 import { takeoverMessage } from './extras.js';
-import { isNative, startDaemon, showOsd, daemonInfo, daemonTakeover } from './native.js';
+import { isNative, startDaemon, showOsd, daemonInfo, daemonTakeover, updateSigned } from './native.js';
 import { DEFAULT_DISCORD_KEY, DEFAULT_DISCORD_DEAF_KEY } from './discord.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { mqttCard } from './mqtt.js';
@@ -62,6 +62,12 @@ export function systemSettings(ctx) {
 
   // ---- updates ----
   const updInfo = h('div', { class: 'list' });
+  const signedBadge = h('span', { class: 'badge', 'data-testid': 'update-signed' }, '…');
+  updateSigned().then((on) => {
+    signedBadge.className = `badge ${on ? 'ok' : ''}`;
+    signedBadge.textContent = on ? 'Kun signerede opdateringer' : 'Ikke slået til';
+    signedBadge.title = on ? 'Appen installerer kun en udgivelse, hvis dens liste over filer er signeret med GoXLR Studios nøgle.' : 'Denne udgave tjekker kun GitHubs checksum.';
+  }).catch(() => { signedBadge.textContent = '–'; });
   const installBtn = h('button', { class: 'btn sm primary', onclick: () => ctx.installUpdate() }, 'Installér nu');
   const renderUpd = () => {
     const u = ctx.updateState || {};
@@ -71,6 +77,7 @@ export function systemSettings(ctx) {
         u.error ? h('span', { class: 'badge warn', title: u.error }, 'Kunne ikke tjekke') : (u.latest || '–'),
         u.available ? h('span', { class: 'badge ok' }, 'Ny version') : null),
       u.checkedAt ? h('div', { class: 'item' }, 'Sidst tjekket', h('div', { class: 'spacer' }), new Date(u.checkedAt).toLocaleString('da-DK')) : null,
+      h('div', { class: 'item' }, 'Signatur', h('div', { class: 'spacer' }), signedBadge),
       u.error ? h('div', { class: 'item hint', 'data-testid': 'update-error' }, u.error) : null,
       u.failed ? h('div', { class: 'item hint', 'data-testid': 'update-failed' }, u.failed) : null].filter(Boolean));
     installBtn.style.display = u.available && isNative() ? '' : 'none';

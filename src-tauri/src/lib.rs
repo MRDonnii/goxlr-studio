@@ -618,6 +618,11 @@ fn app_info(app: AppHandle) -> AppInfo {
 }
 
 #[tauri::command]
+fn update_signed() -> bool {
+    update::signing_required()
+}
+
+#[tauri::command]
 async fn update_check(app: AppHandle) -> Result<Value, String> {
     update::check(app.package_info().version.to_string()).await
 }
@@ -990,6 +995,7 @@ pub fn run() {
             set_tray_status,
             app_info,
             update_check,
+            update_signed,
             install_update,
             update_result,
             update_log,

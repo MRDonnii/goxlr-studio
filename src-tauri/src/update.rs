@@ -110,6 +110,54 @@ pub fn http_error(status: u16, reset: Option<u64>, now: u64) -> String {
     }
 }
 
+// ---------- Signed updates ----------
+// When CI has the secret UPDATE_SIGNING_KEY, it builds the matching public key into the app
+// (UPDATE_PUBKEY) and signs latest.json (ed25519, latest.json.sig). Such an app installs only what a
+// correctly signed latest.json lists, with the SHA-256 given there – a release someone else uploaded
+// or altered is refused. Apps built without the key work as before.
+const UPDATE_PUBKEY: Option<&str> = option_env!("UPDATE_PUBKEY");
+
+pub fn signing_required() -> bool {
+    UPDATE_PUBKEY.map(|k| !k.trim().is_empty()).unwrap_or(false)
+}
+
+/// Checks an ed25519 signature (base64) of `data` against a public key (base64, 32 bytes).
+pub fn verify_signature(pubkey_b64: &str, data: &[u8], sig_b64: &str) -> Result<(), String> {
+    use base64::Engine;
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let key: [u8; 32] = b64.decode(pubkey_b64.trim()).ok().and_then(|k| k.try_into().ok()).ok_or("Ugyldig offentlig nøgle")?;
+    let sig: [u8; 64] = b64.decode(sig_b64.trim()).ok().and_then(|s| s.try_into().ok()).ok_or("Ugyldig signatur")?;
+    let key = VerifyingKey::from_bytes(&key).map_err(|_| "Ugyldig offentlig nøgle")?;
+    key.verify(data, &Signature::from_bytes(&sig)).map_err(|_| "Signaturen passer ikke".to_string())
+}
+
+/// The (url, sha256) of every file in the last correctly signed latest.json.
+static VERIFIED: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+fn remember_verified(rel: &Value) {
+    let files: Vec<(String, String)> = rel["assets"].as_array().into_iter().flatten()
+        .filter_map(|a| Some((a["browser_download_url"].as_str()?.to_string(), a["digest"].as_str()?.trim_start_matches("sha256:").to_lowercase())))
+        .collect();
+    *VERIFIED.lock().unwrap() = files;
+}
+
+/// With signing required: is this exactly a file (and SHA-256) from the signed latest.json?
+pub fn verified_file(url: &str, sha256: Option<&str>) -> bool {
+    let Some(sha) = sha256.map(|s| s.trim_start_matches("sha256:").to_lowercase()) else { return false };
+    VERIFIED.lock().unwrap().iter().any(|(u, s)| u == url && *s == sha)
+}
+
+/// latest.json (as bytes) checked against its signature; the release marked `signed`.
+pub fn signed_release(json: &[u8], sig: Option<&str>, pubkey: &str) -> Result<Value, String> {
+    let sig = sig.ok_or("Udgivelsen er ikke signeret – den installeres ikke. Hent den selv fra GitHub, hvis du stoler på den.")?;
+    verify_signature(pubkey, json, sig).map_err(|e| format!("Udgivelsens signatur passer ikke ({e}) – den installeres ikke."))?;
+    let mut rel = release_from_json(&String::from_utf8_lossy(json))?;
+    rel["signed"] = json!(true);
+    remember_verified(&rel);
+    Ok(rel)
+}
+
 /// Finds the newest release: latest.json first (no hourly limit), GitHub's API as a fallback.
 #[cfg(windows)]
 pub async fn check(current: String) -> Result<Value, String> {
@@ -118,6 +166,19 @@ pub async fn check(current: String) -> Result<Value, String> {
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
+    if let Some(key) = UPDATE_PUBKEY.filter(|_| signing_required()) {
+        // Signed updates: only latest.json and its signature count (GitHub's API cannot be checked).
+        let r = client.get(LATEST_JSON).send().await.map_err(|e| format!("Kunne ikke kontakte GitHub: {e}"))?;
+        if !r.status().is_success() {
+            return Err(format!("GitHub svarede {} på latest.json", r.status().as_u16()));
+        }
+        let bytes = r.bytes().await.map_err(|e| e.to_string())?;
+        let sig = match client.get(format!("{LATEST_JSON}.sig")).send().await {
+            Ok(r) if r.status().is_success() => r.text().await.ok(),
+            _ => None,
+        };
+        return signed_release(&bytes, sig.as_deref(), key);
+    }
     if let Ok(r) = client.get(LATEST_JSON).send().await {
         if r.status().is_success() {
             if let Ok(rel) = release_from_json(&r.text().await.unwrap_or_default()) {
@@ -345,9 +406,14 @@ fn spawn_helper(_script: &str) -> Result<(), String> {
 /// Downloads and verifies, then starts the helper. The caller exits the app afterwards.
 pub fn prepare(url: &str, sha256: Option<&str>, to: &str, background: bool) -> Result<(), String> {
     let from = env!("CARGO_PKG_VERSION");
+    if signing_required() && !verified_file(url, sha256) {
+        let e = "Filen er ikke fra en korrekt signeret udgivelse – den installeres ikke".to_string();
+        log(&format!("Fejl: {e} ({url})"));
+        return Err(e);
+    }
     log(&format!("Opdatering {from} → {to}: henter {url}"));
     let file = download(url, sha256).inspect_err(|e| log(&format!("Fejl: {e}")))?;
-    log(if sha256.is_some() { "Hentet, og filen matcher GitHubs SHA-256" } else { "Hentet (GitHub opgav ingen SHA-256)" });
+    log(if signing_required() { "Hentet, og filen matcher SHA-256 fra den signerede udgivelse" } else if sha256.is_some() { "Hentet, og filen matcher GitHubs SHA-256" } else { "Hentet (GitHub opgav ingen SHA-256)" });
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let (exe, file, log_file, result) =
         (exe.display().to_string(), file.display().to_string(), log_path().display().to_string(), result_path().display().to_string());
@@ -452,6 +518,30 @@ mod tests {
         assert!(release_from_json("{\"message\":\"Not Found\"}").is_err());
         assert!(release_from_json("{\"tag_name\":\"v0.4.4\"}").is_err());
         assert!(release_from_json("<html>").is_err());
+    }
+
+    #[test]
+    fn signed_latest_json_is_checked_byte_for_byte() {
+        use base64::Engine;
+        use ed25519_dalek::{Signer, SigningKey};
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let key = SigningKey::from_bytes(&[7u8; 32]);
+        let public = b64.encode(key.verifying_key().to_bytes());
+        let json = br#"{"tag_name":"v9.9.9","body":"","assets":[{"name":"a-setup.exe","browser_download_url":"https://github.com/x/releases/download/v9.9.9/a-setup.exe","digest":"sha256:ABCD"}]}"#;
+        let sig = b64.encode(key.sign(json).to_bytes());
+        let rel = signed_release(json, Some(&sig), &public).unwrap();
+        assert_eq!(rel["signed"], json!(true));
+        assert!(verified_file("https://github.com/x/releases/download/v9.9.9/a-setup.exe", Some("sha256:abcd")));
+        assert!(!verified_file("https://github.com/x/releases/download/v9.9.9/a-setup.exe", Some("sha256:ffff")));
+        assert!(!verified_file("https://evil.example/a-setup.exe", Some("abcd")));
+        // One changed byte, a missing or foreign signature: refused.
+        let mut changed = json.to_vec();
+        changed[20] ^= 1;
+        assert!(signed_release(&changed, Some(&sig), &public).is_err());
+        assert!(signed_release(json, None, &public).is_err());
+        let other = b64.encode(SigningKey::from_bytes(&[8u8; 32]).verifying_key().to_bytes());
+        assert!(signed_release(json, Some(&sig), &other).is_err());
+        assert!(verify_signature(&public, json, "not base64!").is_err());
     }
 
     #[test]
