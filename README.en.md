@@ -109,7 +109,7 @@ Put any action on a key of a Stream Deck, e.g. Streonor, Elgato or Ulanzi. The *
 
 The link also starts GoXLR Studio if the app isn't running.
 
-**Plugin for Elgato Stream Deck with status:** keys light up when what they control is on – e.g. red when the mic is muted, or when a profile or EQ preset is in use. The dials on Stream Deck + control volume. Get `GoXLR-Studio.streamDeckPlugin` from the release (or from the Stream Deck page in the app) and double-click it.
+**Plugin for Elgato Stream Deck with status:** keys light up when what they control is on – e.g. red when the mic is muted, or when a profile or EQ preset is in use. The dials on Stream Deck + control volume. Get `GoXLR-Studio.streamDeckPlugin` from the release (or from the Stream Deck page in the app) and double-click it. **Streonor** (MiraBox StreamDock) gets the same plugin with one click on "Install the plugin" on the Stream Deck page.
 
 ### Foot pedal
 

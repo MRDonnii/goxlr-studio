@@ -107,7 +107,7 @@ Læg enhver handling på en tast på en Stream Deck, fx Streonor, Elgato eller U
 
 Linket starter også GoXLR Studio, hvis appen ikke kører.
 
-**Plugin til Elgato Stream Deck med status:** tasterne lyser, når det, de styrer, er slået til – fx rød, når mikrofonen er muted, eller når en profil eller et EQ-preset er i brug. Drejeknapperne på Stream Deck + styrer lydstyrken. Hent `GoXLR-Studio.streamDeckPlugin` ved udgivelsen (eller fra Stream Deck-siden i appen) og dobbeltklik på den.
+**Plugin til Elgato Stream Deck med status:** tasterne lyser, når det, de styrer, er slået til – fx rød, når mikrofonen er muted, eller når en profil eller et EQ-preset er i brug. Drejeknapperne på Stream Deck + styrer lydstyrken. Hent `GoXLR-Studio.streamDeckPlugin` ved udgivelsen (eller fra Stream Deck-siden i appen) og dobbeltklik på den. **Streonor** (MiraBox StreamDock) får det samme plugin med ét klik på "Installér pluginnet" på Stream Deck-siden.
 
 ### Fodpedal
 
