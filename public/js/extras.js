@@ -1,3 +1,4 @@
+import { expandBands } from './eq.js';
 // Pure helpers (no DOM) shared by the views and covered by tests/extras.test.mjs.
 
 // ---------- devices ----------
@@ -60,7 +61,8 @@ export function enginePayload(eq, extras = {}, target = null, offset = 0) {
   return {
     ...eq,
     preamp,
-    bands: [...eq.bands, ...loud],
+    // A steep low/high cut is several filters in the engine (eq.js expandBand).
+    bands: expandBands([...eq.bands, ...loud]),
     extra: [...(extras.crossfeed?.enabled ? crossfeedLines(extras.crossfeed) : []), ...channelLines(extras.channels)],
     target,
   };
@@ -73,12 +75,12 @@ export const PRESET_FILE_TYPE = 'goxlr-studio-eq-presets';
 export function exportPresets(presets, version = '') {
   const clean = Object.fromEntries(Object.entries(presets || {}).map(([n, eq]) => [n, {
     enabled: eq.enabled !== false, preamp: Number(eq.preamp) || 0,
-    bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q }) => ({ enabled, type, freq, gain, q })),
+    bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q, slope }) => ({ enabled, type, freq, gain, q, ...(slope > 12 ? { slope } : {}) })),
   }]));
   return JSON.stringify({ type: PRESET_FILE_TYPE, version: 1, app: version, presets: clean }, null, 1);
 }
 
-const BAND_TYPES = ['PK', 'LSC', 'HSC', 'HP', 'LP', 'NO'];
+const BAND_TYPES = ['PK', 'LSC', 'HSC', 'HP', 'LP', 'NO', 'BP', 'AP'];
 const validBand = (b) => b && BAND_TYPES.includes(b.type) && Number.isFinite(+b.freq) && +b.freq >= 10 && +b.freq <= 24000 && Number.isFinite(+b.q) && +b.q > 0;
 
 /** Presets from such a file, added to the ones you have: a name that exists gets " (2)". */
@@ -89,7 +91,10 @@ export function importPresets(existing, text) {
   const out = { ...(existing || {}) };
   const added = [];
   for (const [name, eq] of Object.entries(data.presets)) {
-    const bands = (eq?.bands || []).filter(validBand).slice(0, 30).map((b) => ({ enabled: b.enabled !== false, type: b.type, freq: +b.freq, gain: Math.max(-30, Math.min(30, +b.gain || 0)), q: +b.q }));
+    const bands = (eq?.bands || []).filter(validBand).slice(0, 30).map((b) => ({
+      enabled: b.enabled !== false, type: b.type, freq: +b.freq, gain: Math.max(-30, Math.min(30, +b.gain || 0)), q: +b.q,
+      ...([24, 36, 48].includes(+b.slope) ? { slope: +b.slope } : {}),
+    }));
     let n = String(name).trim().slice(0, 80) || 'Preset';
     for (let i = 2; n in out; i++) n = `${String(name).trim().slice(0, 74)} (${i})`;
     out[n] = { enabled: eq?.enabled !== false, preamp: Math.max(-30, Math.min(12, Number(eq?.preamp) || 0)), bands };
@@ -99,7 +104,7 @@ export function importPresets(existing, text) {
 }
 
 // ---------- presets ----------
-const bandKey = (b) => [b.enabled !== false, b.type, +b.freq, +(b.gain || 0), +b.q].join('|');
+const bandKey = (b) => [b.enabled !== false, b.type, +b.freq, +(b.gain || 0), +b.q, +(b.slope || 12)].join('|');
 // True when the active slot no longer matches the preset it was loaded from.
 export function presetModified(eq, preset) {
   if (!preset) return false;

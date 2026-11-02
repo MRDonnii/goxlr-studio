@@ -306,6 +306,22 @@ mod tests {
     }
 
     #[test]
+    fn band_pass_and_all_pass_have_no_gain() {
+        let eq = OutputEq {
+            enabled: true,
+            preamp: 0.0,
+            bands: vec![Band { enabled: true, kind: "BP".into(), freq: 1000.0, gain: 3.0, q: 2.0 }, Band { enabled: true, kind: "AP".into(), freq: 500.0, gain: 0.0, q: 0.7 }],
+            target: None,
+            extra: vec![],
+            devices: None,
+            channels: vec![],
+        };
+        let text = render(&eq, None);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines.contains(&"Filter: ON BP Fc 1000.0 Hz Q 2.000") && lines.contains(&"Filter: ON AP Fc 500.0 Hz Q 0.700"), "{text}");
+    }
+
+    #[test]
     fn channel_eq_writes_one_section_per_output() {
         let pk = |gain| vec![Band { enabled: true, kind: "PK".into(), freq: 1000.0, gain, q: 1.0 }];
         let eq = OutputEq {

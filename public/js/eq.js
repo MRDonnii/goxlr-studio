@@ -2,10 +2,30 @@ export const FILTER_TYPES = {
   PK: { label: 'Peak', gain: true, q: true },
   LSC: { label: 'Low shelf', gain: true, q: true },
   HSC: { label: 'High shelf', gain: true, q: true },
-  HP: { label: 'Low cut', gain: false, q: true },
-  LP: { label: 'High cut', gain: false, q: true },
+  HP: { label: 'Low cut', gain: false, q: true, slope: true },
+  LP: { label: 'High cut', gain: false, q: true, slope: true },
   NO: { label: 'Notch', gain: false, q: true },
+  BP: { label: 'Band-pass', gain: false, q: true },
+  AP: { label: 'All-pass', gain: false, q: true },
 };
+
+/** Low/high cut steepness in dB per octave. 12 = one filter with your Q; steeper = Butterworth. */
+export const SLOPES = [12, 24, 36, 48];
+
+/** Q of each 2nd-order section of a Butterworth filter of the given order (2, 4, 6, 8). */
+export function butterworthQs(order) {
+  const n = Math.max(1, Math.round(order / 2));
+  return Array.from({ length: n }, (_, k) => 1 / (2 * Math.cos((Math.PI * (2 * k + 1)) / (4 * n))));
+}
+
+/** The filters the engine really runs for a band: a steep low/high cut is several sections. */
+export function expandBand(b) {
+  if ((b.type === 'HP' || b.type === 'LP') && b.slope > 12) {
+    return butterworthQs(b.slope / 6).map((q) => ({ ...b, q: Math.round(q * 10000) / 10000, slope: 12 }));
+  }
+  return [b];
+}
+export const expandBands = (bands) => bands.flatMap(expandBand);
 
 export const SAMPLE_RATE = 48000;
 
@@ -60,6 +80,14 @@ export function coefficients(band, fs = SAMPLE_RATE) {
       b0 = 1; b1 = -2 * cos; b2 = 1;
       a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha;
       break;
+    case 'BP':
+      b0 = alpha; b1 = 0; b2 = -alpha;
+      a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha;
+      break;
+    case 'AP':
+      b0 = 1 - alpha; b1 = -2 * cos; b2 = 1 + alpha;
+      a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha;
+      break;
     default:
       b0 = 1 + alpha * A; b1 = -2 * cos; b2 = 1 - alpha * A;
       a0 = 1 + alpha / A; a1 = -2 * cos; a2 = 1 - alpha / A;
@@ -78,8 +106,8 @@ export function magnitudeDb(c, freq, fs = SAMPLE_RATE) {
 }
 
 export function bandResponse(band, freqs) {
-  const c = coefficients(band);
-  return freqs.map((f) => magnitudeDb(c, f));
+  const cs = expandBand(band).map((b) => coefficients(b));
+  return freqs.map((f) => cs.reduce((sum, c) => sum + magnitudeDb(c, f), 0));
 }
 
 export function totalResponse(eq, freqs) {
@@ -103,40 +131,142 @@ export function suggestedPreamp(eq) {
   return peak > 0 ? -Math.ceil(peak * 10) / 10 : 0;
 }
 
-const APO_TYPE_ALIASES = { PK: 'PK', PEQ: 'PK', LS: 'LSC', LSC: 'LSC', HS: 'HSC', HSC: 'HSC', HP: 'HP', HPQ: 'HP', LP: 'LP', LPQ: 'LP', NO: 'NO' };
-
 const APO_EXPORT_TYPE = { HP: 'HPQ', LP: 'LPQ' };
 
-// Parses the Equalizer APO / AutoEQ "ParametricEQ.txt" filter syntax.
-export function parseApoConfig(text) {
-  const eq = { enabled: true, preamp: 0, bands: [] };
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*/, '').trim();
-    const pre = line.match(/^Preamp:\s*(-?[\d.]+)\s*dB/i);
-    if (pre) { eq.preamp += Number(pre[1]); continue; }
-    const geq = line.match(/^GraphicEQ:\s*(.*)$/i);
-    if (geq) { eq.bands.push(...graphicEqToBands(geq[1])); continue; }
-    const m = line.match(/^Filter\s*\d*:\s*(ON|OFF)\s+(\w+)(.*)$/i);
-    if (!m) continue;
-    const type = APO_TYPE_ALIASES[m[2].toUpperCase()];
-    if (!type) continue;
-    const rest = m[3];
-    const fc = rest.match(/Fc\s+(-?[\d.]+)\s*(k?)Hz/i);
-    if (!fc) continue;
-    const gain = rest.match(/Gain\s+(-?[\d.]+)\s*dB/i);
-    const q = rest.match(/\bQ\s+([\d.]+)/i);
-    const bw = rest.match(/BW\s+Oct\s+([\d.]+)/i);
-    const band = newBand(Number(fc[1]) * (fc[2] ? 1000 : 1), type);
-    band.enabled = m[1].toUpperCase() === 'ON';
-    band.gain = gain ? Number(gain[1]) : 0;
-    if (q) band.q = Number(q[1]);
-    else if (bw) {
-      const n = Number(bw[1]);
-      band.q = Math.sqrt(Math.pow(2, n)) / (Math.pow(2, n) - 1);
-    } else if (type === 'LSC' || type === 'HSC' || type === 'HP' || type === 'LP') band.q = 0.707;
-    eq.bands.push(band);
+// Equalizer APO's filter names (BiQuadFilterFactory.cpp). LS/HS become our LSC/HSC below.
+const APO_TYPES = { PK: 'PK', PEQ: 'PK', MODAL: 'PK', LP: 'LP', LPQ: 'LP', HP: 'HP', HPQ: 'HP', BP: 'BP', LS: 'LS', HS: 'HS', LSC: 'LSC', HSC: 'HSC', NO: 'NO', AP: 'AP' };
+
+// Commands GoXLR Studio doesn't import, and what they do (for the warning after an import).
+const NOT_IMPORTED = {
+  copy: 'blander kanalerne', delay: 'forsinkelse', convolution: 'impulssvar (convolution)', vstplugin: 'VST-plugin',
+  include: 'henviser til en anden fil', stage: 'trin i lydmotoren', if: 'betingelse', elseif: 'betingelse', else: 'betingelse',
+  endif: 'betingelse', eval: 'udregning', loudnesscorrection: 'Loudness Correction', channel: 'gælder kun nogle kanaler',
+};
+
+/** Fc as Equalizer APO reads it – including Room EQ Wizard's "1.000" = 1000 Hz. */
+function apoFreq(text) {
+  const s = text.replace(/ /g, '');
+  let f = parseFloat(s);
+  if (s.length >= 5 && !/[eE]/.test(s) && s[s.length - 4] === '.') f *= 1000;
+  return f;
+}
+
+/** Q from "BW Oct n" exactly as the engine computes it (at 48 kHz). */
+export function bwToQ(bw, freq, fs = SAMPLE_RATE) {
+  const w = (2 * Math.PI * Math.min(freq, fs / 2 - 1)) / fs;
+  return 1 / (2 * Math.sinh((Math.LN2 / 2) * bw * (w / Math.sin(w))));
+}
+
+/** Equalizer APO's shelf ("LS"/"HS" with corner frequency, "LSC"/"HSC" with centre frequency, Q or
+ *  slope in dB) as the same filter written as our LSC/HSC with centre frequency and Q. */
+export function apoShelf({ type, freq, gain, q = null, slope = null }) {
+  const center = type === 'LSC' || type === 'HSC';
+  const low = type === 'LS' || type === 'LSC';
+  const A = Math.pow(10, gain / 40);
+  let isS = true, val = 0.9, corner = false; // no Q and no slope: S 0.9 at the centre (APO's default)
+  if (slope != null) { val = slope / 12; corner = !center; }
+  else if (q != null) { isS = false; val = q; corner = !center; }
+  let outQ = val, s = val;
+  if (isS) {
+    const r = (A + 1 / A) * (1 / val - 1) + 2;
+    if (!(r > 0)) return null;
+    outQ = 1 / Math.sqrt(r);
+  } else {
+    s = 1 / ((1 / (val * val) - 2) / (A + 1 / A) + 1);
   }
-  return eq;
+  let f = freq;
+  if (corner) {
+    const factor = Math.pow(10, Math.abs(gain) / 80 / s);
+    f = low ? f * factor : f / factor;
+  }
+  return { type: low ? 'LSC' : 'HSC', freq: f, gain, q: outQ };
+}
+
+const round = (v, d) => Math.round(v * 10 ** d) / 10 ** d;
+
+/** Parses Equalizer APO / Peace / AutoEQ / Room EQ Wizard text the way Equalizer APO reads it.
+ *  `ignored` lists the lines that are not imported, with the reason, so nothing disappears silently. */
+export function parseApoConfigReport(text) {
+  const eq = { enabled: true, preamp: 0, bands: [] };
+  const ignored = [];
+  const skip = (line, reason) => ignored.push({ line: line.length > 90 ? `${line.slice(0, 87)}…` : line, reason });
+  let device = null, stopped = false;
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    const line = rawLine.replace(/#.*/, '').trim();
+    if (!line) continue;
+    const cmd = line.match(/^([A-Za-z]+)\s*\d*\s*:\s*(.*)$/);
+    if (!cmd) continue;
+    const name = cmd[1].toLowerCase();
+    let rest = cmd[2];
+    if (name === 'device') {
+      // Peace/APO configs can hold one section per device; only the first one is imported.
+      if (device !== null && rest.trim() !== device && (eq.bands.length || eq.preamp)) {
+        if (!stopped) skip(line, 'filen har EQ til flere enheder – kun den første blev importeret');
+        stopped = true;
+      }
+      device ??= rest.trim();
+      continue;
+    }
+    if (stopped) continue;
+    if (name === 'preamp') {
+      const pre = rest.replace(/,/g, '.').match(/^([-+0-9.eE]+)\s*dB/i);
+      if (pre) eq.preamp = round(eq.preamp + Number(pre[1]), 2); else skip(line, 'kunne ikke læse værdien');
+      continue;
+    }
+    if (name === 'graphiceq') {
+      const value = rest.includes('.') ? rest : rest.replace(/,/g, '.');
+      eq.bands.push(...graphicEqToBands(value));
+      continue;
+    }
+    if (name !== 'filter') {
+      skip(line, NOT_IMPORTED[name] ? `${cmd[1]}: ${NOT_IMPORTED[name]}` : `${cmd[1]}: kendes ikke`);
+      continue;
+    }
+    const p = rest.replace(/,/g, '.');
+    const tm = p.match(/^\s*(ON|OFF)\s+([A-Za-z]+)/i);
+    if (!tm) { skip(line, 'kunne ikke læse filteret'); continue; }
+    if (/^none$/i.test(tm[2])) continue;
+    const apoType = APO_TYPES[tm[2].toUpperCase()];
+    if (!apoType) { skip(line, `filtertypen ${tm[2]} kendes ikke`); continue; }
+    const after = p.slice(tm[0].length);
+    const fc = after.match(/\s+Fc\s*([-+0-9.eE ]+)\s*(k?)H\s*z/i);
+    if (!fc) { skip(line, 'mangler Fc (frekvens)'); continue; }
+    const freq = apoFreq(fc[1]) * (fc[2] ? 1000 : 1);
+    const gainM = after.match(/\s+Gain\s*([-+0-9.eE]+)\s*dB/i);
+    const qM = after.match(/\s+Q\s*([-+0-9.eE]+)/i);
+    const bwM = after.match(/\s+BW\s+Oct\s*([-+0-9.eE]+)/i);
+    const slopeM = after.match(/^\s*([-+0-9.eE]+)\s*dB/i);
+    const gain = gainM ? Number(gainM[1]) : 0;
+    const shelf = apoType === 'LS' || apoType === 'HS' || apoType === 'LSC' || apoType === 'HSC';
+    const hasGain = shelf || apoType === 'PK';
+    if (hasGain && !gainM) { skip(line, 'mangler Gain'); continue; }
+    let band;
+    if (shelf) {
+      const q = qM ? Number(qM[1]) : null;
+      band = apoShelf({ type: apoType, freq, gain, q: q || null, slope: slopeM ? Number(slopeM[1]) : null });
+      if (!band) { skip(line, 'hældningen er for stejl til den forstærkning'); continue; }
+    } else {
+      let q = qM ? Number(qM[1]) : 0;
+      if (bwM) q = bwToQ(Number(bwM[1]), freq);
+      if (!q) {
+        if (apoType === 'PK' || apoType === 'AP') { skip(line, 'mangler Q eller båndbredde'); continue; }
+        q = apoType === 'NO' ? 30 : Math.SQRT1_2;
+      }
+      band = { type: apoType, freq, gain: hasGain ? gain : 0, q };
+    }
+    eq.bands.push({ ...newBand(round(band.freq, 2), band.type), gain: round(band.gain, 2), q: round(band.q, 4), enabled: tm[1].toUpperCase() === 'ON' });
+  }
+  return { eq, ignored };
+}
+
+/** Parses Equalizer APO / AutoEQ "ParametricEQ.txt" text; see parseApoConfigReport for what is left out. */
+export const parseApoConfig = (text) => parseApoConfigReport(text).eq;
+
+/** One line for a toast: what an import left out. */
+export function ignoredText(ignored, max = 3) {
+  if (!ignored?.length) return '';
+  const shown = ignored.slice(0, max).map((x) => `"${x.line}" (${x.reason})`).join(', ');
+  return ignored.length > max ? `${shown} og ${ignored.length - max} mere` : shown;
 }
 
 // GraphicEQ lists "freq gain" points; approximate each non-flat point with a peak sized to its neighbours.
@@ -159,7 +289,7 @@ function graphicEqToBands(spec) {
 export function toApoConfig(eq) {
   const fmt = (n, d = 2) => Number(n.toFixed(d)).toString();
   const lines = [`Preamp: ${fmt(eq.preamp, 1)} dB`];
-  eq.bands.forEach((b, i) => {
+  expandBands(eq.bands).forEach((b, i) => {
     let line = `Filter ${i + 1}: ${b.enabled ? 'ON' : 'OFF'} ${APO_EXPORT_TYPE[b.type] || b.type} Fc ${fmt(b.freq, 1)} Hz`;
     if (FILTER_TYPES[b.type].gain) line += ` Gain ${fmt(b.gain, 1)} dB`;
     line += ` Q ${fmt(b.q, 3)}`;

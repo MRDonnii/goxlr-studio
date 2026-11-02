@@ -1,6 +1,6 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
-import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, newBand, defaultOutputEq, totalResponse, bandResponse, parseApoConfig, toApoConfig, coefficients, formatFreq } from './eq.js';
+import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, expandBands, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
 import { chainResponse, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
 import { t } from './i18n.js';
@@ -11,13 +11,22 @@ import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
 
+/** A warning toast when an import left lines out (Delay, Copy, Convolution …), so nothing disappears silently. */
+export function warnIgnored(what, ignored) {
+  if (!ignored?.length) return;
+  const list = ignoredText(ignored);
+  toast(ignored.length === 1 ? `${what}: 1 linje blev ikke importeret – ${list}` : `${what}: ${ignored.length} linjer blev ikke importeret – ${list}`, 'warn');
+}
+
 // Reads every Peace/APO preset file and stores the non-empty ones as presets. Returns the imported names.
 export async function importPeacePresets(ctx) {
   const files = await apoListConfigs();
   const names = [];
+  const skipped = [];
   for (const f of files) {
-    const parsed = parseApoConfig(f.text);
+    const { eq: parsed, ignored } = parseApoConfigReport(f.text);
     if (!parsed.bands.length) continue;
+    skipped.push(...ignored.map((x) => ({ ...x, line: `${f.name}: ${x.line}` })));
     let name = f.name.split(/[\\/]/).pop().replace(/ ParametricEQ$/i, '');
     if (/^peace$/i.test(name)) name = 'Peace (nuværende)';
     if (names.includes(name)) name = f.name;
@@ -25,7 +34,8 @@ export async function importPeacePresets(ctx) {
     names.push(name);
   }
   if (names.length) await storeSet('output-eq', ctx.outputEq);
-  return { names, total: files.length };
+  warnIgnored('Peace-presets', skipped);
+  return { names, total: files.length, ignored: skipped };
 }
 
 const ENGINE_MODES = ['lfx-gfx', 'sfx-efx', 'sfx-mfx'];
@@ -124,8 +134,9 @@ function autoEqCard(ctx) {
     try {
       const r = await fetch(autoEqUrl(e));
       if (!r.ok) throw new Error(`AutoEQ svarede ${r.status}`);
-      const parsed = parseApoConfig(await r.text());
+      const { eq: parsed, ignored } = parseApoConfigReport(await r.text());
       if (!parsed.bands.length) throw new Error('Filen indeholdt ingen filtre');
+      warnIgnored('AutoEQ', ignored);
       const name = `AutoEQ: ${e.name}`;
       ctx.outputEq.presets[name] = parsed;
       await storeSet('output-eq', ctx.outputEq);
@@ -288,7 +299,10 @@ export function outputEqView(ctx) {
         h('td', {}, type),
         h('td', {}, num('freq', 20, 20000, 1), ' Hz'),
         h('td', {}, num('gain', -24, 24, 0.1, !FILTER_TYPES[b.type].gain), ' dB'),
-        h('td', {}, num('q', 0.1, 20, 0.01), warnIcon),
+        h('td', {}, num('q', 0.1, 30, 0.01, b.slope > 12), FILTER_TYPES[b.type].slope
+          ? h('select', { class: 'slope-sel', title: 'Hældning (dB pr. oktav)', 'data-testid': 'band-slope', onchange: (e) => { b.slope = Number(e.target.value); if (b.slope <= 12) delete b.slope; changed(); renderBands(); } },
+            SLOPES.map((sl) => h('option', { value: sl, selected: (b.slope || 12) === sl }, `${sl} dB/okt`)))
+          : null, warnIcon),
         h('td', {}, h('button', { class: 'btn sm', title: 'Slet bånd', onclick: (e) => { e.stopPropagation(); eq().bands.splice(i, 1); selected = Math.max(0, Math.min(selected, eq().bands.length - 1)); changed(); renderBands(); } }, '✕')));
     }));
   };
@@ -511,8 +525,9 @@ export function outputEqView(ctx) {
       fileIn.value = '';
       return;
     }
-    const parsed = parseApoConfig(text);
-    if (!parsed.bands.length) { toast('Fandt ingen filtre i filen.'); return; }
+    const { eq: parsed, ignored } = parseApoConfigReport(text);
+    if (!parsed.bands.length) { toast('Fandt ingen filtre i filen.'); warnIgnored(f.name, ignored); return; }
+    warnIgnored(f.name, ignored);
     const name = f.name.replace(/\.(txt|cfg)$/i, '').replace(/ ParametricEQ$/i, '');
     state.presets[name] = parsed;
     loadEq(parsed, name);
@@ -538,7 +553,8 @@ export function outputEqView(ctx) {
       h('button', { class: 'btn sm', onclick: async () => {
         const txt = await promptDialog('Indsæt Equalizer APO-konfiguration (Preamp/Filter-linjer):', '', { ok: 'Indsæt', input: { multiline: true, placeholder: 'Preamp: -6 dB\nFilter 1: ON PK Fc 100 Hz Gain 3 dB Q 1.41' } });
         if (!txt) return;
-        const parsed = parseApoConfig(txt);
+        const { eq: parsed, ignored } = parseApoConfigReport(txt);
+        warnIgnored('Indsat tekst', ignored);
         if (!parsed.bands.length) { toast('Fandt ingen filtre.'); return; }
         loadEq(parsed, null);
       } }, 'Indsæt tekst'),
@@ -570,7 +586,8 @@ export function outputEqView(ctx) {
   const importApoBtn = h('button', { class: 'btn sm', onclick: async () => {
     try {
       const text = await apoReadConfig();
-      const parsed = parseApoConfig(text);
+      const { eq: parsed, ignored } = parseApoConfigReport(text);
+      warnIgnored('Peace/APO-opsætningen', ignored);
       if (!parsed.bands.length) { toast('Fandt ingen filtre i din Peace/APO-opsætning.'); return; }
       state.presets['Min Peace-opsætning'] = parsed;
       loadEq(parsed, 'Min Peace-opsætning');
@@ -883,7 +900,7 @@ function makePreview(getEq, bypassGainDb = () => 0) {
       const pre = ac.createGain();
       pre.gain.value = Math.pow(10, eq.preamp / 20);
       node.connect(pre); node = pre; chainIn.push(pre);
-      for (const b of eq.bands) {
+      for (const b of expandBands(eq.bands)) {
         if (!b.enabled) continue;
         const c = coefficients(b, ac.sampleRate);
         const f = ac.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
