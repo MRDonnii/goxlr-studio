@@ -49,6 +49,8 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 - **Hearing test:** find the faintest tone you can hear in each ear and get a personal EQ for your ears and your headphones
 - **Room correction:** import your REW measurements (.mdat or text) from a measurement microphone such as the UMIK-1 – even without its calibration file, which can be applied afterwards. GoXLR Studio averages the measurements and makes a preset towards a room curve: peaks are cut, narrow dips are not filled, and nothing is boosted below what the speakers can play
 - **Speakers:** the distance to each speaker gives the right delay, polarity can be flipped, and your own FIR filter (WAV from REW, rePhase or DRC) can be added on top
+- **Dynamics:** GoXLR Studio's own limiter and compressor last in the chain – protection against sudden peaks, or Night mode so quiet dialogue and loud effects sit closer together
+- **Linkwitz-Riley** (LR 12/24/48) on low/high cuts, for crossovers and subwoofers
 - Crossfeed, loudness, mono and balance for headphones
 - **Sounds wrong?** Pick e.g. "harsh" or "muddy", and the EQ is adjusted one small step. Export and import all presets
 - **EQ per app:** e.g. Call of Duty with the footsteps EQ and Spotify with the music EQ at the same time (Per-app audio → EQ per app)
