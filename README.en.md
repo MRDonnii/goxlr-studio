@@ -32,7 +32,7 @@ The GoXLR is a mixer from TC-Helicon. To control it from Windows you normally us
 
 ### Mixer
 
-The channels of your GoXLR with the same LED colors as the hardware, a level meter on each channel, mute and source selection. Below them are all the channel volumes and the mic level. At the top you switch Windows' default output and mic with one click, e.g. from GoXLR "System" to your speakers. The top bar switches GoXLR profile, EQ preset and scene. **Now playing** shows the song from Spotify, the browser and more, with play/pause, next and previous – also available as actions for hotkeys, foot pedal, Stream Deck and the phone.
+The channels of your GoXLR with the same LED colors as the hardware, a level meter on each channel, mute and source selection. Below them are all the channel volumes and the mic level. At the top you switch Windows' default output and mic with one click, e.g. from GoXLR "System" to your speakers. The top bar switches GoXLR profile, EQ preset and scene. **ChatMix** is one control for the balance between chat and game. **Now playing** shows the song from Spotify, the browser and more, with play/pause, next and previous – also available as actions for hotkeys, foot pedal, Stream Deck and the phone.
 
 ### Playback EQ for all of Windows
 
@@ -51,6 +51,9 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 - **Sounds wrong?** Pick e.g. "harsh" or "muddy", and the EQ is adjusted one small step. Export and import all presets
 - **EQ per app:** e.g. Call of Duty with the footsteps EQ and Spotify with the music EQ at the same time (Per-app audio → EQ per app)
 - **EQ per channel:** its own preset on Game, Music, Chat and System. Apps follow their channel, so Spotify gets the music EQ and the game the footsteps EQ – and every GoXLR profile can have its own set
+- **Virtual speakers:** headphones sound like two speakers in front of you (optionally in a room) instead of inside your head
+- **Clean voices in the chat:** keyboards, fans and dogs are removed from your friends' voices (RNNoise)
+- **Game presets** for e.g. CS2/Valorant, Warzone/Battlefield and Fortnite/Apex
 - **Even levels:** measure Game, Music and Chat while they play, and the loudest are lowered so the music doesn't drown the game (nothing is raised)
 - EQ that follows the GoXLR profile, e.g. one preset for "Headset" and another for "Speakers"
 - Listening test in the app, so you can hear the difference with and without EQ
@@ -67,13 +70,15 @@ The mic EQ runs in the GoXLR's own chip, so it uses no CPU and adds no delay. He
 
 **Pick your microphone** from 51 models, e.g. Røde NT1, Shure SM7B, Fifine K688 and Audio-Technica AT2020. GoXLR Studio then suggests EQ, noise gate, compressor and de-esser from the mic's frequency response: a clear speaking voice minus the mic's own coloration, fitted to the GoXLR's bands. The **mic assistant** listens to your room and your voice and sets gain and noise gate, and **Record and listen** lets you hear the result. Happy with it? **Share your settings** as a file with a friend.
 
+**Voice enhancer:** more body, more clarity, less nasal or muddy with one click.
+
 **Limiter (protect against shouting):** one click turns the GoXLR's compressor into a limiter, so shouts and laughs don't clip on stream, in Discord or in recordings. Your own compressor settings come back when it is switched off.
 
 ### Per-app audio
 
 ![Per-app audio](docs/screenshots/lyd-pr-app.png)
 
-Send every app to its channel on the GoXLR, e.g. Spotify → Music, Discord → Chat and games → System. The rules are kept, also when the app restarts. Apps that point to a GoXLR device that no longer exists after a driver update are fixed. Things can also happen automatically when a certain app starts.
+Send every app to its channel on the GoXLR and set its own volume, e.g. Spotify → Music, Discord → Chat and games → System. The rules are kept, also when the app restarts. Apps that point to a GoXLR device that no longer exists after a driver update are fixed. Things can also happen automatically when a certain app starts.
 
 **Automation when a device is connected** (Audio devices page): plug in a USB or Bluetooth headset, and GoXLR Studio switches to e.g. the "Headset" profile and sends the sound to the headset. Unplug it, and it switches back to "Speakers".
 
@@ -114,6 +119,10 @@ Use a foot pedal as a button – e.g. push-to-talk with your foot. USB pedals th
 
 Add sounds and play them on the GoXLR's Sample channel – with the GoXLR's routing they reach Discord and your stream. Works on the GoXLR Mini too, which has no sampler of its own.
 
+### Sampler (full GoXLR)
+
+Sounds on the sampler buttons in three banks, with playback mode (play/stop, hold, loop), order and start/end per sound. Record by holding a button – including the seconds before you pressed.
+
 ### Scenes
 
 ![Scenes](docs/screenshots/scener.png)
@@ -144,6 +153,8 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 
 ![Light theme](docs/screenshots/tema-lyst.png)
 
+- **GoXLR settings:** the cough button, what the GoXLR does when the PC sleeps/wakes/shuts down, the screens above the faders, VOD mode and read-aloud of changes
+- **Audio clips:** save the last 15–120 seconds of the stream mix as WAV with a button or hotkey
 - **Game mode:** when a game runs in full screen, Windows' notification sounds stop and your own actions can run (e.g. EQ "Footsteps") – everything comes back when the game ends
 - **Schedule:** e.g. at 22:00 → EQ "Late night" and a ceiling on the headphones, at 07:00 → back again
 - **Move to a new PC:** one file with settings, hotkeys, pedals, rules, EQ presets and theme – plus GoXLR profiles, mic profiles, samples and the soundboard. Open it on the new PC and everything is there

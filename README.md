@@ -30,7 +30,7 @@ GoXLR'en er en mixer fra TC-Helicon. For at styre den fra Windows bruger man nor
 
 ### Mixer
 
-Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved hver kanal, mute og valg af kilde. Under dem ligger alle kanalers lydstyrke og mikrofonens niveau. Øverst skifter du Windows' standard-udgang og -mikrofon med ét klik, fx fra GoXLR "System" til dine højttalere. Topbjælken skifter GoXLR-profil, EQ-preset og scene. **Spiller nu** viser sangen fra Spotify, browseren m.fl. med afspil/pause, næste og forrige – og de tre findes også som handlinger til genveje, fodpedal, Stream Deck og mobilen.
+Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved hver kanal, mute og valg af kilde. Under dem ligger alle kanalers lydstyrke og mikrofonens niveau. Øverst skifter du Windows' standard-udgang og -mikrofon med ét klik, fx fra GoXLR "System" til dine højttalere. Topbjælken skifter GoXLR-profil, EQ-preset og scene. **ChatMix** er én knap til balancen mellem chat og spil. **Spiller nu** viser sangen fra Spotify, browseren m.fl. med afspil/pause, næste og forrige – og de tre findes også som handlinger til genveje, fodpedal, Stream Deck og mobilen.
 
 ### Afspilnings-EQ for hele Windows
 
@@ -49,6 +49,9 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - **Lyder det forkert?** Vælg fx "skarp" eller "mudret", og EQ'en justeres et lille skridt. Eksport og import af alle presets
 - **EQ pr. app:** fx Call of Duty med fodtrins-EQ og Spotify med musik-EQ på samme tid (Lyd pr. app → EQ pr. app)
 - **EQ pr. kanal:** sit eget preset på Spil, Musik, Chat og System. Apps følger deres kanal, så Spotify får musik-EQ og spillet fodtrins-EQ – og hver GoXLR-profil kan have sit eget sæt
+- **Virtuelle højttalere:** hovedtelefoner lyder som to højttalere foran dig (valgfrit i et rum) i stedet for inde i hovedet
+- **Rene stemmer i chatten:** tastatur, blæser og hund fjernes fra vennernes stemmer (RNNoise)
+- **Spil-presets** til fx CS2/Valorant, Warzone/Battlefield og Fortnite/Apex
 - **Lige lydniveau:** mål Spil, Musik og Chat, mens de spiller, og de højeste sænkes, så musikken ikke drukner spillet (intet hæves)
 - EQ der skifter med GoXLR-profilen, fx ét preset til "Headset" og et andet til "Speakers"
 - Lyttetest i appen, så du kan høre forskellen med og uden EQ
@@ -65,13 +68,15 @@ Mikrofon-EQ'en kører i GoXLR'ens egen chip, så den bruger hverken CPU eller gi
 
 **Vælg din mikrofon** blandt 51 modeller, fx Røde NT1, Shure SM7B, Fifine K688 og Audio-Technica AT2020. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. EQ'en er en klar talestemme minus mikrofonens egen klang, tilpasset GoXLR'ens bånd. **Mikrofon-assistenten** lytter til dit rum og din stemme og sætter gain og noise gate, og med **Optag og lyt** hører du resultatet. Er du tilfreds, kan du **dele dine indstillinger** som en fil med en ven.
 
+**Stemme-forbedrer:** mere fylde, mere klarhed, mindre næset eller mudret med ét klik.
+
 **Limiter (beskyt mod råb):** ét klik gør GoXLR'ens kompressor til en limiter, så råb og grin ikke klipper på stream, i Discord eller i optagelser. Dine egne kompressor-indstillinger kommer tilbage, når den slås fra.
 
 ### Lyd pr. app
 
 ![Lyd pr. app](docs/screenshots/lyd-pr-app.png)
 
-Send hver app til sin kanal på GoXLR'en, fx Spotify → Music, Discord → Chat og spil → System. Reglerne bliver holdt, også når appen genstarter. Apps, der efter en driveropdatering peger på en GoXLR-enhed, som ikke findes længere, bliver rettet. Du kan også lade ting ske automatisk, når en bestemt app starter.
+Send hver app til sin kanal på GoXLR'en og skru på dens egen lydstyrke, fx Spotify → Music, Discord → Chat og spil → System. Reglerne bliver holdt, også når appen genstarter. Apps, der efter en driveropdatering peger på en GoXLR-enhed, som ikke findes længere, bliver rettet. Du kan også lade ting ske automatisk, når en bestemt app starter.
 
 **Automatik når en enhed tilsluttes** (siden Lydenheder): sæt et USB- eller Bluetooth-headset til, og GoXLR Studio skifter fx til profilen "Headset" og sender lyden til headsettet. Tag det ud, og den skifter tilbage til "Speakers". Det kan også ske, når appen starter.
 
@@ -108,6 +113,10 @@ Linket starter også GoXLR Studio, hvis appen ikke kører.
 
 Brug en fodpedal som knap – fx push-to-talk med foden. USB-pedaler, der sender en tast, Elgato Stream Deck Pedal og MIDI-pedaler/-controllere. Hver pedal kan køre en handling ved tryk, virke mens den holdes (push-to-talk/-mute), gøre to forskellige ting ved kort tryk og hold – og en MIDI-fader kan styre en kanals lydstyrke. Tryk "+ Tilføj pedal" og træd på den.
 
+### Sampler (den store GoXLR)
+
+Lyde på sampler-knapperne i tre banker, med afspilningsmåde (afspil/stop, hold, loop), rækkefølge og start/slut pr. lyd. Optag ved at holde en knap nede – også sekunderne før du trykkede.
+
 ### Scener
 
 ![Scener](docs/screenshots/scener.png)
@@ -138,6 +147,8 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 
 ![Lyst tema](docs/screenshots/tema-lyst.png)
 
+- **GoXLR-indstillinger:** cough-knappen, hvad GoXLR'en gør når pc'en sover/vågner/lukker, skærmene over faderne, VOD-tilstand og oplæsning af ændringer
+- **Lydklip:** gem de sidste 15–120 sekunder af stream-mixet som WAV med en knap eller genvej
 - **Spiltilstand:** når et spil kører i fuld skærm, stopper Windows' notifikationslyde, og dine egne handlinger kan køre (fx EQ "Fodtrin") – alt kommer tilbage, når spillet slutter
 - **Tidsstyring:** fx kl. 22 → EQ "Sen aften" og loft på hovedtelefonerne, kl. 7 → tilbage igen
 - **Flyt til ny pc:** én fil med indstillinger, genveje, pedaler, regler, EQ-presets og tema – og GoXLR-profiler, mikrofonprofiler, samples og lydbanken. Åbn den på den nye pc, så er alt med
