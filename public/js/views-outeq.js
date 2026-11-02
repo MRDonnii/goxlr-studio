@@ -13,6 +13,7 @@ import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChan
 import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
 import { presetModified, parseAutoEqIndex, searchAutoEq, autoEqUrl, exportPresets, importPresets } from './extras.js';
+import { roomCorrectionCard, speakersCard } from './views-room.js';
 import { renamePreset, duplicatePreset, deletePresets, presetUses, copyName, decodeText } from './presetmanage.js';
 
 // An imported EQ counts when it has parametric bands or a GraphicEQ curve (Peace's sliders).
@@ -1122,6 +1123,17 @@ export function outputEqView(ctx) {
       label: (ch) => CHANNEL_LABEL[ch] || ch,
       eqOff: () => !eq().enabled,
     })),
+    h('div', { class: 'grid cols-2' },
+      roomCorrectionCard(ctx, {
+        state,
+        save: () => storeSet('output-eq', state),
+        makePreset: (src, name) => {
+          loadEq(src, name);
+          state.presets[name] = structuredClone(eq());
+          persist(); ctx.onStateChanged?.('eq');
+        },
+      }),
+      speakersCard(ctx, { state, save: () => { storeSet('output-eq', state); apply(); } })),
     h('div', { class: 'grid cols-3' }, chatDenoiseCard(ctx, { state, save: () => storeSet('output-eq', state), apply: () => ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`)) })));
 }
 

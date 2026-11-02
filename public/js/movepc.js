@@ -6,7 +6,7 @@ import { h, toast, confirmDialog } from './ui.js';
 import { isNative, storeGet, storeSet, moveCollect, moveRestore } from './native.js';
 import { t } from './i18n.js';
 
-export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking', 'pedals'];
+export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking', 'pedals', 'room-measurements'];
 const SECRETS = [['mqtt', 'password'], ['obs', 'password']];
 export const KIND_LABEL = {
   profiles: ['GoXLR-profil', 'GoXLR-profiler'],
