@@ -99,7 +99,7 @@ export function levelMatchCard(ctx, opts) {
     s.measuring = true;
     await opts.apply();
     const meter = createLevelMeter();
-    const bars = Object.fromEntries(Object.keys(ids).map((ch) => [ch, h('div', { class: 'vu-fill' })]));
+    const bars = Object.fromEntries(Object.keys(ids).map((ch) => [ch, h('div', { class: 'level-fill' })]));
     const vals = Object.fromEntries(Object.keys(ids).map((ch) => [ch, h('span', { class: 'hint' }, '–')]));
     const progress = h('div', { class: 'hint', 'data-testid': 'level-progress' });
     body.replaceChildren(
