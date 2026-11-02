@@ -36,7 +36,8 @@ Selvstændig Windows-app (Tauri 2: Rust + vanilla JS) der erstatter GoXLR Utilit
 - Firmware til GoXLR'en røres ikke (lukket, risiko for brick).
 
 ## Status og næste skridt
-Version 0.6.1 – ét program. Færdigt:
+Version 0.6.2 – ét program. Færdigt:
+- 0.6.2: GUI-gennemgang (Playwright: alle sider × Mini/fuld × dansk/engelsk × smalt vindue + klik på alle knapper): i18n-fallback for "ℹ …" og "tast → handling", Diagnose-apps som felter, kopiér-fejl fanges, Esc annullerer pedal-læring.
 - 0.6.1: **Høretest** (`hearingtest.js`: `TEST_FREQS` 250 Hz–12 kHz, ISO 226:2003-tærskel `normalThreshold`, `hearingProfile` = målt − normal − median (500 Hz–4 kHz, begge ører), "kan ikke høre" = `MAX_DB` −20 dBFS, `compensationBands` halv-gain, +8/−3 dB, PK Q 1,4 pr. øre, `hearingSummary`; kort `views-hearingtest.js` på EQ-siden: pulserende sinus i ét øre (ChannelMerger), EQ slås fra under testen via `setEqEnabled`, `prefs.hearingTest`, "Lav preset 'Min hørelse'"/"Læg oven i").
 - 0.6.0: **Fodpedal** (side `pedals`, `views-pedals.js`; `pedals.js`: store-nøgle `pedals` = `{id, name, input: {kind:'key', accel, canHold} | {kind:'midi', type:'note'|'cc', channel, number, port}, mode: press/hold/taphold/fader, action, holdAction (hold:ptt/ptm), channel}`, `createPedalRunner` (HOLD_MS 400, dedupe ved key repeat), `midiEvent` (note on/off, CC ≥ 64 = nede), `stealsTyping`, fader → `SetVolume` maks ~20/s). Taste-pedaler registreres i `registerHotkeys` som `pedal:<id>` → `keyPedal` i hotkey/hotkey-release. MIDI: `midi.rs` (midir 0.11, kun Windows; åbner alle inputs, ny scanning hvert 3. s, event `midi` {port, data}; `midi_start`/`midi_ports`). Lær: tast måles (hold > 250 ms = `canHold`), MIDI-CC med > 3 værdier = fader. Demo `window.studioDemo.midi([0x90,60,100])`. `pedals` er med i BACKUP_KEYS.
 - 0.5.10: visningen hedder "Sliders" (ikke "som Peace"), knappen "Lav sliders".
