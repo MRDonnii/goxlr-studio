@@ -6,6 +6,7 @@ import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, en
 import { t, language } from './i18n.js';
 import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
 import { shortName, CHANNEL_LABEL } from './views-mixer.js';
+import { hearingTestCard } from './views-hearingtest.js';
 import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChannels } from './channeleq.js';
 import { channelEndpoint } from './extras.js';
 import { applyEqPreset, toggleEq } from './actions.js';
@@ -996,7 +997,17 @@ export function outputEqView(ctx) {
     h('div', { class: 'card' }, h('h2', {}, 'Parametrisk EQ – afspilning'), toolbar, abRow, blindBox, editorBody),
     h('div', { class: 'grid cols-3' }, presetsCard, engineCard, h('div', { class: 'grid' }, fixCard, previewCard)),
     h('div', { class: 'grid cols-3' }, channelCard, profileLinksCard(ctx), extrasCard(ctx, () => { apply(); redraw(); })),
-    h('div', { class: 'grid cols-3' }, autoEqCard(ctx)));
+    h('div', { class: 'grid cols-3' }, autoEqCard(ctx), hearingTestCard(ctx, {
+      // The test tones must not go through the EQ (crossfeed would also leak them to the other ear).
+      setEqEnabled: (on) => { const was = eq().enabled; eq().enabled = on; ctx.applyOutputEq().catch(() => {}); redraw(); return was; },
+      makePreset: (bands) => {
+        const name = 'Min hørelse';
+        loadEq({ enabled: true, preamp: 0, bands }, name);
+        state.presets[name] = structuredClone(eq());
+        persist(); renderPresets?.(); ctx.onStateChanged?.('eq');
+      },
+      addToCurrent: (bands) => { eq().bands.push(...bands.map((b) => ({ ...newBand(b.freq, b.type), ...b }))); changed(); renderBands(); },
+    })));
 }
 
 // The Lyttetest's GraphicEQ: an 8192-tap linear-phase FIR from the curve (Hann-windowed), cached.
