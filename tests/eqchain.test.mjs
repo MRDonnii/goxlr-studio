@@ -136,3 +136,21 @@ test('slotsEqual ignores ids and switched-off bands', () => {
   assert.equal(c.slotsEqual(a, b), true);
   assert.equal(c.slotsEqual(a, eqOf(-2, b.bands)), false);
 });
+
+test('Balance: a boost lowers the whole floor as much, lowering it again raises the floor', async () => {
+  const { floorComp, floorBase, balancedPreamp } = await import('../public/js/eqchain.js');
+  const pk = (gain, channel) => ({ enabled: true, type: 'PK', freq: 1000, gain, q: 1, ...(channel ? { channel } : {}) });
+  const cutOnly = { enabled: true, preamp: 0, bands: [pk(-4)] };
+  assert.equal(floorComp(cutOnly), 0);
+  assert.equal(balancedPreamp(cutOnly, 0), 0, 'cuts never raise the floor above 0 dB');
+  const boost = { enabled: true, preamp: 0, bands: [pk(3)] };
+  assert.equal(balancedPreamp(boost, 0), -3.5);
+  // Your own lower floor is kept on top of the balance; a floor above the balance is not possible.
+  const own = { ...boost, preamp: -6 };
+  assert.equal(floorBase(own), -2.5);
+  assert.equal(balancedPreamp({ ...own, bands: [pk(5)] }, floorBase(own)), -8);
+  assert.equal(floorBase({ ...boost, preamp: 0 }), 0);
+  // One ear's boost and a GraphicEQ curve count too.
+  assert.equal(balancedPreamp({ enabled: true, preamp: 0, bands: [pk(4, 'R')] }, 0), -4.5);
+  assert.equal(balancedPreamp({ enabled: true, preamp: 0, bands: [], graphic: [[100, 2], [1000, 6]] }, 0), -6.5);
+});

@@ -1,7 +1,7 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
 import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, EAR_LABEL, usesEars, onEar, expandBands, SLIDER_SETS, graphicGain, resampleGraphic, graphicActive, graphicOnSet, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
-import { chainResponse, chainLoudness, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
+import { chainResponse, chainLoudness, safePreamp, floorBase, balancedPreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
 import { t, language } from './i18n.js';
 import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
@@ -233,7 +233,14 @@ export function outputEqView(ctx) {
     ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`));
     preview.update();
   }, 60);
+  // Balance (standard til): every boost lowers the floor (preamp) as much, so a boost becomes a
+  // balanced change instead of just more level. `base` is your own floor on top of that; it is
+  // taken from the preamp whenever an EQ is loaded, restored or the preamp is set by hand.
+  const balanceOn = () => state.balance !== false;
+  let base = floorBase(eq());
+  const rebase = () => { base = floorBase(eq()); };
   const changed = (record = true) => {
+    if (balanceOn()) eq().preamp = balancedPreamp(eq(), base);
     if (record) {
       const snap = JSON.stringify(eq());
       if (snap !== history[history.length - 1]) { history.push(snap); if (history.length > 200) history.shift(); future = []; saveUndo(); }
@@ -242,7 +249,7 @@ export function outputEqView(ctx) {
     apply();
     redraw();
   };
-  const restore = (snap) => { state.slots[state.active] = JSON.parse(snap); selected = Math.min(selected, eq().bands.length - 1); changed(false); renderBands(); };
+  const restore = (snap) => { state.slots[state.active] = JSON.parse(snap); selected = Math.min(selected, eq().bands.length - 1); rebase(); changed(false); renderBands(); };
   const undo = () => { if (history.length > 1) { future.push(history.pop()); restore(history[history.length - 1]); saveUndo(); } };
   const redo = () => { if (future.length) { const s = future.pop(); history.push(s); restore(s); saveUndo(); } };
 
@@ -318,7 +325,7 @@ export function outputEqView(ctx) {
   let renderSliders = () => {};
 
   const preampIn = h('input', { type: 'number', min: -30, max: 12, step: 0.1 });
-  preampIn.addEventListener('change', () => { eq().preamp = Number(preampIn.value); changed(); });
+  preampIn.addEventListener('change', () => { eq().preamp = Number(preampIn.value); rebase(); changed(); preampIn.value = eq().preamp; });
   // Headroom of the whole chain (EQ + Loudness + Crossfeed); "Klip-beskyttelse" lowers the preamp
   // in the engine when the chain would go above 0 dB, without changing the preset.
   const headBadge = h('span', { class: 'badge', 'data-testid': 'eq-headroom' });
@@ -327,7 +334,11 @@ export function outputEqView(ctx) {
   const offsetDb = () => playbackOffset(state);
   const chainDiffers = () => eq().enabled && (!!state.extras?.loudness?.enabled || !!state.extras?.crossfeed?.enabled || offsetDb() !== 0);
   const guardBox = h('input', { type: 'checkbox', 'data-testid': 'eq-clip-guard', onchange: () => { state.clipGuard = guardBox.checked; persist(); apply(); redraw(); } });
-  const selectSlot = (k) => { state.active = k; [history, future] = loadUndo(); selected = 0; persist(); apply(); renderBands(); redraw(); };
+  const selectSlot = (k) => { state.active = k; [history, future] = loadUndo(); selected = 0; rebase(); persist(); apply(); renderBands(); redraw(); };
+  const balanceBox = h('input', { type: 'checkbox', 'data-testid': 'eq-balance', onchange: () => {
+    state.balance = balanceBox.checked; rebase(); changed();
+    toast(balanceBox.checked ? 'Balance til: løfter du et bånd, sænkes hele gulvet lige så meget' : 'Balance fra: preamp styrer du selv', 'info');
+  } });
   const abSeg = h('div', { class: 'seg', 'data-testid': 'eq-ab' });
   const abBtns = ['A', 'B'].map((k) => {
     const b = h('button', { onclick: () => selectSlot(k) }, k);
@@ -368,14 +379,16 @@ export function outputEqView(ctx) {
     abInfo.textContent = abText(m, state.abMatch !== false);
     abInfo.className = `ab-info ${Math.abs(m.diff) >= 0.1 && state.abMatch !== false && !m.unmatched ? 'ok' : Math.abs(m.diff) >= 0.1 ? 'warn' : ''}`;
     matchBox.checked = state.abMatch !== false;
+    balanceBox.checked = balanceOn();
   };
 
   const toolbar = h('div', { class: 'row', style: { flexWrap: 'wrap' } },
     h('label', { class: 'switch', title: 'EQ til/fra (bypass)' }, bypass, h('span')),
     h('span', {}, 'EQ aktiv'),
     h('span', { class: 'lbl', style: { minWidth: 0, marginLeft: '12px' } }, 'Preamp'), preampIn, h('span', {}, 'dB'),
-    h('button', { class: 'btn sm', 'data-testid': 'eq-auto-preamp', title: 'Sæt preamp, så det højeste punkt af hele kæden (inkl. Loudness og Crossfeed) lige rammer 0 dB', onclick: () => { eq().preamp = safePreamp(eq(), state.extras); changed(); } }, 'Auto'),
+    h('button', { class: 'btn sm', 'data-testid': 'eq-auto-preamp', title: 'Sæt preamp, så det højeste punkt af hele kæden (inkl. Loudness og Crossfeed) lige rammer 0 dB', onclick: () => { eq().preamp = safePreamp(eq(), state.extras); rebase(); changed(); } }, 'Auto'),
     headBadge,
+    h('label', { class: 'check-inline', title: 'Hæv aldrig uden at sænke gulvet: løfter du et bånd, sænkes preamp – hele resten af lyden – lige så meget, så du får balance i stedet for bare mere lyd. Tager du løftet ned igen, kommer gulvet op igen. Du kan selv sænke preamp yderligere, men ikke hæve den over balancen.' }, balanceBox, h('span', {}, 'Balance')),
     h('label', { class: 'check-inline', title: 'Sænker automatisk preamp, så EQ’en – også med Loudness og Crossfeed – aldrig klipper. Dit preset ændres ikke.' }, guardBox, h('span', {}, 'Klip-beskyttelse')),
     h('div', { class: 'spacer' }),
     h('button', { class: 'btn sm', title: 'Fortryd (Ctrl+Z)', onclick: undo }, '↶'),
@@ -451,7 +464,11 @@ export function outputEqView(ctx) {
   // Preamp as a slider column, as in Peace (shared by the two slider views; the toolbar has it too).
   const preRange = h('input', { type: 'range', min: -30, max: 12, step: 0.1, 'aria-label': 'Preamp', 'data-testid': 'slider-preamp' });
   const preNum = h('input', { type: 'number', min: -30, max: 12, step: 0.1, class: 'col-num', 'data-testid': 'slider-preamp-value' });
-  const setPre = (v, record) => { eq().preamp = Math.round(clamp(v, -30, 12) * 10) / 10; changed(record); };
+  const setPre = (v, record) => {
+    eq().preamp = Math.round(clamp(v, -30, 12) * 10) / 10; rebase(); changed(record);
+    // Balance may have held the floor down – show what it really is.
+    preNum.value = eq().preamp; if (record) preRange.value = eq().preamp;
+  };
   preRange.addEventListener('input', () => { preNum.value = preRange.value; setPre(Number(preRange.value), false); });
   preRange.addEventListener('change', () => setPre(Number(preRange.value), true));
   preRange.addEventListener('dblclick', () => setPre(0, true));
@@ -650,7 +667,7 @@ export function outputEqView(ctx) {
     state.slots[state.active] = { enabled: true, preamp: 0, ...copy };
     state.presetName = name;
     selected = 0;
-    changed(); renderBands();
+    rebase(); changed(); renderBands();
     ctx.onStateChanged?.('eq-local');
   };
   const fileIn = h('input', { type: 'file', accept: '.txt,.cfg,.json,text/plain,application/json', style: { display: 'none' }, 'data-testid': 'preset-file' });

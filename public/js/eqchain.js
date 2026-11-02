@@ -47,6 +47,23 @@ export function clipGuard(eq, extras, margin = SAFETY_MARGIN) {
   return peak > 0.05 ? -Math.ceil((peak + margin) * 10) / 10 : 0;
 }
 
+// ---------- Balance: hæv aldrig uden at sænke gulvet ----------
+// A boost only adds level; real balance is that the rest goes down as much as the highest boost
+// goes up. The preamp is the "floor": it follows the EQ's highest boost (both ears, GraphicEQ
+// included; Loudness/Crossfeed are left to the clip guard). Lowering a boost raises the floor again.
+
+/** How far the floor must go down for this EQ: its highest boost plus the margin (0 when it only cuts). */
+export function floorComp(eq) {
+  const boost = chainPeak({ ...eq, preamp: 0, enabled: true }, {});
+  return boost > 0.05 ? Math.ceil((boost + SAFETY_MARGIN) * 10 - 1e-6) / 10 : 0;
+}
+
+/** Your own floor on top of the balance (≤ 0): what is left of the preamp after the compensation. */
+export const floorBase = (eq) => Math.min(0, Math.round(((eq.preamp || 0) + floorComp(eq)) * 10) / 10);
+
+/** The preamp that keeps the EQ in balance: your own floor minus the highest boost. */
+export const balancedPreamp = (eq, base = 0) => Math.round((Math.min(0, base) - floorComp(eq)) * 10) / 10 || 0;
+
 /** "Auto": the preamp that puts the loudest point of the whole chain at −0,5 dB – or 0 dB preamp
  *  when nothing is boosted. Never above 0 dB. */
 export function safePreamp(eq, extras, margin = SAFETY_MARGIN) {
