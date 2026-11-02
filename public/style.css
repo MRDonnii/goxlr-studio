@@ -425,3 +425,4 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .accent-dot { all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); }
 .accent-dot.on { outline: 2px solid var(--text); outline-offset: 2px; }
 .accent-dot.theme { background: conic-gradient(var(--accent) 0 50%, var(--accent-2) 0); }
+.app-name .badge { align-self: flex-start; width: fit-content; margin: 2px 0; }
