@@ -4,6 +4,7 @@
 import { h, logActivity, toggle } from './ui.js';
 import { actionCatalog, actionLabel } from './actions.js';
 import { t } from './i18n.js';
+import { actionRow } from './actionpicker.js';
 
 export const DAYS = [[1, 'man'], [2, 'tir'], [3, 'ons'], [4, 'tor'], [5, 'fre'], [6, 'lør'], [0, 'søn']];
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -98,13 +99,6 @@ export function scheduleCard(ctx, binder) {
   let catalog = [];
   const save = () => { ctx.savePrefs?.(); render(); };
 
-  const actionSel = (arr, i) => {
-    const known = catalog.some((g) => g.items.some((it) => it.id === arr[i]));
-    return h('select', { class: 'trigger-sel', onchange: (e) => { if (e.target.value) arr[i] = e.target.value; else arr.splice(i, 1); save(); } },
-      h('option', { value: '' }, '— ingen —'),
-      arr[i] && !known ? h('option', { value: arr[i], selected: true }, actionLabel(ctx, arr[i])) : null,
-      catalog.map((g) => h('optgroup', { label: g.title }, g.items.map((it) => h('option', { value: it.id, selected: it.id === arr[i] }, it.label)))));
-  };
   const render = () => {
     list.replaceChildren(...s.rules.map((rule) => {
       rule.days ??= [...ALL_DAYS];
@@ -120,9 +114,7 @@ export function scheduleCard(ctx, binder) {
           h('div', { class: 'spacer' }),
           h('button', { class: 'btn sm', title: 'Slet reglen', onclick: () => { s.rules.splice(s.rules.indexOf(rule), 1); save(); } }, '✕')),
         days,
-        h('div', { class: 'row trigger-actions' }, h('span', { class: 'lbl app-lbl' }, 'Gør →'),
-          ...rule.actions.map((_, i) => actionSel(rule.actions, i)),
-          h('button', { class: 'btn sm', title: 'Tilføj en handling mere', 'data-testid': 'schedule-add-action', onclick: () => { rule.actions.push(''); render(); } }, rule.actions.length ? '+' : '+ Handling')));
+        actionRow(ctx, { arr: rule.actions, label: 'Gør →', getCatalog: () => catalog, save, rerender: render, testid: 'schedule-add-action' }));
     }));
     if (!s.rules.length) list.append(h('div', { class: 'hint' }, 'Ingen tider endnu.'));
     const n = nextDue(s.rules, Date.now());

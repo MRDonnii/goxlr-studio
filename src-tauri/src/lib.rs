@@ -7,6 +7,7 @@ mod daemon_host;
 mod deck;
 mod driver;
 mod engine;
+mod game;
 mod history;
 mod keys;
 mod media;
@@ -318,6 +319,16 @@ async fn migrate_scan() -> Result<migrate::Scan, String> {
 #[tauri::command]
 async fn migrate_backup(stamp: String, goxlr_dirs: Vec<(String, String)>, studio_json: String) -> Result<migrate::BackupResult, String> {
     blocking(move || migrate::backup(&stamp, goxlr_dirs, &studio_json)).await
+}
+
+#[tauri::command]
+async fn game_state() -> Result<game::Foreground, String> {
+    blocking(|| Ok(game::foreground())).await
+}
+
+#[tauri::command]
+async fn game_mute_system_sounds(mute: bool) -> Result<usize, String> {
+    blocking(move || game::mute_system_sounds(mute)).await
 }
 
 #[tauri::command]
@@ -878,6 +889,8 @@ pub fn run() {
             migrate_autostarts,
             migrate_backup,
             move_collect,
+            game_state,
+            game_mute_system_sounds,
             move_restore,
             migrate_copy_profiles,
             migrate_disable_startup,

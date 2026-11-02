@@ -324,6 +324,18 @@ export async function migrateBackup(stamp, goxlrDirs, studioJson) {
   return { path: `C:\\Users\\demo\\AppData\\Roaming\\GoXLR Studio\\backup\\${stamp}`, files: 42, bytes: 1234567 };
 }
 
+// Spiltilstand. Demo: window.studioDemo.game('game.exe') starts a pretend full-screen game, .game(null) ends it.
+const demoGame = { notification: 5, fullscreen: false, exe: 'goxlr-studio.exe', system_muted: false };
+if (typeof window !== 'undefined' && window.studioDemo) {
+  window.studioDemo.game = (exe) => Object.assign(demoGame, exe ? { notification: 3, fullscreen: true, exe } : { notification: 5, fullscreen: false, exe: 'goxlr-studio.exe' });
+}
+export async function gameState() { if (isNative()) return invoke('game_state'); return { ...demoGame }; }
+export async function gameMuteSystemSounds(mute) {
+  if (isNative()) return invoke('game_mute_system_sounds', { mute });
+  demoGame.system_muted = mute;
+  return 1;
+}
+
 const demoB64 = (t) => btoa(t);
 export async function moveCollect(dirs) {
   if (isNative()) return invoke('move_collect', { dirs });
