@@ -21,7 +21,7 @@ export function chainResponse(eq, extras = {}, freqs = CHAIN_FREQS, offset = 0, 
   if (!eq?.enabled) return freqs.map(() => 0);
   const r = totalResponse(enginePayload(eq, extras || {}, null, offset), freqs, ear);
   const cf = extras?.crossfeed;
-  if (cf?.enabled) for (let i = 0; i < freqs.length; i++) r[i] += crossfeedDb(cf, freqs[i]);
+  if (cf?.enabled && !extras?.surround?.enabled) for (let i = 0; i < freqs.length; i++) r[i] += crossfeedDb(cf, freqs[i]);
   return r;
 }
 

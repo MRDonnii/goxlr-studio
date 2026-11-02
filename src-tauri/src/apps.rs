@@ -1,13 +1,18 @@
 //! Per-app audio device routing (Windows' "App volume and device preferences").
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppSession {
     pub pid: u32,
     pub exe: String,
     pub path: String,
     pub output: Option<String>,
     pub input: Option<String>,
+    /// The app's own volume in Windows' volume mixer (0–1), if it plays sound.
+    #[serde(default)]
+    pub volume: Option<f32>,
+    #[serde(default)]
+    pub muted: Option<bool>,
 }
 
 #[cfg(windows)]
@@ -21,7 +26,7 @@ mod imp {
     use windows::Win32::Foundation::{CloseHandle, S_OK};
     use windows::Win32::Media::Audio::{
         eCapture, eConsole, eMultimedia, eRender, EDataFlow, ERole, IAudioSessionControl2, IAudioSessionManager2,
-        IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+        IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
     };
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
     use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
@@ -120,12 +125,23 @@ mod imp {
                             continue;
                         }
                         let Ok(pid) = ctl2.GetProcessId() else { continue };
-                        if pid == 0 || by_pid.contains_key(&pid) {
+                        if pid == 0 {
+                            continue;
+                        }
+                        // The app's volume: from its (first) playback session.
+                        let vol = if flow == eRender { ctl.cast::<ISimpleAudioVolume>().ok() } else { None };
+                        let level = vol.as_ref().and_then(|v| v.GetMasterVolume().ok());
+                        let mute = vol.as_ref().and_then(|v| v.GetMute().ok()).map(|b| b.as_bool());
+                        if let Some(existing) = by_pid.get_mut(&pid) {
+                            if existing.volume.is_none() {
+                                existing.volume = level;
+                                existing.muted = mute;
+                            }
                             continue;
                         }
                         let Some(path) = exe_path(pid) else { continue };
                         let exe = path.rsplit('\\').next().unwrap_or(&path).to_string();
-                        by_pid.insert(pid, AppSession { pid, exe, path, output: persisted(&f, pid, eRender), input: persisted(&f, pid, eCapture) });
+                        by_pid.insert(pid, AppSession { pid, exe, path, output: persisted(&f, pid, eRender), input: persisted(&f, pid, eCapture), volume: level, muted: mute });
                     }
                 }
             }
@@ -147,6 +163,40 @@ mod imp {
         }
         Ok(())
     }
+
+    /// Sets an app's volume (0–1) and/or mute on all its playback sessions, on every output.
+    pub fn set_volume(pid: u32, volume: Option<f32>, mute: Option<bool>) -> Result<usize, String> {
+        init();
+        let mut n = 0;
+        unsafe {
+            let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
+            let col = en.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE).map_err(|e| e.to_string())?;
+            for i in 0..col.GetCount().unwrap_or(0) {
+                let Ok(dev) = col.Item(i) else { continue };
+                let Ok(mgr) = dev.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { continue };
+                let Ok(sessions) = mgr.GetSessionEnumerator() else { continue };
+                for k in 0..sessions.GetCount().unwrap_or(0) {
+                    let Ok(ctl) = sessions.GetSession(k) else { continue };
+                    let Ok(ctl2) = ctl.cast::<IAudioSessionControl2>() else { continue };
+                    if ctl2.GetProcessId().ok() != Some(pid) {
+                        continue;
+                    }
+                    let Ok(v) = ctl.cast::<ISimpleAudioVolume>() else { continue };
+                    if let Some(x) = volume {
+                        let _ = v.SetMasterVolume(super::clamp_volume(x), std::ptr::null());
+                    }
+                    if let Some(m) = mute {
+                        let _ = v.SetMute(m, std::ptr::null());
+                    }
+                    n += 1;
+                }
+            }
+        }
+        if n == 0 {
+            return Err("Appen spiller ikke lyd lige nu".into());
+        }
+        Ok(n)
+    }
 }
 
 #[cfg(not(windows))]
@@ -158,6 +208,29 @@ mod imp {
     pub fn set(_pid: u32, _flow: &str, _endpoint: Option<&str>) -> Result<(), String> {
         Err("Kun på Windows".into())
     }
+    pub fn set_volume(_pid: u32, _volume: Option<f32>, _mute: Option<bool>) -> Result<usize, String> {
+        Err("Kun på Windows".into())
+    }
 }
 
-pub use imp::{sessions, set};
+pub use imp::{sessions, set, set_volume};
+
+/// 0–1, anything else is clamped (NaN → 0).
+pub fn clamp_volume(v: f32) -> f32 {
+    if v.is_nan() {
+        0.0
+    } else {
+        v.clamp(0.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod volume_tests {
+    #[test]
+    fn volume_is_clamped() {
+        assert_eq!(super::clamp_volume(1.5), 1.0);
+        assert_eq!(super::clamp_volume(-1.0), 0.0);
+        assert_eq!(super::clamp_volume(f32::NAN), 0.0);
+        assert_eq!(super::clamp_volume(0.4), 0.4);
+    }
+}

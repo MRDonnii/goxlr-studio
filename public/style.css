@@ -445,3 +445,6 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .submix-row { display: flex; align-items: center; gap: 8px; }
 .submix-row > .row { flex: 1; min-width: 0; }
 input.num { width: 64px; }
+.chatmix-ends { margin-bottom: -6px; }
+.app-volume { display: flex; align-items: center; gap: 6px; min-width: 180px; }
+.app-volume input[type=range] { width: 110px; }

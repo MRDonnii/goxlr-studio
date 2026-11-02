@@ -101,6 +101,8 @@ export async function engineInfo() {
       : { ok: true, problems: [] },
     schema: demoEngine.unregistered ? 0 : 2,
     schema_required: 2,
+    denoise_bundled: true,
+    denoise_installed: demoEngine.kind === 'builtin',
   };
 }
 
@@ -243,14 +245,22 @@ export async function setHotkeys(bindings) {
 }
 
 const DEMO_APPS = [
-  { pid: 101, exe: 'Spotify.exe', path: 'C:\\Spotify\\Spotify.exe', output: 'out-goxlr-music', input: null },
-  { pid: 102, exe: 'Discord.exe', path: 'C:\\Discord\\Discord.exe', output: 'out-goxlr-chat', input: 'in-goxlr-chat' },
-  { pid: 103, exe: 'chrome.exe', path: 'C:\\Chrome\\chrome.exe', output: 'out-goxlr-old', input: null },
-  { pid: 104, exe: 'cod.exe', path: 'C:\\Games\\cod.exe', output: 'out-goxlr-system', input: 'in-goxlr-chat' },
+  { pid: 101, exe: 'Spotify.exe', path: 'C:\\Spotify\\Spotify.exe', output: 'out-goxlr-music', input: null, volume: 0.8, muted: false },
+  { pid: 102, exe: 'Discord.exe', path: 'C:\\Discord\\Discord.exe', output: 'out-goxlr-chat', input: 'in-goxlr-chat', volume: 1, muted: false },
+  { pid: 103, exe: 'chrome.exe', path: 'C:\\Chrome\\chrome.exe', output: 'out-goxlr-old', input: null, volume: 0.6, muted: false },
+  { pid: 104, exe: 'cod.exe', path: 'C:\\Games\\cod.exe', output: 'out-goxlr-system', input: 'in-goxlr-chat', volume: 1, muted: false },
 ];
 export async function appSessions() {
   if (isNative()) return invoke('app_sessions');
   return structuredClone(DEMO_APPS);
+}
+
+/** An app's own volume (0–1) and/or mute, like Windows' volume mixer. */
+export async function setAppVolume(pid, volume = null, mute = null) {
+  if (isNative()) return invoke('app_volume', { pid, volume, mute });
+  const a = DEMO_APPS.find((x) => x.pid === pid);
+  if (a) { if (volume != null) a.volume = volume; if (mute != null) a.muted = mute; }
+  return 1;
 }
 
 export async function setAppDevice(pid, flow, id) {
@@ -335,6 +345,24 @@ export async function gameMuteSystemSounds(mute) {
   demoGame.system_muted = mute;
   return 1;
 }
+
+// Lydklip (clips.rs). The demo pretends to keep sound.
+let demoClips = { running: false, device: '', seconds: 30, rate: 48000, buffered: 0, error: null, at: 0 };
+export async function clipsStart(device, seconds) {
+  if (isNative()) return invoke('clips_start', { device, seconds });
+  demoClips = { ...demoClips, running: true, device, seconds, at: Date.now() };
+}
+export async function clipsStop() { if (isNative()) return invoke('clips_stop'); demoClips.running = false; }
+export async function clipsStatus() {
+  if (isNative()) return invoke('clips_status');
+  return { ...demoClips, buffered: demoClips.running ? Math.min(demoClips.seconds, (Date.now() - demoClips.at) / 1000) : 0 };
+}
+export async function clipsSave(seconds) {
+  if (isNative()) return invoke('clips_save', { seconds });
+  if (!demoClips.running) throw new Error('Lydklip er ikke slået til');
+  return `C:\\Users\\demo\\Music\\GoXLR Studio\\Klip ${new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '.')}.wav`;
+}
+export async function clipsOpenDir() { if (isNative()) return invoke('clips_open_dir'); }
 
 const demoB64 = (t) => btoa(t);
 export async function moveCollect(dirs) {

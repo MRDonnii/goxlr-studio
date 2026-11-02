@@ -51,11 +51,13 @@ export function engineConfig(state, { devices = [], profile = null, target = sta
   const main = enginePayload(state.slots[state.active], state.extras, target, playbackOffset(state));
   if (!main.enabled) return main;
   const chans = activeChannels(state, devices, profile, builtins);
-  // Lige lydniveau: a channel that is lowered needs its own section, even without its own preset.
+  // Lige lydniveau and the chat's noise removal: such a channel needs its own section, even
+  // without its own preset.
   const levels = levelOffsets(state);
+  const denoise = chatDenoise(state);
   const pool = target ? [target] : devices.filter((d) => d.flow === 'render').map((d) => d.id);
   for (const channel of EQ_CHANNELS) {
-    if (!levels[channel] || chans.some((c) => c.channel === channel)) continue;
+    if (!(levels[channel] || (denoise && channel === 'Chat')) || chans.some((c) => c.channel === channel)) continue;
     const id = channelEndpoint(channel, devices);
     if (id) chans.push({ channel, name: null, id, eq: null, main: pool.some((x) => sameId(x, id)) });
   }
@@ -70,16 +72,19 @@ export function engineConfig(state, { devices = [], profile = null, target = sta
       if (!c.eq) {
         const eq = c.main ? state.slots[state.active] : FLAT_EQ;
         const extras = c.main ? state.extras : {};
-        return { ...enginePayload({ ...eq, enabled: true }, extras, c.id, (c.main ? playbackOffset(state) : 0) + level), channel: c.channel, name: null, level };
+        return { ...enginePayload({ ...eq, enabled: true }, extras, c.id, (c.main ? playbackOffset(state) : 0) + level), channel: c.channel, name: null, level, denoise: denoise && c.channel === 'Chat' };
       }
       // "Ingen EQ" is really nothing: no Loudness/Crossfeed either.
       const extras = c.name === FLAT ? {} : state.extras;
       const eq = { ...c.eq, enabled: true };
       const guard = state.clipGuard !== false ? clipGuard(eq, extras) : 0;
-      return { ...enginePayload(eq, extras, c.id, guard + level), channel: c.channel, name: c.name, level };
+      return { ...enginePayload(eq, extras, c.id, guard + level), channel: c.channel, name: c.name, level, denoise: denoise && c.channel === 'Chat' };
     }),
   };
 }
+
+/** "Fjern støj fra vennernes stemmer": the RNNoise plugin on the Chat output. */
+export const chatDenoise = (state) => !!state?.chatDenoise?.enabled;
 
 /** True when any channel has a preset under any profile. */
 export const usesChannelEq = (state) => Object.values(state?.channelEq || {}).some((v) => v && Object.values(v).some(Boolean));

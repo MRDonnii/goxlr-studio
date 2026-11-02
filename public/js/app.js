@@ -30,9 +30,10 @@ import { startMediaWatch } from './media.js';
 import { startSchedule } from './schedule.js';
 import { startMicLimiter } from './miclimiter.js';
 import { startGameMode } from './gamemode.js';
+import { startClips } from './clips.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
-import { engineConfig, usesChannelEq, hasProfileSets } from './channeleq.js';
+import { engineConfig, usesChannelEq, hasProfileSets, chatDenoise } from './channeleq.js';
 import { levelOffsets } from './levelmatch.js';
 
 const PAGES = [
@@ -174,7 +175,7 @@ async function applyOutputEq() {
   const st = ctx.outputEq;
   let target = st.target;
   // EQ pr. kanal needs the GoXLR's Windows outputs (found by name, so driver updates don't matter).
-  const devs = target || usesChannelEq(st) || Object.keys(levelOffsets(st)).length ? await listAudioDevices().catch(() => []) : [];
+  const devs = target || usesChannelEq(st) || Object.keys(levelOffsets(st)).length || chatDenoise(st) ? await listAudioDevices().catch(() => []) : [];
   if (target) {
     const r = resolveDevice(devs, target, st.target_name, 'render');
     if (r && r !== target) { st.target = target = r; storeSet('output-eq', st); }
@@ -874,6 +875,7 @@ async function boot() {
   startSchedule(ctx);
   startMicLimiter(ctx);
   startGameMode(ctx);
+  startClips(ctx);
   // Profilhistorik: a version of each changed profile every 5 minutes.
   setTimeout(() => snapshotProfiles(ctx), 20000);
   setInterval(() => snapshotProfiles(ctx), 5 * 60 * 1000);

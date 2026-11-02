@@ -24,5 +24,14 @@ GoXLR Studio er MIT-licenseret. Windows-udgaven indeholder desuden disse kompone
   - libsndfile (`sndfile.dll`) – LGPL v2.1 eller senere, https://libsndfile.github.io/libsndfile/
   - Microsoft Visual C++ Runtime (`msvcp140*.dll`, `vcruntime140*.dll`) – Microsofts licens til videredistribution.
 
+## Støjfjerning af chatten – noise-suppression-for-voice 1.22 (`rnnoise_stereo.dll`)
+- Kilde: https://github.com/werman/noise-suppression-for-voice (tag `v1.22`, commit `0b8c03b3…`) – den officielle Windows-udgave
+  (`win-rnnoise.zip`, SHA-256 `7fc1a031…708e`) hentes i bygget, og VST-pluginnet bruges uændret. Den tilsvarende kildekode
+  (`noise-suppression-for-voice-src-1.22.zip`) ligger ved hver GoXLR Studio-udgivelse.
+- Licens: GNU GPL version 3 – Copyright (c) werman og bidragydere. Fuld tekst: [`licenses/GPL-3.0.txt`](licenses/GPL-3.0.txt).
+  Pluginnet bygger på RNNoise (BSD-3-Clause, Xiph.Org Foundation og Jean-Marc Valin).
+- Lægges i `C:\Program Files\GoXLR Studio Engine\` sammen med EQ-motoren og indlæses af den (VSTPlugin-filteret) på Chat-udgangen,
+  når du slår "Fjern støj fra vennernes stemmer" til. GoXLR Studio linker ikke mod det.
+
 ## Hardware-driver (følger ikke med)
 TC-Helicons USB-driver til GoXLR skal være installeret i Windows. Den hentes fra TC-Helicon og er ikke en del af GoXLR Studio.

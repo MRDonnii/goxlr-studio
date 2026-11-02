@@ -2,6 +2,7 @@ mod api;
 mod apo;
 mod apps;
 mod audio;
+mod clips;
 mod daemon;
 mod daemon_host;
 mod deck;
@@ -21,6 +22,7 @@ mod osd;
 mod session;
 mod soundcheck;
 mod sounds;
+mod surround;
 mod spectrum;
 mod store;
 mod update;
@@ -329,6 +331,38 @@ async fn game_state() -> Result<game::Foreground, String> {
 #[tauri::command]
 async fn game_mute_system_sounds(mute: bool) -> Result<usize, String> {
     blocking(move || game::mute_system_sounds(mute)).await
+}
+
+#[tauri::command]
+async fn app_volume(pid: u32, volume: Option<f32>, mute: Option<bool>) -> Result<usize, String> {
+    blocking(move || apps::set_volume(pid, volume, mute)).await
+}
+
+#[tauri::command]
+fn clips_start(device: String, seconds: u32) {
+    clips::start(device, seconds);
+}
+
+#[tauri::command]
+fn clips_stop() {
+    clips::stop();
+}
+
+#[tauri::command]
+fn clips_status() -> clips::ClipStatus {
+    clips::status()
+}
+
+#[tauri::command]
+async fn clips_save(seconds: u32) -> Result<String, String> {
+    blocking(move || clips::save(seconds)).await
+}
+
+#[tauri::command]
+fn clips_open_dir() -> Result<(), String> {
+    let dir = clips::clips_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    migrate::open_path(dir.display().to_string())
 }
 
 #[tauri::command]
@@ -889,6 +923,12 @@ pub fn run() {
             migrate_autostarts,
             migrate_backup,
             move_collect,
+            clips_start,
+            clips_stop,
+            clips_status,
+            clips_save,
+            clips_open_dir,
+            app_volume,
             game_state,
             game_mute_system_sounds,
             move_restore,

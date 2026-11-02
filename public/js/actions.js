@@ -1,5 +1,7 @@
 import { MEDIA_COMMANDS } from './media.js';
 import { HEARING_DEFAULTS } from './hearing.js';
+import { chatMixAction } from './chatmix.js';
+import { saveClip } from './clips.js';
 import { setLimiter, limiterSettings } from './miclimiter.js';
 import { playSound, stopSounds, soundNames } from './soundboard.js';
 import { obsScene, streamSafeMusic } from './obs.js';
@@ -135,6 +137,8 @@ export async function runAction(ctx, id, source = 'handling') {
     case 'mic-limiter': return setLimiter(ctx, arg === 'on' ? true : arg === 'off' ? false : !limiterSettings(ctx).enabled);
     case 'sampler-pad': { const [bank, pad] = arg.split('|'); if (m?.sampler) ctx.conn.command('PlayNextSample', bank, pad); return; }
     case 'sampler-bank': if (m?.sampler) { ctx.conn.command('SetActiveSamplerBank', arg); notify(ctx, `Sampler: bank ${arg}`); } return;
+    case 'chatmix': return chatMixAction(ctx, arg);
+    case 'clip-save': return saveClip(ctx);
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
     // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
@@ -233,10 +237,12 @@ export async function actionCatalog(ctx) {
     ...['A', 'B', 'C'].map((b) => ({ id: `sampler-bank:${b}`, label: `Sampler: bank ${b}` })),
     ...['A', 'B', 'C'].flatMap((b) => SAMPLER_PADS.map(([k, n]) => ({ id: `sampler-pad:${b}|${k}`, label: `Afspil sampler-knap ${n} (bank ${b})` }))),
   ] : []);
+  g('ChatMix', [{ id: 'chatmix:chat', label: 'ChatMix mod chat' }, { id: 'chatmix:game', label: 'ChatMix mod spil' }, { id: 'chatmix:center', label: 'ChatMix i midten' }]);
   g('Medier', MEDIA_COMMANDS.map(([c, label]) => ({ id: `media:${c}`, label })));
   g('Andet', [
     m?.effects ? { id: 'fx-toggle', label: 'Effekter til/fra' } : null,
     { id: 'ducking-toggle', label: 'Auto-ducking til/fra' },
+    { id: 'clip-save', label: 'Gem lydklip (de sidste sekunder)' },
     { id: 'discord-toggle', label: 'Skift Discord-mute (uden at røre GoXLR’en)' },
     { id: 'discord-deafen', label: 'Skift Discord-døv (uden at røre GoXLR’en)' },
     { id: 'stream-safe-music', label: 'Stream-sikker musik til/fra (Music ud af streamen)' },
@@ -277,6 +283,8 @@ export function actionLabel(ctx, id) {
     case 'hearing-cap': return arg === 'off' ? 'Intet loft for hovedtelefonerne' : `Loft for hovedtelefonerne: ${arg} %`;
     case 'sampler-bank': return `Sampler: bank ${arg}`;
     case 'sampler-pad': { const [b, k] = arg.split('|'); return `Afspil sampler-knap ${SAMPLER_PADS.find(([x]) => x === k)?.[1] || k} (bank ${b})`; }
+    case 'clip-save': return 'Gem lydklip';
+    case 'chatmix': return arg === 'center' ? 'ChatMix i midten' : arg === 'chat' ? 'ChatMix mod chat' : 'ChatMix mod spil';
     case 'media': return MEDIA_COMMANDS.find(([c]) => c === arg)?.[1] || arg;
     case 'mute-fader': return `Mute fader ${arg}`;
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;

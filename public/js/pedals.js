@@ -4,8 +4,12 @@
 // - A MIDI pedal, key or fader comes from midi.rs as `midi` events, also with the window hidden.
 // Each pedal: "Tryk" runs an action, "Hold" works while held (push-to-talk/-mute), "Tryk og hold"
 // does one thing on a short tap and another while held, "Fader" sets a channel's volume.
+import { setChatMix } from './chatmix.js';
 import { storeGet, storeSet, isNative, midiStart } from './native.js';
 import { releaseAction } from './actions.js';
+
+/** A MIDI fader on this "channel" moves ChatMix instead of a volume. */
+export const CHATMIX = 'ChatMix';
 
 export const HOLD_MS = 400;
 export const HOLD_ACTIONS = [['hold:ptt', 'Push-to-talk (tal mens du holder)'], ['hold:ptm', 'Push-to-mute (mute mens du holder)']];
@@ -113,7 +117,11 @@ function midiMessage(ctx, msg) {
       const key = p.channel, now = Date.now();
       const f = faderAt.get(key) || { at: 0 };
       clearTimeout(f.timer);
-      const send = () => { ctx.conn.command('SetVolume', p.channel, faderValue(ev.value)); faderAt.set(key, { at: Date.now() }); };
+      const send = () => {
+        if (p.channel === CHATMIX) setChatMix(ctx, (ev.value / 127) * 200 - 100);
+        else ctx.conn.command('SetVolume', p.channel, faderValue(ev.value));
+        faderAt.set(key, { at: Date.now() });
+      };
       if (now - f.at > 50) send(); else faderAt.set(key, { at: f.at, timer: setTimeout(send, 60) });
       ctx.onPedal?.(p.id, true, ev.value);
       continue;

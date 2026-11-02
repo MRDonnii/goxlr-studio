@@ -63,7 +63,9 @@ export function enginePayload(eq, extras = {}, target = null, offset = 0) {
     preamp,
     // A steep low/high cut is several filters in the engine (eq.js expandBand).
     bands: expandBands([...eq.bands, ...loud]),
-    extra: [...(extras.crossfeed?.enabled ? crossfeedLines(extras.crossfeed) : []), ...channelLines(extras.channels)],
+    // Virtuelle højttalere replace crossfeed (both mix the channels); the engine adds them last.
+    extra: [...(extras.crossfeed?.enabled && !extras.surround?.enabled ? crossfeedLines(extras.crossfeed) : []), ...channelLines(extras.channels)],
+    surround: extras.surround?.enabled ? { angle: Number(extras.surround.angle) || 30, room: Math.round(Number(extras.surround.room) || 0) } : null,
     target,
   };
 }

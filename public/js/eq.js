@@ -369,6 +369,12 @@ export const BUILTIN_PRESETS = {
   'Film / serier': { enabled: true, preamp: -2.5, bands: [{ type: 'LSC', freq: 80, gain: 1.5, q: 0.7 }, { type: 'PK', freq: 2500, gain: 2.5, q: 1 }, { type: 'PK', freq: 6500, gain: -1, q: 2 }] },
   'Musik': { enabled: true, preamp: -3, bands: [{ type: 'LSC', freq: 90, gain: 2.5, q: 0.7 }, { type: 'PK', freq: 2500, gain: -1, q: 1 }, { type: 'HSC', freq: 9000, gain: 2, q: 0.7 }] },
   'Sen aften': { enabled: true, preamp: 0, bands: [{ type: 'LSC', freq: 120, gain: -4, q: 0.7 }, { type: 'PK', freq: 3000, gain: -2, q: 1.2 }] },
+  // Spil-presets: starting points for game types (the preamp = the highest boost + 0,5 dB, Balance).
+  'Spil: CS2 / Valorant': { enabled: true, preamp: -4, bands: [{ type: 'HP', freq: 40, gain: 0, q: 0.707 }, { type: 'LSC', freq: 150, gain: -5, q: 0.7 }, { type: 'PK', freq: 300, gain: -2, q: 1 }, { type: 'PK', freq: 2000, gain: 3, q: 1.2 }, { type: 'PK', freq: 4000, gain: 3.5, q: 1.4 }, { type: 'HSC', freq: 9000, gain: -2, q: 0.7 }] },
+  'Spil: Warzone / Battlefield': { enabled: true, preamp: -3.5, bands: [{ type: 'LSC', freq: 100, gain: -4, q: 0.7 }, { type: 'PK', freq: 250, gain: -2, q: 1 }, { type: 'PK', freq: 2500, gain: 3, q: 1 }, { type: 'PK', freq: 5000, gain: 2, q: 1.5 }] },
+  'Spil: Fortnite / Apex': { enabled: true, preamp: -3.5, bands: [{ type: 'PK', freq: 200, gain: -2, q: 1 }, { type: 'PK', freq: 1500, gain: 2, q: 1 }, { type: 'PK', freq: 3500, gain: 3, q: 1.3 }, { type: 'HSC', freq: 8000, gain: 1, q: 0.7 }] },
+  'Spil: Racing / sport': { enabled: true, preamp: -3.5, bands: [{ type: 'LSC', freq: 80, gain: 3, q: 0.7 }, { type: 'PK', freq: 400, gain: -1.5, q: 1 }, { type: 'PK', freq: 2500, gain: 1.5, q: 1 }] },
+  'Spil: RPG / eventyr': { enabled: true, preamp: -2.5, bands: [{ type: 'LSC', freq: 90, gain: 2, q: 0.7 }, { type: 'PK', freq: 2500, gain: 1, q: 1 }, { type: 'HSC', freq: 10000, gain: 1.5, q: 0.7 }] },
 };
 
 // What each built-in preset is for (shown when it is chosen).
@@ -381,6 +387,11 @@ export const PRESET_INFO = {
   'Film / serier': 'Tydeligere dialog og lidt mere fylde i bunden – godt til film, serier og YouTube.',
   'Musik': 'En let "smil-kurve": lidt mere bas og luft i toppen, som de fleste kan lide til musik.',
   'Sen aften': 'Til lav lydstyrke, når andre sover: mindre bas, der går gennem væggene, og blødere top.',
+  'Spil: CS2 / Valorant': 'Konkurrence-skydespil: buldren og granater skæres ned, fodtrin og genladning (2–4 kHz) frem, skarp top dæmpet.',
+  'Spil: Warzone / Battlefield': 'Store slag med meget bas: eksplosioner tæmmes, så fodtrin og skud tæt på kan høres.',
+  'Spil: Fortnite / Apex': 'Hurtige skydespil med lyse lyde: lidt mindre mudder, mere af fodtrin, skjolde og genladning.',
+  'Spil: Racing / sport': 'Mere motor og stemning i bunden, lidt klarere kommentator.',
+  'Spil: RPG / eventyr': 'Fylde og luft til musik og stemninger – til historie-spil, hvor du ikke jagter fodtrin.',
 };
 
 // "Det lyder forkert": a problem → one EQ move. Applied on top of the current EQ (fixMove).

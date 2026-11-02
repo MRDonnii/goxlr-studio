@@ -45,6 +45,15 @@ jobs:
           foreach ($f in 'EqualizerAPO.dll','fftw3f.dll','sndfile.dll','msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll','vcruntime140.dll','vcruntime140_1.dll') {
             Copy-Item "engine-dl/x/$f" engine/
           }
+          # Støjfjerning af chatten: RNNoise VST-plugin (werman/noise-suppression-for-voice v1.22, GPL-3.0).
+          Get-Verified 'https://github.com/werman/noise-suppression-for-voice/releases/download/v1.22/win-rnnoise.zip' 'engine-dl/win-rnnoise.zip' '7FC1A031438C27CB5731BDD4B627CC890387752C26436FD7E7B29A9C67CC708E'
+          7z x -y -oengine-dl/rnnoise engine-dl/win-rnnoise.zip | Out-Null
+          Copy-Item 'engine-dl/rnnoise/win-rnnoise/vst/rnnoise_stereo.dll' engine/
+          if ((Get-FileHash engine/rnnoise_stereo.dll -Algorithm SHA256).Hash -ne '925350973E6A2036CF74FDA4B43E8A87B415A864DAD94AF943105BC1D5EE7E36') { throw 'rnnoise_stereo.dll checksum mismatch' }
+          # Its source code for the release (the exact tagged commit).
+          git clone -q --depth 1 --branch v1.22 https://github.com/werman/noise-suppression-for-voice engine-dl/rnnoise-src
+          if ((git -C engine-dl/rnnoise-src rev-parse HEAD) -ne '0b8c03b368ca609247a0cb65b0c8eb651759dd69') { throw 'noise-suppression-for-voice v1.22 is not the expected commit' }
+          git -C engine-dl/rnnoise-src archive --format=zip --prefix=noise-suppression-for-voice-1.22/ -o ../noise-suppression-for-voice-src-1.22.zip HEAD
           "ENGINE_DIR=$((Resolve-Path engine).Path)" >> $env:GITHUB_ENV
           "ENGINE_VERSION=1.4.2" >> $env:GITHUB_ENV
 
@@ -64,6 +73,7 @@ jobs:
           Copy-Item src-tauri/target/release/bundle/msi/*.msi dist/
           Copy-Item THIRD-PARTY-NOTICES.md dist/
           Copy-Item engine-dl/EqualizerAPO-src-1.4.2.zip dist/
+          Copy-Item engine-dl/noise-suppression-for-voice-src-1.22.zip dist/
 
       - uses: actions/upload-artifact@v4
         with:

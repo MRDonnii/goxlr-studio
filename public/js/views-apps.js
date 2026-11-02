@@ -1,5 +1,5 @@
-import { h, toast } from './ui.js';
-import { appSessions, setAppDevice, listAudioDevices, isNative, storeSet, engineInfo } from './native.js';
+import { h, toast, setRangeFill } from './ui.js';
+import { appSessions, setAppDevice, setAppVolume, listAudioDevices, isNative, storeSet, engineInfo } from './native.js';
 import { shortName, CHANNEL_LABEL } from './views-mixer.js';
 import { resolveDevice, deviceName, triggerActions, channelEndpoint } from './extras.js';
 import { BUILTIN_PRESETS } from './eq.js';
@@ -139,10 +139,28 @@ export function appsView(ctx) {
         ctx.saveAppRules(); render();
       } }, rule ? '📌 Husket' : 'Husk');
       const eqName = appEqName(ctx, g, devs);
+      // The app's own volume (Windows' volume mixer), for all its processes.
+      const withVol = g.sessions.filter((x) => x.volume != null);
+      const volBox = withVol.length ? (() => {
+        const v0 = Math.round(Math.max(...withVol.map((x) => x.volume)) * 100);
+        const muted = withVol.every((x) => x.muted);
+        const val = h('span', { class: 'val' }, `${v0} %`);
+        const r = h('input', { type: 'range', min: 0, max: 100, value: v0, 'aria-label': `Lydstyrke for ${g.exe}`, 'data-testid': 'app-volume' });
+        setRangeFill(r);
+        let t = null;
+        r.addEventListener('input', () => {
+          val.textContent = `${r.value} %`; setRangeFill(r);
+          clearTimeout(t);
+          t = setTimeout(() => { for (const x of withVol) setAppVolume(x.pid, Number(r.value) / 100).catch(() => {}); }, 40);
+        });
+        const mb = h('button', { class: `btn sm ${muted ? 'danger on' : ''}`, 'data-testid': 'app-mute', title: muted ? 'Slå lyden til' : 'Slå lyden fra', onclick: async () => { for (const x of withVol) await setAppVolume(x.pid, null, !muted).catch(() => {}); mb.blur(); refresh(); } }, muted ? '🔇' : '🔊');
+        return h('div', { class: 'app-volume' }, mb, r, val);
+      })() : null;
       return h('div', { class: `item app-row ${stale ? 'stale' : ''}` },
         h('div', { class: 'app-name' }, h('b', {}, g.exe.replace(/\.exe$/i, '')), eqName ? h('span', { class: 'badge info', 'data-testid': 'app-eq-badge', title: 'Den EQ, appens lyd får (EQ pr. kanal)' }, `EQ: ${eqName}`) : null,
           h('span', { class: 'hint' }, g.pids.length > 1 ? `${g.pids.length} processer` : g.path)),
         h('div', { class: 'spacer' }),
+        volBox,
         h('span', { class: 'lbl app-lbl' }, 'Udgang'), outSel,
         h('span', { class: 'lbl app-lbl' }, 'Mikrofon'), inSel,
         pin);

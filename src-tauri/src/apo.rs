@@ -47,6 +47,12 @@ pub struct OutputEq {
     /// One section per GoXLR channel with its own preset (Game, Music, Chat, System).
     #[serde(default)]
     pub channels: Vec<ChannelEq>,
+    /// Virtuelle højttalere (surround.rs).
+    #[serde(default)]
+    pub surround: Option<crate::surround::Surround>,
+    /// Remove noise from the voices (RNNoise VST plugin, see engine::DENOISE_DLL).
+    #[serde(default)]
+    pub denoise: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -59,6 +65,10 @@ pub struct ChannelEq {
     pub extra: Vec<String>,
     #[serde(default)]
     pub graphic: Vec<(f64, f64)>,
+    #[serde(default)]
+    pub surround: Option<crate::surround::Surround>,
+    #[serde(default)]
+    pub denoise: bool,
 }
 
 const EXTRA_ALLOWED: [&str; 5] = ["Copy:", "Channel:", "Filter:", "Delay:", "Preamp:"];
@@ -115,12 +125,12 @@ pub fn render_with(eq: &OutputEq, device_name: Option<&str>, name_of: &dyn Fn(&s
         let main: Vec<String> = eq.devices.iter().flatten().filter_map(|id| selector(id, name_of)).collect();
         if !main.is_empty() {
             out.push_str(&format!("Device: {}\n", main.join("; ")));
-            body(&mut out, eq.preamp, &eq.graphic, &eq.bands, &eq.extra);
+            body(&mut out, eq.preamp, &eq.graphic, &eq.bands, &eq.extra, eq.surround, eq.denoise);
         }
         for c in eq.channels.iter().filter(|c| c.enabled) {
             if let Some(sel) = selector(&c.target, name_of) {
                 out.push_str(&format!("Device: {sel}\n"));
-                body(&mut out, c.preamp, &c.graphic, &c.bands, &c.extra);
+                body(&mut out, c.preamp, &c.graphic, &c.bands, &c.extra, c.surround, c.denoise);
             }
         }
         return out;
@@ -137,7 +147,7 @@ pub fn render_with(eq: &OutputEq, device_name: Option<&str>, name_of: &dyn Fn(&s
     if !eq.enabled {
         return out;
     }
-    body(&mut out, eq.preamp, &eq.graphic, &eq.bands, &eq.extra);
+    body(&mut out, eq.preamp, &eq.graphic, &eq.bands, &eq.extra, eq.surround, eq.denoise);
     out
 }
 
@@ -151,7 +161,11 @@ fn graphic_line(points: &[(f64, f64)]) -> Option<String> {
     if pts.is_empty() { None } else { Some(format!("GraphicEQ: {}", pts.join("; "))) }
 }
 
-fn body(out: &mut String, preamp: f64, graphic: &[(f64, f64)], bands: &[Band], extra: &[String]) {
+fn body(out: &mut String, preamp: f64, graphic: &[(f64, f64)], bands: &[Band], extra: &[String], surround: Option<crate::surround::Surround>, denoise: bool) {
+    // First: noise removal works best on the untouched voices (RNNoise is made for 48 kHz only).
+    if denoise {
+        out.push_str(&denoise_lines(&crate::engine::denoise_path().display().to_string()));
+    }
     out.push_str(&format!("Preamp: {:.1} dB\n", preamp));
     if let Some(line) = graphic_line(graphic) {
         out.push_str(&line);
@@ -180,6 +194,18 @@ fn body(out: &mut String, preamp: f64, graphic: &[(f64, f64)], bands: &[Band], e
             out.push('\n');
         }
     }
+    // Last, after the EQ: the virtual speakers (they mix the two channels, like crossfeed).
+    if let Some(s) = surround {
+        for line in crate::surround::lines(s) {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+}
+
+/// The plugin on the selected output, only at 48 kHz (anything else and it is left out).
+pub fn denoise_lines(dll: &str) -> String {
+    format!("If: sampleRate == 48000\nVSTPlugin: Library \"{dll}\"\nEndIf:\n")
 }
 
 fn filters<'a>(out: &mut String, bands: impl Iterator<Item = &'a Band>) {
@@ -199,7 +225,17 @@ pub fn apply(eq: &OutputEq) -> Result<(), String> {
     let dir = engine::config_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let name = eq.target.as_deref().and_then(crate::audio::name_of);
+    // The noise-suppression plugin only where it is installed (an older engine install may lack it).
+    let mut eq = eq.clone();
+    if !crate::engine::denoise_path().exists() {
+        eq.denoise = false;
+        eq.channels.iter_mut().for_each(|c| c.denoise = false);
+    }
+    let eq = &eq;
     let text = render_with(eq, name.as_deref(), &|id| crate::audio::name_of(id));
+    // Virtuelle højttalere: the impulse files must be there before the config names them.
+    let wanted: Vec<crate::surround::Surround> = if eq.enabled { eq.surround.into_iter().chain(eq.channels.iter().filter(|c| c.enabled).filter_map(|c| c.surround)).collect() } else { Vec::new() };
+    crate::surround::ensure_files(&dir, &wanted)?;
     // Write next to config.txt and rename, so the engine never reads a half-written file.
     let tmp = dir.join("config.tmp");
     std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
@@ -349,6 +385,8 @@ mod tests {
             extra: vec![],
             devices: None,
             channels: vec![],
+            surround: None,
+            denoise: false,
             graphic: vec![],
         };
         let text = render(&eq, None);
@@ -368,6 +406,8 @@ mod tests {
             extra: vec!["Copy: L=0.5*L+0.5*R R=0.5*L+0.5*R".into()],
             devices: None,
             channels: vec![],
+            surround: None,
+            denoise: false,
             graphic: vec![],
         };
         let text = render(&eq, None);
@@ -400,6 +440,8 @@ mod tests {
             extra: vec![],
             devices: None,
             channels: vec![],
+            surround: None,
+            denoise: false,
             graphic: vec![(100.0, 3.0), (1000.0, -2.0)],
         };
         let text = render(&eq, None);
@@ -417,6 +459,8 @@ mod tests {
             extra: vec![],
             devices: None,
             channels: vec![],
+            surround: None,
+            denoise: false,
             graphic: vec![],
         };
         let text = render(&eq, None);
@@ -434,13 +478,22 @@ mod tests {
             target: None,
             extra: vec!["Copy: L=0.5*L+0.5*R R=0.5*L+0.5*R".into()],
             devices: Some(vec!["{0.0.0.00000000}.{aaaa}".into(), "{0.0.0.00000000}.{bbbb}".into()]),
-            channels: vec![ChannelEq { target: "{0.0.0.00000000}.{cccc}".into(), enabled: true, preamp: -3.0, bands: pk(3.0), extra: vec![], graphic: vec![] }],
+            channels: vec![ChannelEq { target: "{0.0.0.00000000}.{cccc}".into(), enabled: true, preamp: -3.0, bands: pk(3.0), extra: vec![], graphic: vec![], surround: None, denoise: true }],
             graphic: vec![],
+            surround: Some(crate::surround::Surround { angle: 30.0, room: 1 }),
+            denoise: false,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().collect();
         let main = lines.iter().position(|l| *l == "Device: {aaaa}; {bbbb}").expect(&text);
         let chan = lines.iter().position(|l| *l == "Device: {cccc}").expect(&text);
+        // Virtual speakers in the main section only, after its EQ.
+        let conv = lines.iter().position(|l| l.starts_with("Convolution: surround-a30-r1-")).expect(&text);
+        assert!(conv > main && conv < chan, "{text}");
+        // Noise removal on the channel only, first in its section and only at 48 kHz.
+        let vst = lines.iter().position(|l| l.starts_with("VSTPlugin: Library")).expect(&text);
+        assert!(vst > chan && lines[vst - 1] == "If: sampleRate == 48000" && lines[vst + 1] == "EndIf:", "{text}");
+        assert_eq!(lines.iter().filter(|l| l.starts_with("VSTPlugin")).count(), 1);
         assert!(main < chan);
         assert!(lines[main..chan].contains(&"Preamp: -2.0 dB") && lines[main..chan].iter().any(|l| l.starts_with("Copy:")));
         assert!(lines[chan..].contains(&"Preamp: -3.0 dB") && !lines[chan..].iter().any(|l| l.starts_with("Copy:")));

@@ -42,3 +42,19 @@ test('the engine gets a section per lowered channel', () => {
   assert.equal(one.channels[0].preamp, -6);
   assert.deepEqual(one.devices, ['g']);
 });
+
+test('noise removal puts the Chat output in its own section with the plugin', () => {
+  const devices = [
+    { id: 'c', name: 'Chat (TC-Helicon GoXLR)', flow: 'render' },
+    { id: 's', name: 'Speakers (Realtek)', flow: 'render' },
+  ];
+  const eq = { enabled: true, preamp: -1, bands: [] };
+  const state = { active: 'A', slots: { A: eq, B: eq }, extras: {}, clipGuard: false, abMatch: false, presets: {}, chatDenoise: { enabled: true } };
+  const cfg = engineConfig(state, { devices });
+  assert.deepEqual(cfg.devices, ['s']);
+  assert.equal(cfg.channels.length, 1);
+  assert.equal(cfg.channels[0].target, 'c');
+  assert.equal(cfg.channels[0].denoise, true);
+  assert.equal(cfg.channels[0].preamp, -1, 'the main EQ is kept on the chat');
+  assert.equal(engineConfig({ ...state, chatDenoise: { enabled: false } }, { devices }).channels, undefined);
+});

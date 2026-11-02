@@ -2,6 +2,7 @@ import { h, toast, slider, confirmDialog, promptDialog, logActivity } from './ui
 import { isNative, soundsList, soundsSave, soundsDelete, soundsRename, soundsOpenDir } from './native.js';
 import { playSound, stopSounds, forgetSound } from './soundboard.js';
 import { prettyAccel } from './views-hotkeys.js';
+import { clipsCard } from './clips.js';
 
 const KEY_POOL = Array.from({ length: 12 }, (_, i) => `Ctrl+Alt+Shift+F${i + 1}`)
   .concat(['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((d) => `Ctrl+Alt+Shift+${d}`));
@@ -108,5 +109,6 @@ export function soundsView(ctx) {
         slider(binder, { label: 'Lydstyrke', min: 0, max: 100, get: () => sb.volume ?? 80, set: (v) => { sb.volume = v; ctx.savePrefs(); }, fmt: (v) => `${v} %` }),
         slider(binder, { label: 'Sample-kanal', min: 0, max: 255, get: () => conn.mixer?.levels?.volumes?.Sample ?? 0, set: (v) => conn.command('SetVolume', 'Sample', v), fmt: (v) => `${Math.round((v / 255) * 100)} %` }),
         h('label', { class: 'engine-dev' }, h('input', { type: 'checkbox', checked: sb.overlap !== false, onchange: (e) => { sb.overlap = e.target.checked; ctx.savePrefs(); } }), h('span', {}, 'Flere lyde på én gang')),
-        isNative() ? h('button', { class: 'btn sm', style: { marginTop: '8px' }, onclick: () => soundsOpenDir().catch((e) => toast(String(e))) }, 'Åbn mappen med lyde') : null)));
+        isNative() ? h('button', { class: 'btn sm', style: { marginTop: '8px' }, onclick: () => soundsOpenDir().catch((e) => toast(String(e))) }, 'Åbn mappen med lyde') : null),
+      clipsCard(ctx)));
 }

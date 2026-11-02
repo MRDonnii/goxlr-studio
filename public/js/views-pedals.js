@@ -5,7 +5,7 @@ import { midiStart, midiPorts, isNative } from './native.js';
 import { actionCatalog } from './actions.js';
 import { accelFromEvent, prettyAccel } from './views-hotkeys.js';
 import { CHANNEL_LABEL } from './views-mixer.js';
-import { HOLD_ACTIONS, PEDAL_MODES, describeInput, stealsTyping } from './pedals.js';
+import { HOLD_ACTIONS, PEDAL_MODES, CHATMIX, describeInput, stealsTyping } from './pedals.js';
 
 const LEARN_SECONDS = 15;
 const VOLUME_CHANNELS = ['Mic', 'LineIn', 'Console', 'System', 'Game', 'Chat', 'Sample', 'Music', 'Headphones', 'MicMonitor', 'LineOut'];
@@ -101,7 +101,7 @@ export function pedalsView(ctx) {
       if (m === 'hold' || m === 'taphold') parts.push(h('span', { class: 'lbl app-lbl' }, m === 'taphold' ? 'Hold →' : '→'),
         h('select', { 'data-testid': 'pedal-hold', onchange: (e) => { p.holdAction = e.target.value; save(); } }, HOLD_ACTIONS.map(([k, v]) => h('option', { value: k, selected: p.holdAction === k }, v))));
       if (m === 'fader') parts.push(h('span', { class: 'lbl app-lbl' }, '→'),
-        h('select', { 'data-testid': 'pedal-channel', onchange: (e) => { p.channel = e.target.value; save(); } }, VOLUME_CHANNELS.map((c) => h('option', { value: c, selected: p.channel === c }, CHANNEL_LABEL[c] || c))));
+        h('select', { 'data-testid': 'pedal-channel', onchange: (e) => { p.channel = e.target.value; save(); } }, [...VOLUME_CHANNELS, CHATMIX].map((c) => h('option', { value: c, selected: p.channel === c }, c === CHATMIX ? 'ChatMix (chat ↔ spil)' : CHANNEL_LABEL[c] || c))));
       // What could go wrong, said in the row.
       const warns = [];
       const accel = p.input?.kind === 'key' ? p.input.accel : null;

@@ -16,7 +16,9 @@ fn main() {
         let files = ["EqualizerAPO.dll", "fftw3f.dll", "sndfile.dll", "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
         if files.iter().all(|f| dir.join(f).is_file()) {
             let mut code = String::from("pub static ENGINE_FILES: &[(&str, &[u8])] = &[\n");
-            for f in files {
+            // Optional: the noise-suppression VST plugin for the chat (only when CI fetched it).
+            let optional = ["rnnoise_stereo.dll"];
+            for f in files.iter().chain(optional.iter().filter(|f| dir.join(f).is_file())) {
                 let p = dir.join(f);
                 println!("cargo:rerun-if-changed={}", p.display());
                 code.push_str(&format!("    ({f:?}, include_bytes!({:?})),\n", p.display().to_string()));

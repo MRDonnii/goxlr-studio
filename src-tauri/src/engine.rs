@@ -59,6 +59,30 @@ pub fn bundled() -> bool {
     !ENGINE_FILES.is_empty()
 }
 
+/// The chat noise-suppression plugin (VST) next to the engine, and whether this build carries it.
+pub const DENOISE_DLL: &str = "rnnoise_stereo.dll";
+pub fn denoise_path() -> PathBuf {
+    install_dir().join(DENOISE_DLL)
+}
+pub fn denoise_bundled() -> bool {
+    ENGINE_FILES.iter().any(|(n, _)| *n == DENOISE_DLL)
+}
+
+/// Files this build carries that an older install doesn't have yet (e.g. the noise-suppression
+/// plugin added in 0.8.0) are added; nothing is overwritten or re-registered.
+fn add_missing_files(log: &mut Vec<String>) {
+    let dir = install_dir();
+    if !dir.join("EqualizerAPO.dll").exists() {
+        return;
+    }
+    for (name, bytes) in ENGINE_FILES {
+        let target = dir.join(name);
+        if !target.exists() && std::fs::write(&target, bytes).is_ok() {
+            log.push(format!("{name} lagt i {}", dir.display()));
+        }
+    }
+}
+
 pub fn install_dir() -> PathBuf {
     let base = std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
     base.join("GoXLR Studio Engine")
@@ -383,6 +407,11 @@ pub struct EngineInfo {
     pub schema: u32,
     /// The version this app needs; when `schema` is older the engine is repaired once.
     pub schema_required: u32,
+    /// The chat noise-suppression plugin: in this build / next to the installed engine.
+    #[serde(default)]
+    pub denoise_bundled: bool,
+    #[serde(default)]
+    pub denoise_installed: bool,
 }
 
 fn fx_key(guid: &str) -> String {
@@ -457,6 +486,8 @@ pub fn info() -> EngineInfo {
         registration: if kind == "builtin" { registration() } else { Registration { ok: true, problems: vec![] } },
         schema: reg::read_dword(APP_KEY, SCHEMA_VALUE).unwrap_or(0),
         schema_required: ENGINE_SCHEMA,
+        denoise_bundled: denoise_bundled(),
+        denoise_installed: denoise_path().exists(),
     }
 }
 
@@ -1675,10 +1706,12 @@ pub fn run_task(task: &Task) -> TaskResult {
         Task::Install { devices, mode } => install_engine(devices, mode.as_deref(), &mut log, &mut tests, &mut sound),
         // A way chosen by hand is only tested; otherwise the way that works is found automatically.
         Task::SetDevices { devices, mode } => ensure_engine_registered(&mut log)
+            .map(|r| { add_missing_files(&mut log); r })
             .and_then(|_| apply_devices(devices, mode.as_deref(), &mut log))
             .map(|_| verify(devices, mode.is_none(), &mut log, &mut tests, &mut sound)),
         // Repairs what an older version or Equalizer APO's uninstaller left behind, then tests.
         Task::Test => ensure_engine_registered(&mut log).and_then(|_| {
+            add_missing_files(&mut log);
             let guids = installed_guids();
             if guids.is_empty() {
                 log.push("EQ-motoren er ikke sat på nogen udgang endnu".into());

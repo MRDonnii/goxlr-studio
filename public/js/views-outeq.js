@@ -7,6 +7,7 @@ import { t, language } from './i18n.js';
 import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
 import { shortName, CHANNEL_LABEL } from './views-mixer.js';
 import { levelMatchCard } from './levelmatch.js';
+import { chatDenoiseCard } from './chatdenoise.js';
 import { hearingTestCard } from './views-hearingtest.js';
 import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChannels } from './channeleq.js';
 import { channelEndpoint } from './extras.js';
@@ -93,6 +94,7 @@ function extrasCard(ctx, apply) {
   x.crossfeed ??= { enabled: false, level: -8, cutoff: 700, delay: 0.3 };
   x.loudness ??= { enabled: false, amount: 4 };
   x.channels ??= { mono: false, balance: 0 };
+  x.surround ??= { enabled: false, angle: 30, room: 1 };
   const save = () => { storeSet('output-eq', state); apply(); };
   const sw = (obj) => { const i = h('input', { type: 'checkbox', checked: obj.enabled, onchange: () => { obj.enabled = i.checked; save(); } }); return h('label', { class: 'switch' }, i, h('span')); };
   const range = (obj, key, min, max, step, fmt) => {
@@ -109,6 +111,11 @@ function extrasCard(ctx, apply) {
     h('div', { class: 'row' }, h('label', {}, 'Styrke'), ...range(x.crossfeed, 'level', -15, -3, 0.5, (v) => `${v} dB`)),
     h('div', { class: 'row' }, h('label', {}, 'Afskæring'), ...range(x.crossfeed, 'cutoff', 300, 1500, 50, (v) => `${v} Hz`)),
     h('div', { class: 'hint' }, 'Til hovedtelefoner: lidt af venstre kanal blandes ind i højre (og omvendt) som når man hører højttalere – mindre "lyd inde i hovedet".'),
+    h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'Virtuelle højttalere'), h('div', { class: 'spacer' }),
+      (() => { const i = h('input', { type: 'checkbox', 'data-testid': 'eq-surround', checked: !!x.surround.enabled, onchange: () => { x.surround.enabled = i.checked; save(); } }); return h('label', { class: 'switch' }, i, h('span')); })()),
+    h('div', { class: 'row' }, h('label', {}, 'Vinkel'), ...range(x.surround, 'angle', 10, 60, 5, (v) => `±${v}°`)),
+    h('div', { class: 'row' }, h('label', {}, 'Rum'), ...range(x.surround, 'room', 0, 3, 1, (v) => ['Intet', 'Lille', 'Stue', 'Stort'][v] || v)),
+    h('div', { class: 'hint' }, 'Hovedtelefoner lyder som to højttalere foran dig – i et rum, hvis du vil – i stedet for inde i hovedet. Godt til musik, film og spil, hvor du vil høre retning. Erstatter crossfeed, mens den er slået til.'),
     h('div', { class: 'row', style: { marginTop: '12px' } }, h('label', {}, 'Loudness'), h('div', { class: 'spacer' }), sw(x.loudness)),
     h('div', { class: 'row' }, h('label', {}, 'Løft'), ...range(x.loudness, 'amount', 1, 10, 0.5, (v) => `${v} dB`)),
     h('div', { class: 'hint' }, 'Løfter bas og diskant til lav lydstyrke. Preamp sænkes automatisk tilsvarende, så intet klipper. Begge dele virker oven på alle presets.'),
@@ -1014,7 +1021,8 @@ export function outputEqView(ctx) {
       apply: () => ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`)),
       label: (ch) => CHANNEL_LABEL[ch] || ch,
       eqOff: () => !eq().enabled,
-    })));
+    })),
+    h('div', { class: 'grid cols-3' }, chatDenoiseCard(ctx, { state, save: () => storeSet('output-eq', state), apply: () => ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`)) })));
 }
 
 // The Lyttetest's GraphicEQ: an 8192-tap linear-phase FIR from the curve (Hann-windowed), cached.
