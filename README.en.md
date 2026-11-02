@@ -109,6 +109,8 @@ Put any action on a key of a Stream Deck, e.g. Streonor, Elgato or Ulanzi. The *
 
 The link also starts GoXLR Studio if the app isn't running.
 
+**Plugin for Elgato Stream Deck with status:** keys light up when what they control is on – e.g. red when the mic is muted, or when a profile or EQ preset is in use. The dials on Stream Deck + control volume. Get `GoXLR-Studio.streamDeckPlugin` from the release (or from the Stream Deck page in the app) and double-click it.
+
 ### Foot pedal
 
 ![Foot pedal](docs/screenshots/fodpedal.png)
@@ -120,6 +122,8 @@ Use a foot pedal as a button – e.g. push-to-talk with your foot. USB pedals th
 Add sounds and play them on the GoXLR's Sample channel – with the GoXLR's routing they reach Discord and your stream. Works on the GoXLR Mini too, which has no sampler of its own.
 
 ### Sampler (full GoXLR)
+
+![Sampler](docs/screenshots/sampler.png)
 
 Sounds on the sampler buttons in three banks, with playback mode (play/stop, hold, loop), order and start/end per sound. Record by holding a button – including the seconds before you pressed.
 
@@ -154,6 +158,9 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 ![Light theme](docs/screenshots/tema-lyst.png)
 
 - **GoXLR settings:** the cough button, what the GoXLR does when the PC sleeps/wakes/shuts down, the screens above the faders, VOD mode and read-aloud of changes
+
+  ![GoXLR settings](docs/screenshots/goxlr-indstillinger.png)
+
 - **Audio clips:** save the last 15–120 seconds of the stream mix as WAV with a button or hotkey
 - **Game mode:** when a game runs in full screen, Windows' notification sounds stop and your own actions can run (e.g. EQ "Footsteps") – everything comes back when the game ends
 - **Schedule:** e.g. at 22:00 → EQ "Late night" and a ceiling on the headphones, at 07:00 → back again
@@ -166,7 +173,7 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 - **Themes:** light, dark (or automatic like Windows), Black (OLED), Northern lights, Sunset, Forest and Paper – and an optional accent colour
 - Start with Windows and close to the tray icon
 - Automatic updates
-- **Home Assistant** via MQTT: GoXLR Studio shows up as a device with mic mute, "Mic open" (e.g. for an ON AIR lamp), GoXLR profile, EQ preset, scene and volumes
+- **Home Assistant** via MQTT: GoXLR Studio shows up as a device with mic mute, "Mic open" (e.g. for an ON AIR lamp), GoXLR profile, EQ preset, scene, volumes, ChatMix, limiter, game mode and "Save audio clip"
 - **OBS:** switch OBS scenes with hotkeys, Stream Deck or automation, let the scene follow the GoXLR profile, and "Stream-safe music" takes the music out of your stream
 - **Remote on your phone:** mute, profiles, scenes, EQ and volume from your phone on the same Wi-Fi
 - Local API, e.g. for Stream Deck

@@ -15,7 +15,7 @@ const OUT = process.argv[2];
   p.on('pageerror', (e) => errors.push(e.message));
   p.on('dialog', (d) => d.accept());
   await p.goto('http://127.0.0.1:14600/?mini'); await p.waitForTimeout(3500);
-  const nav = async (t) => { await p.click(`#nav button:has-text("${t}")`); await p.waitForTimeout(1300); await p.mouse.move(5, 870); };
+  const nav = async (t) => { await p.click(`#nav button:text-is("${t}")`); await p.waitForTimeout(1300); await p.mouse.move(5, 870); };
   // Status line as in the app with a GoXLR connected.
   const live = () => p.evaluate(() => {
     const el = document.getElementById('conn');
@@ -89,7 +89,14 @@ const OUT = process.argv[2];
     await p.click('button:has-text("Gem scene")'); await p.waitForTimeout(400);
   }
 
+  // ChatMix on, a little toward the chat.
   await nav('Mixer'); await p.waitForTimeout(600);
+  const cm = p.locator('[data-testid=chatmix-card]');
+  if (!(await cm.locator('input[type=checkbox]').first().isChecked())) await cm.locator('.switch').first().click();
+  await cm.locator('input[type=range]').evaluate((r) => { r.value = 30; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('pointerup')); });
+  await p.waitForTimeout(400);
+  await p.evaluate(() => { for (const el of [document.scrollingElement, document.querySelector('main'), document.querySelector('#view')]) el?.scrollTo?.(0, 0); });
+  await p.waitForTimeout(200);
   await shot('mixer');
   await nav('Mikrofon'); await shot('mikrofon');
   await nav('Afspilnings-EQ'); await shot('afspilnings-eq');
@@ -118,6 +125,23 @@ const OUT = process.argv[2];
   await p.keyboard.type('spe'); await p.waitForTimeout(400);
   await shot('kommandopalet');
   await p.keyboard.press('Escape');
+
+  // The full GoXLR (the Mini has no sampler): Sampler and GoXLR-indstillinger.
+  const f = await b.newPage({ viewport: { width: 1360, height: 880 }, locale: 'da-DK' });
+  f.on('pageerror', (e) => errors.push(e.message));
+  await f.goto('http://127.0.0.1:14600/'); await f.waitForTimeout(3000);
+  const fshot = async (name, page) => {
+    await f.click(`#nav button:text-is("${page}")`); await f.waitForTimeout(1300); await f.mouse.move(5, 870);
+    await f.evaluate(() => {
+      const el = document.getElementById('conn');
+      if (el) { el.className = 'conn live'; const l = el.querySelector('.label'); if (l) l.textContent = 'Forbundet'; }
+      document.querySelector('[data-testid=banner-update]')?.remove();
+    });
+    await f.screenshot({ path: `${OUT}/${name}.png` }); console.log('shot', name);
+  };
+  await fshot('sampler', 'Sampler');
+  await fshot('goxlr-indstillinger', 'GoXLR-indstillinger');
+  await f.close();
 
   // The small on-screen message shown over games when a shortcut is used.
   const o = await b.newPage({ viewport: { width: 520, height: 120 } });

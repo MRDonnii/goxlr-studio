@@ -107,6 +107,8 @@ Læg enhver handling på en tast på en Stream Deck, fx Streonor, Elgato eller U
 
 Linket starter også GoXLR Studio, hvis appen ikke kører.
 
+**Plugin til Elgato Stream Deck med status:** tasterne lyser, når det, de styrer, er slået til – fx rød, når mikrofonen er muted, eller når en profil eller et EQ-preset er i brug. Drejeknapperne på Stream Deck + styrer lydstyrken. Hent `GoXLR-Studio.streamDeckPlugin` ved udgivelsen (eller fra Stream Deck-siden i appen) og dobbeltklik på den.
+
 ### Fodpedal
 
 ![Fodpedal](docs/screenshots/fodpedal.png)
@@ -114,6 +116,8 @@ Linket starter også GoXLR Studio, hvis appen ikke kører.
 Brug en fodpedal som knap – fx push-to-talk med foden. USB-pedaler, der sender en tast, Elgato Stream Deck Pedal og MIDI-pedaler/-controllere. Hver pedal kan køre en handling ved tryk, virke mens den holdes (push-to-talk/-mute), gøre to forskellige ting ved kort tryk og hold – og en MIDI-fader kan styre en kanals lydstyrke. Tryk "+ Tilføj pedal" og træd på den.
 
 ### Sampler (den store GoXLR)
+
+![Sampler](docs/screenshots/sampler.png)
 
 Lyde på sampler-knapperne i tre banker, med afspilningsmåde (afspil/stop, hold, loop), rækkefølge og start/slut pr. lyd. Optag ved at holde en knap nede – også sekunderne før du trykkede.
 
@@ -148,6 +152,9 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 ![Lyst tema](docs/screenshots/tema-lyst.png)
 
 - **GoXLR-indstillinger:** cough-knappen, hvad GoXLR'en gør når pc'en sover/vågner/lukker, skærmene over faderne, VOD-tilstand og oplæsning af ændringer
+
+  ![GoXLR-indstillinger](docs/screenshots/goxlr-indstillinger.png)
+
 - **Lydklip:** gem de sidste 15–120 sekunder af stream-mixet som WAV med en knap eller genvej
 - **Spiltilstand:** når et spil kører i fuld skærm, stopper Windows' notifikationslyde, og dine egne handlinger kan køre (fx EQ "Fodtrin") – alt kommer tilbage, når spillet slutter
 - **Tidsstyring:** fx kl. 22 → EQ "Sen aften" og loft på hovedtelefonerne, kl. 7 → tilbage igen
@@ -159,7 +166,7 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - **Temaer** (her Lyst): lyst, mørkt (eller automatisk som Windows), Sort (OLED), Nordlys, Solnedgang, Skov og Papir – og valgfri accentfarve
 - Start med Windows og luk til bakke-ikonet
 - Automatiske opdateringer
-- **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
+- **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene, lydstyrker, ChatMix, limiter, spiltilstand og "Gem lydklip"
 - **OBS:** skift OBS-scene med genveje, Stream Deck eller automatik, lad scenen følge GoXLR-profilen, og "Stream-sikker musik" tager musikken ud af streamen
 - **Fjernbetjening på mobilen:** mute, profiler, scener, EQ og lydstyrke fra telefonen på samme wifi
 - Lokalt API til fx Stream Deck
