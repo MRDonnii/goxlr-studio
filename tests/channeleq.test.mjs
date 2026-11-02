@@ -72,3 +72,29 @@ test('EQ off turns the channels off too; unknown presets and missing outputs are
   assert.deepEqual(activeChannels(st, devices.filter((d) => !/Game/.test(d.name))).map((c) => c.channel), []);
   assert.equal(engineConfig(st, { devices }).channels.length, 1);
 });
+
+test('EQ pr. app: apps keep their channel, same preset shares one, music/chat/games go where they belong', async () => {
+  const { planAppEq, preferredChannel } = await import('../public/js/channeleq.js');
+  assert.equal(preferredChannel('Spotify.exe'), 'Music');
+  assert.equal(preferredChannel('Discord.exe'), 'Chat');
+  assert.equal(preferredChannel('cod.exe'), 'Game');
+  const plan = planAppEq([
+    { exe: 'cod.exe', preset: 'Fodtrin (FPS)' },
+    { exe: 'Spotify.exe', preset: 'Musik' },
+    { exe: 'valorant.exe', preset: 'Fodtrin (FPS)' },
+  ], { channelOf: (exe) => (exe === 'cod.exe' ? 'System' : exe === 'Spotify.exe' ? 'Music' : null) });
+  // CoD leaves System (Windows' default, where every other sound plays too) for Game.
+  assert.deepEqual(plan.sets, { Game: 'Fodtrin (FPS)', Music: 'Musik' });
+  assert.deepEqual(plan.assignments.map((a) => a.channel), ['Game', 'Music', 'Game']);
+  assert.deepEqual(plan.full, []);
+});
+
+test('EQ pr. app: a taken channel moves the app, and more presets than channels are reported', async () => {
+  const { planAppEq } = await import('../public/js/channeleq.js');
+  const plan = planAppEq([
+    { exe: 'a.exe', preset: 'A' }, { exe: 'b.exe', preset: 'B' }, { exe: 'c.exe', preset: 'C' },
+  ], { channelOf: () => 'Game', available: ['Game', 'Music'] });
+  assert.deepEqual(plan.sets, { Game: 'A', Music: 'B' });
+  assert.deepEqual(plan.full, ['C']);
+  assert.equal(plan.assignments[2].channel, null);
+});

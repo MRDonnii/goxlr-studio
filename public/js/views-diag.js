@@ -55,6 +55,7 @@ export async function collectDiagnostics(ctx) {
       extras: ctx.outputEq?.extras || {},
       profile_links: ctx.outputEq?.profileLinks || {},
       channel_eq: ctx.outputEq?.channelEq || {},
+      app_eq: ctx.outputEq?.appEq || [],
     },
     devices: devs.map((d) => `${d.flow === 'render' ? 'Ud' : 'Ind'}${d.default ? ' [standard]' : ''}${d.default_comm ? ' [kommunikation]' : ''}: ${d.name}`),
     apps: apps.map((a) => `${a.exe}: ud=${devs.find((d) => d.id === a.output)?.name || (a.output ? 'FORÆLDET' : 'standard')} ind=${devs.find((d) => d.id === a.input)?.name || (a.input ? 'FORÆLDET' : 'standard')}`),

@@ -1,7 +1,9 @@
 import { h, toast } from './ui.js';
-import { appSessions, setAppDevice, listAudioDevices, isNative } from './native.js';
-import { shortName } from './views-mixer.js';
-import { resolveDevice, deviceName, triggerActions } from './extras.js';
+import { appSessions, setAppDevice, listAudioDevices, isNative, storeSet, engineInfo } from './native.js';
+import { shortName, CHANNEL_LABEL } from './views-mixer.js';
+import { resolveDevice, deviceName, triggerActions, channelEndpoint } from './extras.js';
+import { BUILTIN_PRESETS } from './eq.js';
+import { EQ_CHANNELS, FLAT, ALL_PROFILES, planAppEq, channelPresetFor } from './channeleq.js';
 import { actionCatalog } from './actions.js';
 
 // Rules: [{ exe, output, input }] – a device id, or null for "follow the Windows default".
@@ -136,8 +138,10 @@ export function appsView(ctx) {
         }
         ctx.saveAppRules(); render();
       } }, rule ? '📌 Husket' : 'Husk');
+      const eqName = appEqName(ctx, g, devs);
       return h('div', { class: `item app-row ${stale ? 'stale' : ''}` },
-        h('div', { class: 'app-name' }, h('b', {}, g.exe.replace(/\.exe$/i, '')), h('span', { class: 'hint' }, g.pids.length > 1 ? `${g.pids.length} processer` : g.path)),
+        h('div', { class: 'app-name' }, h('b', {}, g.exe.replace(/\.exe$/i, '')), eqName ? h('span', { class: 'badge info', 'data-testid': 'app-eq-badge', title: 'Den EQ, appens lyd får (EQ pr. kanal)' }, `EQ: ${eqName}`) : null,
+          h('span', { class: 'hint' }, g.pids.length > 1 ? `${g.pids.length} processer` : g.path)),
         h('div', { class: 'spacer' }),
         h('span', { class: 'lbl app-lbl' }, 'Udgang'), outSel,
         h('span', { class: 'lbl app-lbl' }, 'Mikrofon'), inSel,
@@ -198,7 +202,9 @@ export function appsView(ctx) {
       devs = d;
     } catch (e) { toast(`Lyd pr. app: ${e}`); }
     if (document.body.contains(list) && !list.contains(document.activeElement)) render();
+    eqCard?.refresh();
   };
+  let eqCard = null;
 
   const fixBtn = h('button', { class: 'btn sm primary', onclick: async () => {
     const n = await enforceAppRules(ctx, { fixStale: true }).catch((e) => { toast(String(e)); return 0; });
@@ -207,6 +213,7 @@ export function appsView(ctx) {
   } }, 'Ret forældede nu');
   const autoFix = h('input', { type: 'checkbox', checked: !!ctx.prefs.fixStaleApps, onchange: () => { ctx.prefs.fixStaleApps = autoFix.checked; ctx.savePrefs(); } });
 
+  eqCard = appEqCard(ctx, () => devs, () => groups, () => render());
   ctx.onAppsChanged = refresh;
   const timer = setInterval(refresh, 5000);
   ctx.cleanup.push(() => { clearInterval(timer); ctx.onAppsChanged = null; });
@@ -225,7 +232,117 @@ export function appsView(ctx) {
         h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Apps uden regel sættes tilbage til Windows-standard; apps med regel får deres huskede enhed.')),
       h('div', { class: 'card' }, h('h2', {}, 'Regler'), rulesList, addForm,
         h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Reglerne håndhæves hvert 5. sekund, også når appen ligger i bakken – fx Spotify → Music, Discord → Chat.'))),
+    eqCard,
     triggersCard(ctx, () => groups));
+}
+
+// ---------- EQ pr. app ----------
+// The channel an app plays on: its rule, else what Windows has it on now.
+function channelOfExe(ctx, exe, devs, groups) {
+  const rule = ctx.appRules.find((r) => sameExe(r.exe, exe));
+  const g = groups.find((x) => sameExe(x.exe, exe));
+  const id = rule?.output !== undefined ? rule.output : g?.sessions.find((s) => s.output)?.output;
+  if (!id) return null;
+  return EQ_CHANNELS.find((c) => channelEndpoint(c, devs) === id) || null;
+}
+
+/** The channel EQ an app gets right now (for the badge in the list), or null. */
+function appEqName(ctx, g, devs) {
+  const ch = channelOfExe(ctx, g.exe, devs, [g]);
+  const name = ch && channelPresetFor(ctx.outputEq, ch, ctx.conn.mixer?.profile_name);
+  return name ? (name === FLAT ? 'ingen' : name) : null;
+}
+
+/** Puts each app on a channel and gives the channel the app's preset (see planAppEq). */
+async function applyAppEq(ctx, devs, groups) {
+  const st = ctx.outputEq;
+  const available = EQ_CHANNELS.filter((c) => channelEndpoint(c, devs));
+  const plan = planAppEq(st.appEq, { channelOf: (exe) => channelOfExe(ctx, exe, devs, groups), available });
+  st.channelEq ??= {};
+  const all = (st.channelEq[ALL_PROFILES] ??= {});
+  // Channels this card set before and no longer needs go back to the main EQ.
+  for (const ch of st.appEqChannels || []) if (!(ch in plan.sets)) delete all[ch];
+  Object.assign(all, plan.sets);
+  if (!Object.keys(all).length) delete st.channelEq[ALL_PROFILES];
+  st.appEqChannels = Object.keys(plan.sets);
+  for (const a of plan.assignments) {
+    if (!a.channel) continue;
+    const id = channelEndpoint(a.channel, devs);
+    let rule = ctx.appRules.find((r) => sameExe(r.exe, a.exe));
+    if (!rule) ctx.appRules.push((rule = { exe: a.exe }));
+    rule.output = id;
+    rule.output_name = deviceName(devs, id);
+  }
+  ctx.saveAppRules();
+  await storeSet('output-eq', st);
+  ctx.applyOutputEq?.().catch((e) => toast(`EQ-motor: ${e}`));
+  enforceAppRules(ctx).catch(() => {});
+  return plan;
+}
+
+function appEqCard(ctx, getDevs, getGroups, rerenderApps) {
+  const st = ctx.outputEq;
+  st.appEq ??= [];
+  const list = h('div', { class: 'list', 'data-testid': 'app-eq' });
+  const shared = h('div', { class: 'hint', 'data-testid': 'app-eq-shared' });
+  let installed = null;
+  engineInfo().then((i) => { installed = new Set((i.devices || []).filter((d) => d.installed).map((d) => d.id.toLowerCase())); render(); }).catch(() => {});
+  const label = (ch) => CHANNEL_LABEL[ch] || ch;
+  const commit = async () => {
+    const plan = await applyAppEq(ctx, getDevs(), getGroups());
+    if (plan.full.length) toast(`Ingen ledig kanal til ${plan.full.join(', ')} – GoXLR'en har fire kanaler, så højst fire forskellige EQ'er ad gangen`);
+    render(); rerenderApps();
+  };
+  const render = () => {
+    const devs = getDevs(), groups = getGroups();
+    const available = EQ_CHANNELS.filter((c) => channelEndpoint(c, devs));
+    const plan = planAppEq(st.appEq, { channelOf: (exe) => channelOfExe(ctx, exe, devs, groups), available });
+    const profile = ctx.conn.mixer?.profile_name;
+    const mine = Object.keys(st.presets || {});
+    const builtin = Object.keys(BUILTIN_PRESETS).filter((n) => !(n in (st.presets || {})));
+    list.replaceChildren(...st.appEq.map((r, i) => {
+      const exe = h('input', { type: 'text', value: r.exe || '', placeholder: 'fx cod.exe', list: 'appeq-exes', style: { width: '150px' }, 'data-testid': 'app-eq-exe', onchange: () => {
+        let v = exe.value.trim();
+        if (v && !/\.exe$/i.test(v)) v += '.exe';
+        r.exe = v; commit();
+      } });
+      const sel = h('select', { 'data-testid': 'app-eq-preset', onchange: () => { r.preset = sel.value; commit(); } },
+        h('option', { value: '' }, '— vælg preset —'),
+        h('option', { value: FLAT }, 'Ingen EQ'),
+        mine.length ? h('optgroup', { label: 'Mine' }, mine.map((n) => h('option', { value: n }, n))) : null,
+        h('optgroup', { label: 'Indbyggede' }, builtin.map((n) => h('option', { value: n }, n))));
+      sel.value = r.preset || '';
+      const a = r.exe && r.preset ? plan.assignments.find((x) => x.exe === r.exe && x.preset === r.preset) : null;
+      const notes = [];
+      if (!r.exe || !r.preset) notes.push(h('span', { class: 'hint' }, 'Vælg app og preset'));
+      else if (!a?.channel) notes.push(h('span', { class: 'badge warn' }, 'Ingen ledig kanal'));
+      else {
+        notes.push(h('span', { class: 'badge ok', 'data-testid': 'app-eq-channel' }, `→ ${label(a.channel)}-kanalen`));
+        const id = channelEndpoint(a.channel, devs);
+        if (installed && id && !installed.has(id.toLowerCase())) notes.push(h('span', { class: 'badge warn', title: 'Afspilnings-EQ → EQ pr. kanal → "Sæt motoren på"' }, 'EQ-motoren mangler på kanalen'));
+        const own = profile && st.channelEq?.[profile]?.[a.channel];
+        if (own && own !== r.preset) notes.push(h('span', { class: 'badge warn' }, `Profilen "${profile}" har sit eget valg for kanalen`));
+      }
+      return h('div', { class: 'item', style: { flexWrap: 'wrap' } }, exe, sel, ...notes, h('div', { class: 'spacer' }),
+        h('button', { class: 'btn sm', title: 'Fjern', onclick: () => { st.appEq.splice(i, 1); commit(); } }, '✕'));
+    }));
+    if (!st.appEq.length) list.append(h('div', { class: 'hint' }, 'Ingen endnu. Tryk "+ Tilføj", vælg fx cod.exe og "Fodtrin (FPS)".'));
+    // Other apps on the same channels get the same EQ – say so.
+    const others = Object.keys(plan.sets).map((ch) => {
+      const apps = groups.filter((g) => !st.appEq.some((r) => sameExe(r.exe, g.exe)) && channelOfExe(ctx, g.exe, devs, groups) === ch).map((g) => g.exe.replace(/\.exe$/i, ''));
+      return apps.length ? `${label(ch)}: ${apps.join(', ')}` : null;
+    }).filter(Boolean);
+    shared.textContent = others.length ? `Spiller også på de kanaler og får samme EQ – ${others.join(' · ')}` : '';
+    datalist.replaceChildren(...[...new Set([...groups.map((g) => g.exe), 'Spotify.exe', 'Discord.exe', 'chrome.exe', 'cod.exe'])].map((x) => h('option', { value: x })));
+  };
+  const datalist = h('datalist', { id: 'appeq-exes' });
+  render();
+  const card = h('div', { class: 'card', 'data-testid': 'app-eq-card' }, h('h2', {}, 'EQ pr. app',
+    h('button', { class: 'btn sm primary', 'data-testid': 'app-eq-add', onclick: () => { st.appEq.push({ exe: '', preset: '' }); render(); } }, '+ Tilføj')),
+    list, shared, datalist,
+    h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Giv en app sin egen EQ, fx Call of Duty → "Fodtrin (FPS)" og Spotify → "Musik". GoXLR Studio sætter selv appen på en GoXLR-kanal og giver kanalen EQ’en (se Afspilnings-EQ → EQ pr. kanal). Apps med samme preset deler kanal – højst fire forskellige EQ’er ad gangen. Fader-knappen for kanalen styrer så appens lydstyrke.'));
+  card.refresh = () => { if (!card.contains(document.activeElement)) render(); };
+  return card;
 }
 
 // "When cod.exe starts → scene Gaming, when it exits → scene Normal".

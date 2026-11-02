@@ -68,3 +68,47 @@ export function engineConfig(state, { devices = [], profile = null, target = sta
 
 /** True when any channel has a preset under any profile. */
 export const usesChannelEq = (state) => Object.values(state?.channelEq || {}).some((v) => v && Object.values(v).some(Boolean));
+
+// ---------- EQ pr. app ----------
+// Windows' EQ engine works per output, not per app – but each GoXLR channel is its own output. So
+// "Call of Duty gets the footsteps EQ, Spotify the music EQ" = each app on its own channel, with
+// that channel's EQ. Apps with the same preset share a channel; four channels = four EQs at once.
+const MUSIC_APPS = /spotify|tidal|deezer|itunes|applemusic|musicbee|foobar|aimp|winamp|amazon ?music|youtube ?music|qobuz|plex|musicassistant|music assistant/i;
+const CHAT_APPS = /discord|teams|zoom|skype|slack|mumble|teamspeak|ts3client|whatsapp|signal|telegram/i;
+
+/** The channel an app would naturally use: music players → Music, voice chat → Chat, else Game. */
+export const preferredChannel = (exe) => (MUSIC_APPS.test(exe) ? 'Music' : CHAT_APPS.test(exe) ? 'Chat' : 'Game');
+
+/** Which channel each preset gets. Apps keep the channel they already use when it is free – except
+ *  System, which is Windows' default output where every other sound plays too; then the natural
+ *  one; then any free one (System last). `channelOf(exe)` = the channel the app plays on now (or null),
+ *  `available` = channels whose Windows output exists. More presets than channels → `full`. */
+export function planAppEq(appEq, { channelOf = () => null, available = EQ_CHANNELS } = {}) {
+  const groups = [];
+  for (const r of appEq || []) {
+    if (!r?.exe || !r.preset) continue;
+    let g = groups.find((x) => x.preset === r.preset);
+    if (!g) groups.push((g = { preset: r.preset, apps: [] }));
+    g.apps.push(r.exe);
+  }
+  const taken = new Map();
+  const channelFor = new Map();
+  const take = (g, ch) => { taken.set(ch, g.preset); channelFor.set(g.preset, ch); };
+  for (const g of groups) {
+    for (const exe of g.apps) {
+      const ch = channelOf(exe);
+      if (ch && ch !== 'System' && available.includes(ch) && !taken.has(ch) && !channelFor.has(g.preset)) take(g, ch);
+    }
+  }
+  for (const g of groups) {
+    if (channelFor.has(g.preset)) continue;
+    const pref = preferredChannel(g.apps[0]);
+    const ch = [pref, ...EQ_CHANNELS.filter((c) => c !== pref)].find((c) => available.includes(c) && !taken.has(c));
+    if (ch) take(g, ch);
+  }
+  return {
+    assignments: (appEq || []).filter((r) => r?.exe && r.preset).map((r) => ({ exe: r.exe, preset: r.preset, channel: channelFor.get(r.preset) || null })),
+    sets: Object.fromEntries(taken),
+    full: groups.filter((g) => !channelFor.has(g.preset)).map((g) => g.preset),
+  };
+}
