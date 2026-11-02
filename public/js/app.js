@@ -8,6 +8,8 @@ import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, s
 import { diagView } from './views-diag.js';
 import { soundcheckView } from './views-soundcheck.js';
 import { deckView } from './views-deck.js';
+import { pedalsView } from './views-pedals.js';
+import { loadPedals, startPedals, keyPedal, savePedals } from './pedals.js';
 import { soundsView } from './views-sounds.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
@@ -39,6 +41,7 @@ const PAGES = [
   { id: 'profiles', title: 'Profiler', icon: 'profile', view: profilesView },
   { id: 'hotkeys', title: 'Genveje', icon: 'key', view: hotkeysView },
   { id: 'deck', title: 'Stream Deck', icon: 'deck', view: deckView },
+  { id: 'pedals', title: 'Fodpedal', icon: 'pedal', view: pedalsView },
   { id: 'migrate', title: 'Overflytning', icon: 'move', view: migrateView },
   { id: 'soundcheck', title: 'Lydtjek', icon: 'check', view: soundcheckView },
   { id: 'diag', title: 'Diagnose', icon: 'diag', view: diagView },
@@ -142,6 +145,8 @@ const ctx = {
   onApoChanged: (takenOver) => { ctx.prefs.apoExpected = takenOver; ctx.savePrefs(); ctx.apoLost = false; renderBanners(); },
   pauseHotkeys: () => setHotkeys([]).catch(() => {}),
   resumeHotkeys: () => registerHotkeys(),
+  registerHotkeys: () => registerHotkeys(),
+  savePedals: () => savePedals(ctx),
   runAction: (id, source) => Promise.resolve(runAction(ctx, id, source)).catch((e) => toast(String(e))),
   onStateChanged: (kind) => {
     syncTray();
@@ -522,11 +527,13 @@ function syncTrayStatus() {
 // ---------- hotkeys ----------
 async function registerHotkeys() {
   const active = ctx.hotkeys.filter((b) => b.accel && b.action).map(({ id, accel }) => ({ id, accel }));
+  // Fodpedal: pedals that type a key are hotkeys too (pressed and released, see keyPedal).
+  for (const p of ctx.pedals || []) if (p.input?.kind === 'key' && p.input.accel && !active.some((b) => b.accel === p.input.accel)) active.push({ id: `pedal:${p.id}`, accel: p.input.accel });
   const res = await setHotkeys(active).catch((e) => active.map((b) => ({ id: b.id, ok: false, error: String(e) })));
   ctx.hotkeyStatus = Object.fromEntries(res.map((r) => [r.id, r]));
   const failed = res.filter((r) => !r.ok);
   if (failed.length && !ctx.capturingHotkey) {
-    const names = failed.map((r) => prettyAccel(ctx.hotkeys.find((b) => b.id === r.id)?.accel)).join(', ');
+    const names = failed.map((r) => prettyAccel(ctx.hotkeys.find((b) => b.id === r.id)?.accel || ctx.pedals?.find((p) => `pedal:${p.id}` === r.id)?.input?.accel)).join(', ');
     toast(`Kunne ikke registrere: ${names} (bruges af et andet program?)`);
   }
   return ctx.hotkeyStatus;
@@ -798,10 +805,12 @@ async function registerNativeHooks() {
   if (!isNative()) return;
   const { listen } = window.__TAURI__.event;
   await listen('hotkey', (ev) => {
+    if (keyPedal(ctx, ev.payload, true)) return;
     const b = ctx.hotkeys.find((x) => x.id === ev.payload);
     if (b?.action) ctx.runAction(b.action, `genvej ${prettyAccel(b.accel)}`);
   });
   await listen('hotkey-release', (ev) => {
+    if (keyPedal(ctx, ev.payload, false)) return;
     const b = ctx.hotkeys.find((x) => x.id === ev.payload);
     if (b?.action?.startsWith('hold:')) releaseAction(ctx, b.action);
   });
@@ -839,8 +848,10 @@ async function boot() {
   ctx.appRules = appRules;
   ctx.hotkeys = hotkeys || defaultHotkeys(scenes);
   if (!hotkeys) storeSet('hotkeys', ctx.hotkeys);
+  await loadPedals(ctx);
   buildNav();
   await registerNativeHooks();
+  startPedals(ctx);
   registerHotkeys();
   syncTray();
   startAppRules(ctx);

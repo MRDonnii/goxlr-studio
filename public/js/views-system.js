@@ -7,7 +7,7 @@ import { mqttCard } from './mqtt.js';
 import { hearingCard } from './hearing.js';
 import { obsCard } from './obs.js';
 
-export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking'];
+export const BACKUP_KEYS = ['prefs', 'scenes', 'hotkeys', 'app-rules', 'app-triggers', 'device-triggers', 'output-eq', 'ducking', 'pedals'];
 
 export function newToken() {
   const b = new Uint8Array(18);

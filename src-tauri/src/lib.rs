@@ -10,6 +10,7 @@ mod engine;
 mod history;
 mod keys;
 mod meters;
+mod midi;
 mod migrate;
 mod mqtt;
 mod obs;
@@ -119,6 +120,23 @@ async fn set_default_device(id: String, role: String) -> Result<(), String> {
 #[tauri::command]
 async fn output_eq_apply(eq: apo::OutputEq) -> Result<(), String> {
     blocking(move || apo::apply(&eq)).await
+}
+
+/// Fodpedal: start reading every MIDI input (pedals, controllers) – messages arrive as `midi` events.
+#[tauri::command]
+fn midi_start(app: AppHandle) {
+    midi::start(app);
+}
+
+#[tauri::command]
+fn midi_stop() {
+    midi::stop();
+}
+
+/// The MIDI inputs that are open now (names).
+#[tauri::command]
+fn midi_ports() -> Vec<String> {
+    midi::ports()
 }
 
 #[tauri::command]
@@ -813,6 +831,9 @@ pub fn run() {
             audio_devices,
             set_default_device,
             output_eq_apply,
+            midi_start,
+            midi_stop,
+            midi_ports,
             output_eq_status,
             apo_takeover,
             apo_read_config,

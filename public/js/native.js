@@ -222,6 +222,10 @@ export async function apoListConfigs() {
   return invoke('apo_list_configs');
 }
 
+// Fodpedal: MIDI inputs (midi.rs). The browser demo has one pretend pedal (window.studioDemo.midi).
+export async function midiStart() { if (isNative()) return invoke('midi_start'); return null; }
+export async function midiPorts() { if (isNative()) return invoke('midi_ports'); return ['Demo MIDI-pedal']; }
+
 export async function setHotkeys(bindings) {
   if (!isNative()) return bindings.map((b) => ({ id: b.id, ok: true, error: null }));
   return invoke('set_hotkeys', { bindings });

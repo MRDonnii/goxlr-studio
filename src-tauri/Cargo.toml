@@ -32,6 +32,8 @@ rumqttc = { version = "0.25.1", default-features = false }
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
+# Fodpedal: MIDI pedals and controllers (WinMM), read in the background.
+midir = "0.11"
 # GoXLR Utility's engine, run inside GoXLR Studio (see goxlr-engine/README.md).
 goxlr-engine = { path = "goxlr-engine" }
 # Update check (latest.json from the release); same version and TLS as the GoXLR engine uses.
