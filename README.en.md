@@ -42,6 +42,7 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 - **Left and right ear separately**, band-pass/all-pass and steep low/high cuts (up to 48 dB/octave)
 - **Live spectrum** behind the curve: see where the music or the game has its energy while you adjust the EQ
 - **A/B at the same loudness:** the louder of A and B is turned down, so you hear the difference in sound and not just in volume. With the **blind test** you hear them as X and Y without knowing which is which
+- **Balance:** raise a band, and the whole floor (preamp) goes down as much – balance instead of just more level
 - **Clip protection and headroom:** the app calculates the whole chain (EQ, Loudness and Crossfeed) and lowers the level by itself if the sound would otherwise distort. "Auto" sets the preamp just below the limit
 - Presets, including your old Peace/Equalizer APO presets, imported with one click and sounding exactly as before (GraphicEQ too)
 - AutoEQ search that finds the correction for your exact headphones

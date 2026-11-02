@@ -40,6 +40,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - **Venstre og højre øre hver for sig**, Band-pass/All-pass og stejle low/high-cut (op til 48 dB/oktav)
 - **Live-spektrum** bag kurven: du ser, hvor musikken eller spillet har sin energi, mens du stiller på EQ'en
 - **A/B ved samme lydstyrke:** den højeste af A og B sænkes, så du hører forskellen i klang og ikke bare i lydstyrke. Med **blindtest** hører du dem som X og Y uden at vide, hvilken er hvilken
+- **Balance:** løfter du et bånd, sænkes hele gulvet (preamp) lige så meget – så du får balance i stedet for bare mere lyd
 - **Klip-beskyttelse og headroom:** appen regner på hele kæden (EQ, Loudness og Crossfeed) og sænker selv lyden, hvis den ellers ville forvrænge. "Auto" sætter preamp lige under grænsen
 - Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik og lyder præcis som før (også GraphicEQ)
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
