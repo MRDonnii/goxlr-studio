@@ -103,6 +103,8 @@ The link also starts GoXLR Studio if the app isn't running.
 
 ### Foot pedal
 
+![Foot pedal](docs/screenshots/fodpedal.png)
+
 Use a foot pedal as a button – e.g. push-to-talk with your foot. USB pedals that send a key, the Elgato Stream Deck Pedal and MIDI pedals/controllers. Each pedal can run an action when pressed, work while held (push-to-talk/-mute), do two different things on a short press and a hold – and a MIDI fader can control a channel's volume. Press "+ Add pedal" and step on it.
 
 ### Soundboard
@@ -136,6 +138,8 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 ### Settings, Discord and much more
 
 ![Settings](docs/screenshots/indstillinger.png)
+
+![Light theme](docs/screenshots/tema-lyst.png)
 
 - **Discord:** the GoXLR's mute button also mutes (and can deafen) Discord, with the red icon
 - **Mic safety:** a warning when you talk while muted, and the mic is muted when you lock the PC (Win+L)

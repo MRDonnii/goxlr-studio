@@ -22,8 +22,10 @@ const OUT = process.argv[2];
     if (el) { el.className = 'conn live'; const l = el.querySelector('.label'); if (l) l.textContent = 'Forbundet'; }
     // Browser-only hints (the Windows app shows its own text there).
     for (const d of document.querySelectorAll('.hint')) {
-      if (/^(Demo-data|I browseren)/.test(d.textContent.trim())) d.remove();
+      if (/^(Demo-data|I browseren|Demo:)/.test(d.textContent.trim())) d.remove();
     }
+    // The demo's own "new version" banner is not part of the app's normal look.
+    document.querySelector('[data-testid=banner-update]')?.remove();
     for (const d of document.querySelectorAll('.item')) {
       for (const n of d.childNodes) if (n.nodeType === 3 && n.textContent === 'Demo (ingen GoXLR-motor)') n.textContent = 'Live';
     }
@@ -59,6 +61,27 @@ const OUT = process.argv[2];
   await p.locator('.card:has(h2:has-text("EQ-motor")) button:has-text("Erstat med indbygget motor")').click(); await p.waitForTimeout(1000); await okDialogs(); await p.waitForTimeout(1500);
   await p.click('button:has-text("Fodtrin (FPS)")').catch((e) => console.log('no preset', e.message)); await p.waitForTimeout(800);
 
+  // EQ pr. app: the game gets the footsteps EQ, the music player the music EQ.
+  await nav('Lyd pr. app');
+  for (const [exe, preset] of [['cod.exe', 'Fodtrin (FPS)'], ['Spotify.exe', 'Musik']]) {
+    await p.click('[data-testid=app-eq-add]'); await p.waitForTimeout(200);
+    const row = p.locator('[data-testid=app-eq] .item').last();
+    await row.locator('[data-testid=app-eq-exe]').fill(exe); await row.locator('[data-testid=app-eq-exe]').press('Tab'); await p.waitForTimeout(400);
+    await p.locator('[data-testid=app-eq] .item').last().locator('[data-testid=app-eq-preset]').selectOption(preset); await p.waitForTimeout(600);
+  }
+  // Two foot pedals: one that types a key (push-to-talk), one MIDI fader for the music.
+  await nav('Fodpedal');
+  await p.click('[data-testid=pedal-add]'); await p.waitForTimeout(200);
+  await p.keyboard.down('Control'); await p.keyboard.down('Alt'); await p.keyboard.down('F5'); await p.waitForTimeout(600);
+  await p.keyboard.up('F5'); await p.keyboard.up('Alt'); await p.keyboard.up('Control'); await p.waitForTimeout(400);
+  await p.locator('[data-testid=pedal-mode]').first().selectOption('hold'); await p.waitForTimeout(300);
+  await p.click('[data-testid=pedal-add]'); await p.waitForTimeout(200);
+  await p.evaluate(() => [20, 45, 70, 90, 100].forEach((v, i) => setTimeout(() => window.studioDemo.midi([0xb0, 7, v]), i * 60)));
+  await p.waitForTimeout(1900);
+  await p.locator('[data-testid=pedal-name]').nth(0).fill('Venstre pedal'); await p.locator('[data-testid=pedal-name]').nth(0).press('Tab');
+  await p.locator('[data-testid=pedal-name]').nth(1).fill('Musik-fader'); await p.locator('[data-testid=pedal-name]').nth(1).press('Tab');
+  await p.waitForTimeout(300);
+
   // A few scenes.
   await nav('Scener');
   for (const name of ['Gaming', 'Stream', 'Film']) {
@@ -83,7 +106,12 @@ const OUT = process.argv[2];
   await nav('Stream Deck'); await shot('stream-deck');
   await nav('Overflytning'); await shot('overflytning');
   await nav('Diagnose'); await p.waitForTimeout(800); await shot('diagnose');
+  await nav('Fodpedal'); await shot('fodpedal');
   await nav('Indstillinger'); await shot('indstillinger');
+  // The light theme on the EQ page, then back to dark.
+  await p.click('[data-testid=theme-light]'); await p.waitForTimeout(300);
+  await nav('Afspilnings-EQ'); await shot('tema-lyst');
+  await nav('Indstillinger'); await p.click('[data-testid=theme-dark]'); await p.waitForTimeout(300);
   // Command palette (Ctrl+K)
   await nav('Mixer');
   await p.keyboard.press('Control+k'); await p.waitForTimeout(500);

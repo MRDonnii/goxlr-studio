@@ -101,6 +101,8 @@ Linket starter også GoXLR Studio, hvis appen ikke kører.
 
 ### Fodpedal
 
+![Fodpedal](docs/screenshots/fodpedal.png)
+
 Brug en fodpedal som knap – fx push-to-talk med foden. USB-pedaler, der sender en tast, Elgato Stream Deck Pedal og MIDI-pedaler/-controllere. Hver pedal kan køre en handling ved tryk, virke mens den holdes (push-to-talk/-mute), gøre to forskellige ting ved kort tryk og hold – og en MIDI-fader kan styre en kanals lydstyrke. Tryk "+ Tilføj pedal" og træd på den.
 
 ### Scener
@@ -131,11 +133,13 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 
 ![Indstillinger](docs/screenshots/indstillinger.png)
 
+![Lyst tema](docs/screenshots/tema-lyst.png)
+
 - **Discord:** GoXLR'ens mute-knap muter også Discord, med det røde ikon
 - Auto-ducking, der skruer ned for musik og spil, mens du taler – eller mens vennerne taler i Discord
 - **Høreværn:** påmindelse efter lang tid med høj lyd og et valgfrit loft for hovedtelefonerne
 - **Profilhistorik:** tidligere versioner af dine GoXLR- og mikrofonprofiler kan gendannes
-- **Temaer:** lyst, mørkt (eller automatisk som Windows), Sort (OLED), Nordlys, Solnedgang, Skov og Papir – og valgfri accentfarve
+- **Temaer** (her Lyst): lyst, mørkt (eller automatisk som Windows), Sort (OLED), Nordlys, Solnedgang, Skov og Papir – og valgfri accentfarve
 - Start med Windows og luk til bakke-ikonet
 - Automatiske opdateringer
 - **Home Assistant** via MQTT: GoXLR Studio dukker op som en enhed med mikrofon-mute, "Mikrofon åben" (fx til en ON AIR-lampe), GoXLR-profil, EQ-preset, scene og lydstyrker
