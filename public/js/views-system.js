@@ -116,7 +116,7 @@ export function systemSettings(ctx) {
     remoteBox.replaceChildren(h('div', { class: 'hint', style: { marginTop: '10px' } }, 'Fjernbetjening på mobilen:'),
       api.enabled && url
         ? h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('code', { 'data-no-i18n': '', 'data-testid': 'remote-url' }, url),
-          h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(url).then(() => toast('Linket er kopieret – send det til din telefon', 'info')) }, 'Kopiér link'))
+          h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(url).then(() => toast('Linket er kopieret – send det til din telefon', 'info')).catch((e) => toast(`Kunne ikke kopiere: ${e.message || e}`)) }, 'Kopiér link'))
         : h('div', { class: 'hint' }, 'Slå API til og "Tillad fra andre enheder på netværket", så får du et link, du kan åbne på telefonen (samme wifi). Gem det på hjemmeskærmen.'));
   };
   const apiCard = h('div', { class: 'card' }, h('h2', {}, 'Lokalt API (Stream Deck / Home Assistant)', apiStatus),
@@ -124,7 +124,7 @@ export function systemSettings(ctx) {
     toggle(binder, { label: 'Tillad fra andre enheder på netværket', get: () => api.lan, set: (v) => { api.lan = v; saveApi(); } }),
     h('div', { class: 'row' }, h('label', {}, 'Port'), port,
       h('button', { class: 'btn sm', 'data-testid': 'api-new-token', onclick: async () => { if (await confirmDialog('Lav en ny token? Gamle links holder op med at virke.', { ok: 'Ny token' })) { api.token = newToken(); saveApi(); } } }, 'Ny token'),
-      h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(api.token).then(() => toast('Token kopieret', 'info')) }, 'Kopiér token')),
+      h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(api.token).then(() => toast('Token kopieret', 'info')).catch((e) => toast(`Kunne ikke kopiere: ${e.message || e}`)) }, 'Kopiér token')),
     examples,
     remoteBox,
     h('div', { class: 'hint' }, isNative() ? 'Alle handlinger fra Genveje kan kaldes – se listen på /actions. Windows Firewall spørger første gang, hvis netværksadgang er slået til.' : 'API’et findes kun i Windows-appen.'));

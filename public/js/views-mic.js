@@ -206,7 +206,7 @@ function micPresetCard(ctx, undo) {
   const render = () => {
     const m = model();
     if (!m) {
-      body.replaceChildren(h('div', { class: 'hint' }, `Vælg din mikrofon blandt ${MIC_MODELS.length - 2} modeller. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. Står din ikke på listen, så vælg "Anden dynamisk" eller "Anden kondensator" nederst. ${USB_ONLY.length > 1 ? `${USB_ONLY.slice(0, -1).join(', ')} og ${USB_ONLY.at(-1)}` : USB_ONLY[0] || ''} er kun USB og kan ikke sluttes til GoXLR’en.`));
+      body.replaceChildren(h('div', { class: 'hint' }, `Vælg din mikrofon blandt ${MIC_MODELS.length - 2} modeller. GoXLR Studio foreslår så EQ, noise gate, kompressor og de-esser ud fra mikrofonens frekvenskurve. Står din ikke på listen, så vælg "Anden dynamisk" eller "Anden kondensator" nederst. ${USB_ONLY.join(', ')} er kun USB og kan ikke sluttes til GoXLR’en.`));
       return;
     }
     const s = micSettings(m, isMini());

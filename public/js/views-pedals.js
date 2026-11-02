@@ -39,12 +39,13 @@ export function pedalsView(ctx) {
       else if (pedal.mode === 'fader') pedal.mode = 'press';
       delete pedal.input.fader;
       if (!ctx.pedals.includes(pedal)) ctx.pedals.push(pedal);
-      const note = input.canHold === false ? 'den sendte kun et kort tryk, så "Hold" virker ikke med den' : null;
-      toast([`${pedal.name}: ${describeInput(input)}`, note].filter(Boolean).join(' – '), 'info');
+      toast(`${pedal.name}: ${describeInput(input)}`, 'info');
+      if (input.canHold === false) toast('Pedalen sendte kun et kort tryk – "Hold" virker ikke med den. Brug "Tryk".', 'info');
       save();
     };
     const onDown = (e) => {
       e.preventDefault(); e.stopPropagation();
+      if (e.key === 'Escape') { done(null); return; } // Esc cancels – it is not a pedal
       const a = accelFromEvent(e);
       if (!a) return;
       if (!keyAccel) { keyAccel = a; downAt = performance.now(); setTimeout(() => { if (keyAccel && downAt) done({ kind: 'key', accel: keyAccel, canHold: true }); }, 1500); }

@@ -78,7 +78,7 @@ function translateCore(text, tables, depth = 0) {
     return lead + p.en.replace(/\{(\d+)\}/g, (_, n) => values[n] ?? '') + trail;
   }
   // "+ EQ til/fra", "✓ Gemt": a symbol in front of a known text.
-  const sym = core.match(/^([+✓✗✕⚠•→←·–-]\s+)(.+)$/s);
+  const sym = core.match(/^([+✓✗✕⚠ℹ•→←·–-]\s+)(.+)$/s);
   if (sym) {
     const rest = translateCore(sym[2], tables, depth + 1);
     if (rest !== sym[2]) return lead + sym[1] + rest + trail;
@@ -89,6 +89,12 @@ function translateCore(text, tables, depth = 0) {
     const a = translateCore(core.slice(0, colon), tables, depth + 1);
     const b = translateCore(core.slice(colon + 2), tables, depth + 1);
     if (a !== core.slice(0, colon) || b !== core.slice(colon + 2)) return lead + a + ': ' + b + trail;
+  }
+  // "Ctrl + Alt + E → EQ til/fra": a key (or a name) and a known text.
+  if (core.includes(' → ') && depth < 2) {
+    const parts = core.split(' → ');
+    const out = parts.map((x) => translateCore(x, tables, depth + 1));
+    if (out.some((x, i) => x !== parts[i])) return lead + out.join(' → ') + trail;
   }
   // "Standard · Kommunikation": translate each part.
   if (core.includes(' · ')) {

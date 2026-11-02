@@ -58,7 +58,10 @@ export async function collectDiagnostics(ctx) {
       app_eq: ctx.outputEq?.appEq || [],
     },
     devices: devs.map((d) => `${d.flow === 'render' ? 'Ud' : 'Ind'}${d.default ? ' [standard]' : ''}${d.default_comm ? ' [kommunikation]' : ''}: ${d.name}`),
-    apps: apps.map((a) => `${a.exe}: ud=${devs.find((d) => d.id === a.output)?.name || (a.output ? 'FORÆLDET' : 'standard')} ind=${devs.find((d) => d.id === a.input)?.name || (a.input ? 'FORÆLDET' : 'standard')}`),
+    apps: apps.map((a) => {
+      const dev = (id) => devs.find((d) => d.id === id)?.name || (id ? 'Forældet enhed' : 'Windows-standard');
+      return { exe: a.exe, output: dev(a.output), input: dev(a.input), stale: [a.output, a.input].some((id) => id && !devs.some((d) => d.id === id)) };
+    }),
     hotkeys,
     app_rules: ctx.appRules.length,
     app_triggers: ctx.appTriggers?.length || 0,
@@ -124,7 +127,8 @@ export function diagView(ctx) {
       section('Seneste hændelser (presetskift, administrator-opgaver …)', (r.activity || []).slice().reverse().map((x) => h('div', { class: 'item', 'data-testid': 'activity-item' }, h('span', { class: 'hint' }, new Date(x.at).toLocaleTimeString('da-DK')), x.msg))),
       h('div', { class: 'grid cols-2' },
         section('Lydenheder', r.devices.map((d) => h('div', { class: 'item' }, d))),
-        section('Apps', r.apps.map((a) => h('div', { class: `item ${a.includes('FORÆLDET') ? 'stale' : ''}` }, a)))));
+        section('Apps', r.apps.map((a) => h('div', { class: `item ${a.stale ? 'stale' : ''}`, style: { flexWrap: 'wrap', gap: '6px' } },
+          h('b', {}, a.exe), h('span', { class: 'hint' }, 'Udgang'), h('span', {}, a.output), h('span', { class: 'hint' }, 'Mikrofon'), h('span', {}, a.input))))));
   };
   const load = async () => { report = await collectDiagnostics(ctx); if (document.body.contains(root)) render(); };
   load();
