@@ -47,6 +47,8 @@ The channels of your GoXLR with the same LED colors as the hardware, a level met
 - Presets, including your old Peace/Equalizer APO presets, imported with one click and sounding exactly as before (GraphicEQ too)
 - AutoEQ search that finds the correction for your exact headphones
 - **Hearing test:** find the faintest tone you can hear in each ear and get a personal EQ for your ears and your headphones
+- **Room correction:** import your REW measurements (.mdat or text) from a measurement microphone such as the UMIK-1 – even without its calibration file, which can be applied afterwards. GoXLR Studio averages the measurements and makes a preset towards a room curve: peaks are cut, narrow dips are not filled, and nothing is boosted below what the speakers can play
+- **Speakers:** the distance to each speaker gives the right delay, polarity can be flipped, and your own FIR filter (WAV from REW, rePhase or DRC) can be added on top
 - Crossfeed, loudness, mono and balance for headphones
 - **Sounds wrong?** Pick e.g. "harsh" or "muddy", and the EQ is adjusted one small step. Export and import all presets
 - **EQ per app:** e.g. Call of Duty with the footsteps EQ and Spotify with the music EQ at the same time (Per-app audio → EQ per app)
