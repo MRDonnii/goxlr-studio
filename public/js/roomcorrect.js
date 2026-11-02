@@ -91,18 +91,25 @@ export function referenceLevel(curve) {
   return mean(b.slice(idx(500), idx(2000) + 1));
 }
 
+// 0.10.1: less bass than 0.10.0 (+4/+7 felt heavy on real speakers – especially close up or outdoors).
 export const TARGETS = {
-  room: { label: 'Rum-kurve (anbefalet)', bass: 4, tilt: -0.6 },
-  bass: { label: 'Rum-kurve med ekstra bas', bass: 7, tilt: -0.8 },
+  room: { label: 'Rum-kurve (anbefalet)', bass: 2, tilt: -0.5 },
+  bass: { label: 'Rum-kurve med ekstra bas', bass: 4, tilt: -0.7 },
   flat: { label: 'Helt flad', bass: 0, tilt: 0 },
 };
+
+export const DEFAULT_MAX_BOOST = 3;
+// Under the low limit the filters' skirts may lift at most this much in total.
+const BELOW_LOW_MAX = 1.5;
+// A bass peak this much over the bass around it is a room mode (it booms).
+const MODE_MIN = 3;
 
 /**
  * The target in dB at f: a gentle bass lift (half of it at 120 Hz) and a gentle fall above 1 kHz.
  * Speakers measured where you sit sound right with this, not with a flat line (more treble arrives
  * straight from the speaker than bass, which the room adds to).
  */
-export function targetDb(f, { bass = 4, tilt = -0.6 } = {}) {
+export function targetDb(f, { bass = 2, tilt = -0.5 } = {}) {
   return bass / (1 + (f / 120) ** 2) + (f > 1000 ? tilt * Math.log2(f / 1000) : 0);
 }
 
@@ -134,7 +141,7 @@ const peakQ = (bwOct) => { const r = 2 ** Math.max(bwOct, 0.05); return Math.sqr
  */
 export function designCorrection(measured, opts = {}) {
   const t = typeof opts.target === 'object' ? opts.target : TARGETS[opts.target || 'room'];
-  const maxBoost = opts.maxBoost ?? 6;
+  const maxBoost = opts.maxBoost ?? DEFAULT_MAX_BOOST;
   const maxCut = opts.maxCut ?? 12;
   const maxFilters = opts.maxFilters ?? 12;
   const high = Math.min(20000, opts.high ?? 8000);
@@ -157,6 +164,8 @@ export function designCorrection(measured, opts = {}) {
   // Below the Schroeder frequency the room's modes are narrow peaks; above it only broad trends count.
   const peakDev = (i) => (GRID[i] < SCHROEDER ? devFine(i) : third[i] + eqAt[i] - target[i]);
   const maxEq = () => Math.max(...eqAt);
+  // How far the boosts go over their limits: the total, and (from their skirts) below the low limit.
+  const overLimit = () => Math.max(maxEq() - maxBoost, lo > 0 ? Math.max(...eqAt.slice(0, lo)) - BELOW_LOW_MAX : -Infinity);
 
   const width = (i, dev, sign) => {
     const d0 = dev(i);
@@ -166,7 +175,35 @@ export function designCorrection(measured, opts = {}) {
     return Math.max((b - a + 1) / PPO, 0.1);
   };
 
-  const near = (i) => bands.some((b) => Math.abs(Math.log2(GRID[i] / b.freq)) < 1 / 8);
+  // No new filter right next to one that is there (the fine-tuning adjusts that one), and no boost
+  // within 1/3 octave of a room mode (it would lift the boom again).
+  const dist = (i, b) => Math.abs(Math.log2(GRID[i] / b.freq));
+  const near = (i) => bands.some((b) => dist(i, b) < (b.mode ? 1 / 5 : 1 / 8));
+  const nearMode = (i) => bands.some((b) => b.mode && dist(i, b) < 1 / 3);
+
+  // Room modes first: bass peaks that stand out from the bass around them (1-octave average) boom
+  // and ring – they are cut towards their surroundings even when the bass as a whole is under the
+  // target, and boosts are never centred on them.
+  const base = smooth(m, 1);
+  const prom = (i) => fine[i] - base[i];
+  const modeIdx = [];
+  for (let i = Math.max(lo, idx(25)); i <= idx(SCHROEDER); i++) {
+    const p = prom(i);
+    if (p > MODE_MIN && p >= prom(i - 1) && p >= prom(i + 1) && p >= prom(i - 2) && p >= prom(i + 2)) modeIdx.push(i);
+  }
+  modeIdx.sort((a, b) => prom(b) - prom(a));
+  for (const i of modeIdx) {
+    if (bands.filter((b) => b.mode).length >= 4 || bands.some((b) => Math.abs(Math.log2(GRID[i] / b.freq)) < 1 / 3)) continue;
+    const p = prom(i);
+    let a = i, b = i;
+    while (a > 0 && prom(a - 1) > p / 2) a--;
+    while (b < GRID.length - 1 && prom(b + 1) > p / 2) b++;
+    const q = Math.min(10, Math.max(2, peakQ((b - a + 1) / PPO)));
+    const band = { enabled: true, type: 'PK', freq: GRID[i], gain: -Math.min(maxCut, p - 1), q, mode: true };
+    addResp(band);
+    bands.push(band);
+  }
+
   for (let n = 0; n < maxFilters; n++) {
     let best = null;
     for (let i = lo; i <= hi; i++) {
@@ -179,7 +216,7 @@ export function designCorrection(measured, opts = {}) {
       const room = Math.min(maxBoost, GRID[i] < SCHROEDER ? maxBoost : MID_BOOST) - eqAt[i];
       // A broad shortfall only, and some room left under the boost limit; cuts go first.
       // No boost right above the roll-off either: the filter's skirt would reach below it.
-      if (d < -1.5 && room > 0.5 && GRID[i] >= low * 1.25) { const s = Math.min(-d, room) * 0.8; if (!best || s > best.score) best = { score: s, i, kind: 'boost' }; }
+      if (d < -1.5 && room > 0.5 && GRID[i] >= low * 1.25 && !nearMode(i)) { const s = Math.min(-d, room) * 0.8; if (!best || s > best.score) best = { score: s, i, kind: 'boost' }; }
     }
     if (!best || best.score < 1) break;
     const { i, kind } = best;
@@ -195,7 +232,7 @@ export function designCorrection(measured, opts = {}) {
     }
     addResp(band);
     // Never more than maxBoost in total (neighbouring boosts add up).
-    const over = maxEq() - maxBoost;
+    const over = overLimit();
     if (over > 0 && band.gain > 0) { addResp(band, -1); band.gain = Math.max(0, band.gain - over); addResp(band); }
     if (Math.abs(band.gain) < 0.5) { addResp(band, -1); break; }
     bands.push(band);
@@ -205,13 +242,21 @@ export function designCorrection(measured, opts = {}) {
   for (let pass = 0; pass < 4; pass++) {
     for (const b of bands) {
       const i = idx(b.freq);
+      if (b.mode) {
+        // A room mode: down to the bass around it (+1 dB) – and not over the target either.
+        const r = Math.max(peakDev(i), fine[i] + eqAt[i] - base[i] - 1);
+        addResp(b, -1);
+        b.gain = Math.max(-maxCut, Math.min(0, b.gain - 0.7 * r));
+        addResp(b);
+        continue;
+      }
       const dev = b.gain < 0 ? peakDev(i) : devBroad(i);
       addResp(b, -1);
       const g = b.gain - 0.7 * dev;
       const mid = b.freq >= SCHROEDER;
       b.gain = b.gain < 0 ? Math.max(mid ? -MID_CUT : -maxCut, Math.min(0, g)) : Math.max(0, Math.min(mid ? MID_BOOST : maxBoost, g));
       addResp(b);
-      const over = maxEq() - maxBoost;
+      const over = overLimit();
       if (over > 0 && b.gain > 0) { addResp(b, -1); b.gain = Math.max(0, b.gain - over); addResp(b); }
     }
   }
@@ -226,6 +271,7 @@ export function designCorrection(measured, opts = {}) {
   const boost = Math.max(0, ...eq);
   return {
     bands: out,
+    modes: bands.filter((b) => b.mode && b.gain <= -0.5).map((b) => Math.round(b.freq)).sort((a, b) => a - b),
     preamp: -Math.round((boost + 0.5) * 10) / 10,
     low, high, reference: ref, target, measured: m, predicted,
     before: Math.round(err(m) * 10) / 10,
@@ -242,6 +288,7 @@ export function correctionNotes(res, { calibrated = null } = {}) {
   if (mean(low) < -8) notes.push(`Bassen ligger ca. ${Math.round(-mean(low))} dB under mellemtonen (40–150 Hz). Det er typisk for højttalere uden et rum omkring sig (udendørs, eller langt fra væggene) – det kan EQ kun hjælpe lidt på uden at tage al forstærkerens luft. Flyt dem tættere på en væg eller et hjørne, hvis du kan.`);
   notes.push(`Retter fra ${res.low} Hz til ${res.high >= 1000 ? `${Math.round(res.high / 100) / 10} kHz` : `${res.high} Hz`}.`);
   if (res.low > 40) notes.push('Længere nede kan højttalerne ikke spille det, så der løftes ikke.');
+  if (res.modes?.length) notes.push(`Rumtoppe i bassen ved ${res.modes.join(', ')} Hz dæmpes – det er dem, der får bassen til at runge.`);
   const cuts = res.bands.filter((x) => x.gain < 0).length, boosts = res.bands.length - cuts;
   notes.push(`${res.bands.length} filtre: ${cuts} dæmper toppe, ${boosts} løfter brede huller (højst så meget, som du har valgt). Smalle huller fyldes ikke op – dem kan EQ ikke rette.`);
   notes.push(`Afvigelse fra målkurven: ${String(res.before).replace('.', ',')} dB før → ${String(res.after).replace('.', ',')} dB efter (1/6 oktav).`);

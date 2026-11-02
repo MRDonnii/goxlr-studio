@@ -122,6 +122,8 @@ test('room correction cuts the mode, leaves the null and the roll-off alone', ()
   const eq = GRID.map(() => 0);
   for (const b of r.bands) bandResponse(b, GRID).forEach((v, i) => { eq[i] += v; });
   assert.ok(Math.max(...eq) <= 6.05, 'never more than the boost limit');
+  const below = eq.filter((_, i) => GRID[i] < r.low);
+  assert.ok(!below.length || Math.max(...below) <= 1.55, 'the skirts lift at most 1.5 dB below the low limit');
   assert.ok(r.after < r.before);
   assert.ok(r.preamp <= -0.5);
   assert.ok(correctionNotes(r, { calibrated: false }).some((n) => /kalibreringsfil/.test(n)));
@@ -150,4 +152,14 @@ test('speakers: delay from distance, polarity, FIR lines', () => {
   const p = enginePayload({ enabled: true, preamp: 0, bands: [] }, { fir: { enabled: true, file: 'fir-a.wav', rate: 48000 }, channels: { distL: 1, distR: 2 } });
   assert.equal(p.extra[1], 'Convolution: fir-a.wav');
   assert.ok(p.extra.some((l) => l.startsWith('Delay:')));
+});
+
+test('defaults are gentle: at most +3 dB, nothing when max boost is 0', () => {
+  const curve = GRID.map((f) => 80 + (f < 300 ? -12 : 0));
+  const eqOf = (r) => { const e = GRID.map(() => 0); for (const b of r.bands) bandResponse(b, GRID).forEach((v, i) => { e[i] += v; }); return e; };
+  assert.ok(Math.max(...eqOf(designCorrection(curve))) <= 3.05);
+  assert.ok(Math.max(...eqOf(designCorrection(curve, { maxBoost: 0 }))) <= 0.05);
+  const low = designCorrection(curve, { low: 100 });
+  assert.equal(low.low, 100);
+  assert.ok(!low.bands.some((b) => b.gain > 0 && b.freq < 125));
 });

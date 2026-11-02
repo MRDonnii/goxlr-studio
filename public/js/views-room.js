@@ -3,18 +3,21 @@
 import { h, toast, promptDialog, confirmDialog } from './ui.js';
 import { storeGet, storeSet, firSave } from './native.js';
 import { readMeasurementFile, readCalFile } from './rew.js';
-import { GRID, toGrid, powerAverage, smooth, designCorrection, correctionNotes, applyCalibration, TARGETS } from './roomcorrect.js';
+import { GRID, toGrid, powerAverage, smooth, designCorrection, correctionNotes, applyCalibration, TARGETS, DEFAULT_MAX_BOOST } from './roomcorrect.js';
 import { speakerDelay } from './extras.js';
 import { toApoConfig, formatFreq } from './eq.js';
 import { fileBase64 } from './views-sampler.js';
 
 const HIGH_CHOICES = [2000, 5000, 8000, 12000, 20000];
+const LOW_CHOICES = [30, 40, 50, 60, 70, 80, 100, 120];
 const dec = (v, d = 1) => String(Math.round(v * 10 ** d) / 10 ** d).replace('.', ',');
 
 /** opts: { state (outputEq), save(), makePreset(eq, name) } */
 export function roomCorrectionCard(ctx, { state, save, makePreset }) {
-  state.room ??= { target: 'room', maxBoost: 6, high: 8000, low: 'auto' };
+  state.room ??= { v: 2, target: 'room', maxBoost: DEFAULT_MAX_BOOST, high: 8000, low: 'auto' };
   const cfg = state.room;
+  // 0.10.0 started at +6 dB, which was too much bass: earlier settings move to the new default once.
+  if (cfg.v !== 2) { cfg.v = 2; cfg.maxBoost = Math.min(cfg.maxBoost ?? DEFAULT_MAX_BOOST, DEFAULT_MAX_BOOST); }
   let meas = []; // [{ id, name, date, calibrated, on, curve }]
   let result = null;
   const saveMeas = () => storeSet('room-measurements', meas).catch(() => {});
@@ -154,7 +157,10 @@ export function roomCorrectionCard(ctx, { state, save, makePreset }) {
     h('div', { class: 'row wrap' },
       h('label', {}, 'Målkurve'), sel(Object.entries(TARGETS).map(([k, t]) => [k, t.label]), cfg.target, (v) => { cfg.target = v; save(); render(); }, 'room-target'),
       h('label', {}, 'Ret op til'), sel(HIGH_CHOICES.map((f) => [f, formatFreq(f)]), cfg.high, (v) => { cfg.high = Number(v); save(); render(); }, 'room-high')),
+    h('div', { class: 'row wrap' }, h('label', {}, 'Laveste frekvens'),
+      sel([['auto', 'Automatisk'], ...LOW_CHOICES.map((f) => [f, `${f} Hz`])], cfg.low ?? 'auto', (v) => { cfg.low = v === 'auto' ? 'auto' : Number(v); save(); render(); }, 'room-low')),
     h('div', { class: 'row' }, h('label', {}, 'Højst løft'), boost, boostVal),
+    h('div', { class: 'hint' }, 'Lyder det tungt i bunden: sæt "Højst løft" ned (0 dB = kun toppe dæmpes) eller "Laveste frekvens" op. Under den frekvens løftes højst 1,5 dB.'),
     canvas, legend, notes, filters, actions);
 }
 
