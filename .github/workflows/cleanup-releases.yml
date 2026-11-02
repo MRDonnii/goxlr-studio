@@ -1,0 +1,31 @@
+# Startes med hånden (Actions → "Ryd gamle udgivelser"): sletter alle udgivelser og tags undtagen
+# den, der skal beholdes – fx efter at historikken er renset for personlige data.
+name: Ryd gamle udgivelser
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: Tag der beholdes (fx v0.6.1)
+        required: true
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slet andre udgivelser og tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: ${{ inputs.keep }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Never delete everything: the release to keep must exist.
+          gh release view "$KEEP" -R "$REPO" > /dev/null
+          gh release list -R "$REPO" --limit 500 --json tagName -q '.[].tagName' | while read -r t; do
+            if [ -n "$t" ] && [ "$t" != "$KEEP" ]; then echo "Sletter udgivelsen $t"; gh release delete "$t" -R "$REPO" --cleanup-tag -y; fi
+          done
+          gh api "repos/$REPO/git/matching-refs/tags/" -q '.[].ref' | while read -r r; do
+            if [ -n "$r" ] && [ "$r" != "refs/tags/$KEEP" ]; then echo "Sletter $r"; gh api -X DELETE "repos/$REPO/git/$r"; fi
+          done
+          gh release list -R "$REPO" --limit 50
