@@ -1,0 +1,16 @@
+[package]
+name = "goxlr-studio-dynamics"
+version = "1.0.0"
+edition = "2021"
+description = "GoXLR Studio's limiter and compressor as a small VST2 plugin for the EQ engine"
+license = "MIT"
+publish = false
+
+[lib]
+name = "goxlr_studio_dynamics"
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"

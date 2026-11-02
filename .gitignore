@@ -5,3 +5,5 @@ data/
 dist/
 *.log
 __pycache__/
+
+plugins/*/target/
