@@ -74,6 +74,9 @@ jobs:
           Copy-Item THIRD-PARTY-NOTICES.md dist/
           Copy-Item engine-dl/EqualizerAPO-src-1.4.2.zip dist/
           Copy-Item engine-dl/noise-suppression-for-voice-src-1.22.zip dist/
+          # Stream Deck-plugin: the folder zipped with the folder itself at the root, as Stream Deck wants it.
+          Compress-Archive -Path streamdeck/com.goxlrstudio.sdPlugin -DestinationPath dist/GoXLR-Studio-plugin.zip
+          Move-Item dist/GoXLR-Studio-plugin.zip dist/GoXLR-Studio.streamDeckPlugin
 
       - uses: actions/upload-artifact@v4
         with:

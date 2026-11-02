@@ -448,3 +448,4 @@ input.num { width: 64px; }
 .chatmix-ends { margin-bottom: -6px; }
 .app-volume { display: flex; align-items: center; gap: 6px; min-width: 180px; }
 .app-volume input[type=range] { width: 110px; }
+.deck-steps { margin: 8px 0; padding-left: 20px; line-height: 1.7; }

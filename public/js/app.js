@@ -31,6 +31,7 @@ import { startSchedule } from './schedule.js';
 import { startMicLimiter } from './miclimiter.js';
 import { startGameMode } from './gamemode.js';
 import { startClips } from './clips.js';
+import { activeActions } from './apistate.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 import { engineConfig, usesChannelEq, hasProfileSets, chatDenoise } from './channeleq.js';
@@ -350,7 +351,17 @@ async function publishApi(force = false) {
     volumes: m?.levels.volumes || {},
     eq: { enabled: !!eq?.enabled, preset: ctx.outputEq?.presetName || null, presets: ctx.outputEq ? eqPresetNames(ctx) : [] },
     scenes: ctx.scenes.map((x) => ({ id: x.id, name: x.name })),
+    faders: m ? Object.fromEntries(Object.entries(m.fader_status).map(([f, st]) => [f, { channel: st.channel, name: st.scribble?.bottom_text || st.channel, muted: st.mute_state !== 'Unmuted' }])) : {},
+    chatmix: { enabled: !!ctx.prefs.chatMix?.enabled, position: ctx.prefs.chatMix?.position || 0 },
+    limiter: !!ctx.prefs.micLimiter?.enabled,
+    game: { enabled: !!ctx.prefs.gameMode?.enabled, active: !!ctx.gameMode?.active, exe: ctx.gameMode?.exe || null },
+    clips: !!ctx.prefs.clips?.enabled,
   };
+  state.active = activeActions({
+    mixer: m,
+    eq: { enabled: !!eq?.enabled, preset: ctx.outputEq?.presetName || null, crossfeed: !!ctx.outputEq?.extras?.crossfeed?.enabled, loudness: !!ctx.outputEq?.extras?.loudness?.enabled },
+    ducking: !!ctx.ducker?.settings?.enabled, limiter: state.limiter, chatMix: state.chatmix, media: ctx.nowPlaying,
+  });
   const key = JSON.stringify(state);
   if (!force && key === apiStateKey) return;
   apiStateKey = key;
@@ -876,6 +887,8 @@ async function boot() {
   startMicLimiter(ctx);
   startGameMode(ctx);
   startClips(ctx);
+  // The API state also covers app settings (ChatMix, limiter, game mode …): publish changes every 2 s.
+  setInterval(() => publishApi(), 2000);
   // Profilhistorik: a version of each changed profile every 5 minutes.
   setTimeout(() => snapshotProfiles(ctx), 20000);
   setInterval(() => snapshotProfiles(ctx), 5 * 60 * 1000);

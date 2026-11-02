@@ -58,7 +58,8 @@ fn respond(mut s: TcpStream, status: &str, body: &Value) {
     let text = body.to_string();
     let _ = write!(
         s,
-        "HTTP/1.1 {status}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+        // Any origin may read it (the Stream Deck plugin runs from a file:// page); the token is still required.
+        "HTTP/1.1 {status}\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
         text.len()
     );
 }
@@ -100,6 +101,12 @@ fn handle(app: &AppHandle, api: &Api, cfg: &ApiConfig, mut s: TcpStream) {
         .map(|(_, v)| v.trim().trim_start_matches("Bearer ").trim().to_string());
     let query_token = query.split('&').filter_map(|kv| kv.split_once('=')).find(|(k, _)| *k == "token").map(|(_, v)| percent_decode(v));
     let token = header_token.or(query_token).unwrap_or_default();
+    // CORS preflight (a page sending the token as a header asks first); answers nothing else.
+    if method == "OPTIONS" {
+        let head = ["HTTP/1.1 204 No Content", "Access-Control-Allow-Origin: *", "Access-Control-Allow-Methods: GET, POST", "Access-Control-Allow-Headers: Authorization", "Content-Length: 0", "Connection: close", "", ""];
+        let _ = s.write_all(head.join("\r\n").as_bytes());
+        return;
+    }
     if cfg.token.is_empty() || token != cfg.token {
         return respond(s, "401 Unauthorized", &json!({ "error": "token mangler eller er forkert" }));
     }

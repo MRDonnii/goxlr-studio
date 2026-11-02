@@ -134,7 +134,22 @@ export function deckView(ctx) {
   actionCatalog(ctx).then((c) => { catalog = c; renderList(); });
   render();
 
+  // Elgato's Stream Deck app: our plugin shows status on the keys (it reads the local API).
+  const api = ctx.prefs.api || {};
+  const pluginCard = h('div', { class: 'card', 'data-testid': 'deck-plugin' },
+    h('h2', {}, 'Plugin til Elgato Stream Deck – med status'),
+    h('div', { class: 'hint' }, 'Med pluginnet lyser tasterne, når det, de styrer, er slået til – fx rød, når mikrofonen er muted, eller når profilen/EQ-presettet er i brug. Der er også en lydstyrke-handling til drejeknapperne på Stream Deck +.'),
+    h('ol', { class: 'deck-steps' },
+      h('li', {}, 'Slå "Lokalt API" til under Indstillinger, og tryk "Kopiér token".',
+        h('span', { class: `badge ${api.enabled ? 'ok' : 'warn'}`, style: { marginLeft: '6px' } }, api.enabled ? `API kører (port ${api.port || 14610})` : 'API er slået fra')),
+      h('li', {}, 'Hent pluginnet og dobbeltklik på filen – Stream Deck-programmet installerer det.'),
+      h('li', {}, 'Træk "GoXLR Studio-handling" ud på en tast, sæt token ind, og vælg handlingen.')),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } },
+      h('a', { class: 'btn sm primary', 'data-testid': 'deck-plugin-download', href: 'https://github.com/MRDonnii/goxlr-studio/releases/latest/download/GoXLR-Studio.streamDeckPlugin', target: '_blank', rel: 'noopener' }, 'Hent Stream Deck-plugin')),
+    h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Til Elgatos Stream Deck-program (version 6 eller nyere). Andre programmer, fx Streonor, bruger metoderne herunder.'));
+
   return h('div', { class: 'grid' },
+    pluginCard,
     h('div', { class: 'card' },
       h('h2', {}, 'Stream Deck'),
       h('p', {}, 'Styr GoXLR Studio fra en Stream Deck – fx Streonor, Elgato eller Ulanzi. Hver handling i appen kan lægges på en tast. Vælg, hvordan dit Stream Deck-program skal starte den:'),

@@ -19,6 +19,7 @@ export function startMediaWatch(ctx) {
   const tick = async () => {
     if (mediaSettings(ctx).osd) {
       const np = await mediaNow().catch(() => null);
+      ctx.nowPlaying = np;
       if (last && songChanged(last, np)) showOsd(`♪ ${songText(np)}`, 'info').catch(() => {});
       last = np;
     } else last = null;
@@ -36,6 +37,7 @@ export function nowPlayingCard(ctx) {
   const playBtn = btn('play-pause', '⏯', 'Afspil/pause');
   const refresh = async () => {
     const np = await mediaNow().catch(() => null);
+    ctx.nowPlaying = np;
     if (!np?.available) { title.textContent = 'Intet spiller'; sub.textContent = 'Start musik i fx Spotify – så kan den styres her, med genveje, pedaler og telefonen.'; return; }
     title.textContent = np.title || np.app || 'Ukendt';
     sub.textContent = [np.artist, np.app].filter(Boolean).join(' · ');

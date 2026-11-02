@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="pi.css"></head>
+<body data-kind="action">
+<div class="status" id="status">…</div>
+<div class="row"><label id="l-action">Handling</label><select id="action"></select></div>
+<details id="conn"><summary id="l-conn">Forbindelse til GoXLR Studio</summary>
+  <div class="row"><label id="l-token">Token</label><input id="token" type="password" autocomplete="off"></div>
+  <div class="row"><label id="l-port">Port</label><input id="port" type="number" min="1" max="65535"></div>
+  <div class="hint" id="h-conn"></div>
+</details>
+<script src="common.js"></script>
+<script src="pi.js"></script>
+</body>
+</html>
