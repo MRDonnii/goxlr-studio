@@ -8,6 +8,9 @@ export class EqGraph {
   constructor(canvas, opts) {
     this.canvas = canvas;
     this.opts = { minDb: -15, maxDb: 15, ...opts };
+    // A new theme (or Windows switching light/dark): redraw in its colours while on screen.
+    const onTheme = () => { if (canvas.isConnected) this.draw(); else window.removeEventListener('studio-theme', onTheme); };
+    window.addEventListener('studio-theme', onTheme);
     this.freqs = logFreqs(300);
     this.selected = -1;
     this.hover = -1;
@@ -145,16 +148,17 @@ export class EqGraph {
     g.lineTo(this.xOf(sp.freqs[sp.freqs.length - 1]), bottom);
     g.closePath();
     const fill = g.createLinearGradient(0, p.t, 0, bottom);
-    fill.addColorStop(0, 'rgba(168,85,247,.32)');
-    fill.addColorStop(1, 'rgba(34,211,238,.06)');
+    const tc = themeColors();
+    fill.addColorStop(0, hexA(tc.accent2, 0.32));
+    fill.addColorStop(1, hexA(tc.accent, 0.06));
     g.fillStyle = fill;
     g.fill();
-    g.strokeStyle = 'rgba(168,85,247,.55)';
+    g.strokeStyle = hexA(tc.accent2, 0.55);
     g.lineWidth = 1;
     g.stroke();
     if (sp.label) {
       g.font = '11px system-ui, sans-serif';
-      g.fillStyle = 'rgba(200,180,255,.8)';
+      g.fillStyle = hexA(tc.accent2, 0.85);
       g.textAlign = 'right';
       g.fillText(sp.label, W - p.r - 6, p.t + 14);
     }
@@ -175,22 +179,23 @@ export class EqGraph {
     const p = this.pad();
     const { minDb, maxDb } = this.opts;
 
+    const tc = themeColors();
     g.font = '11px system-ui, sans-serif';
     g.lineWidth = 1;
     for (const f of GRID_F) {
       const x = Math.round(this.xOf(f)) + 0.5;
-      g.strokeStyle = '#1a2335';
+      g.strokeStyle = tc.grid;
       g.beginPath(); g.moveTo(x, p.t); g.lineTo(x, H - p.b); g.stroke();
-      g.fillStyle = '#5d6a85';
+      g.fillStyle = tc.label;
       g.textAlign = 'center';
       g.fillText(f >= 1000 ? `${f / 1000}k` : String(f), x, H - 7);
     }
     const step = maxDb - minDb > 24 ? 6 : 3;
     for (let db = Math.ceil(minDb / step) * step; db <= maxDb; db += step) {
       const y = Math.round(this.yOf(db)) + 0.5;
-      g.strokeStyle = db === 0 ? '#33415f' : '#1a2335';
+      g.strokeStyle = db === 0 ? tc.zero : tc.grid;
       g.beginPath(); g.moveTo(p.l, y); g.lineTo(W - p.r, y); g.stroke();
-      g.fillStyle = '#5d6a85';
+      g.fillStyle = tc.label;
       g.textAlign = 'right';
       g.fillText(`${db > 0 ? '+' : ''}${db}`, p.l - 6, y + 4);
     }
@@ -216,8 +221,8 @@ export class EqGraph {
 
     const total = this.opts.curve(this.freqs);
     const grad = g.createLinearGradient(0, 0, W, 0);
-    grad.addColorStop(0, '#22d3ee');
-    grad.addColorStop(1, '#a855f7');
+    grad.addColorStop(0, tc.accent);
+    grad.addColorStop(1, tc.accent2);
     g.beginPath();
     total.forEach((db, k) => {
       const x = this.xOf(this.freqs[k]), y = this.yOf(Math.min(Math.max(db, minDb - 5), maxDb + 5));
@@ -225,7 +230,7 @@ export class EqGraph {
     });
     g.strokeStyle = grad;
     g.lineWidth = 2.5;
-    g.shadowColor = 'rgba(34,211,238,.5)';
+    g.shadowColor = hexA(tc.accent, 0.5);
     g.shadowBlur = 10;
     g.stroke();
     g.shadowBlur = 0;
@@ -238,7 +243,7 @@ export class EqGraph {
         const x = this.xOf(this.freqs[k]), y = this.yOf(Math.min(Math.max(db, minDb - 5), maxDb + 5));
         k ? g.lineTo(x, y) : g.moveTo(x, y);
       });
-      g.strokeStyle = '#f472b6';
+      g.strokeStyle = tc.earRight;
       g.lineWidth = 2;
       g.stroke();
     }
@@ -252,7 +257,7 @@ export class EqGraph {
         k ? g.lineTo(x, y) : g.moveTo(x, y);
       });
       g.setLineDash([5, 4]);
-      g.strokeStyle = 'rgba(230,235,245,.7)';
+      g.strokeStyle = hexA(tc.text, 0.7);
       g.lineWidth = 1.5;
       g.stroke();
       g.setLineDash([]);
@@ -263,10 +268,10 @@ export class EqGraph {
       const active = i === this.selected || i === this.hover;
       g.beginPath();
       g.arc(x, y, active ? 8 : 6.5, 0, Math.PI * 2);
-      g.fillStyle = pt.enabled === false ? '#3a4560' : pt.color;
+      g.fillStyle = pt.enabled === false ? tc.lineHover : pt.color;
       g.fill();
       g.lineWidth = 2;
-      g.strokeStyle = active ? '#fff' : '#0a0e16';
+      g.strokeStyle = active ? tc.text : tc.deep;
       g.stroke();
       if (pt.label) {
         g.fillStyle = '#0a0e16';
@@ -286,19 +291,32 @@ export class EqGraph {
       tx = Math.min(Math.max(tx, p.l), W - p.r - tw);
       let ty = this.yOf(pt.dot ?? pt.gain) - 34;
       if (ty < 2) ty += 52;
-      g.fillStyle = 'rgba(18,24,38,.95)';
-      g.strokeStyle = '#2b3754';
+      g.fillStyle = hexA(tc.panel, 0.95);
+      g.strokeStyle = tc.lineStrong;
       g.lineWidth = 1;
       roundRect(g, tx, ty, tw, 22, 6);
       g.fill(); g.stroke();
-      g.fillStyle = '#e6ebf5';
+      g.fillStyle = tc.text;
       g.textAlign = 'left';
       g.fillText(txt, tx + 8, ty + 15);
     }
   }
 }
 
+// The theme's colours (style.css variables), so the graph follows Lys/Mørk and the other themes.
+function themeColors() {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    grid: v('--graph-grid', '#1a2335'), zero: v('--graph-zero', '#33415f'), label: v('--graph-label', '#5d6a85'),
+    accent: v('--accent', '#22d3ee'), accent2: v('--accent-2', '#a855f7'), earRight: v('--ear-right', '#f472b6'),
+    text: v('--text', '#e6ebf5'), panel: v('--panel', '#121826'), lineStrong: v('--line-strong', '#2b3754'),
+    lineHover: v('--line-hover', '#3a4560'), deep: v('--deep', '#0a0e16'),
+  };
+}
+
 function hexA(hex, a) {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return hex;
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }

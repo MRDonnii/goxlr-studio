@@ -100,13 +100,13 @@ export function hearingTestCard(ctx, opts) {
     const W = 320, H = 130, lo = Math.log(200), hi = Math.log(14000);
     const x = (f) => 30 + ((Math.log(f) - lo) / (hi - lo)) * (W - 40);
     const y = (d) => 10 + ((Math.max(-10, Math.min(30, d)) + 10) / 40) * (H - 30);
-    const line = (ear, color) => `<polyline fill="none" stroke="${color}" stroke-width="2" points="${TEST_FREQS.map((f, i) => `${x(f).toFixed(1)},${y(prof[ear][i]).toFixed(1)}`).join(' ')}"/>`
-      + TEST_FREQS.map((f, i) => `<circle cx="${x(f).toFixed(1)}" cy="${y(prof[ear][i]).toFixed(1)}" r="3" fill="${color}"/>`).join('');
+    const line = (ear, color) => `<polyline fill="none" style="stroke:${color}" stroke-width="2" points="${TEST_FREQS.map((f, i) => `${x(f).toFixed(1)},${y(prof[ear][i]).toFixed(1)}`).join(' ')}"/>`
+      + TEST_FREQS.map((f, i) => `<circle cx="${x(f).toFixed(1)}" cy="${y(prof[ear][i]).toFixed(1)}" r="3" style="fill:${color}"/>`).join('');
     const svg = h('div', { class: 'hearing-chart' });
     svg.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img">`
-      + `<line x1="30" x2="${W - 10}" y1="${y(0)}" y2="${y(0)}" stroke="#3a4560" stroke-dasharray="3 3"/>`
-      + [250, 1000, 4000, 12000].map((f) => `<text x="${x(f)}" y="${H - 4}" fill="#8b97b0" font-size="9" text-anchor="middle">${f >= 1000 ? `${f / 1000}k` : f}</text>`).join('')
-      + line('L', '#22d3ee') + line('R', '#f472b6') + '</svg>';
+      + `<line x1="30" x2="${W - 10}" y1="${y(0)}" y2="${y(0)}" style="stroke:var(--line-hover)" stroke-dasharray="3 3"/>`
+      + [250, 1000, 4000, 12000].map((f) => `<text x="${x(f)}" y="${H - 4}" style="fill:var(--muted)" font-size="9" text-anchor="middle">${f >= 1000 ? `${f / 1000}k` : f}</text>`).join('')
+      + line('L', 'var(--accent)') + line('R', 'var(--ear-right)') + '</svg>';
     body.replaceChildren(
       h('div', { class: 'row', style: { gap: '14px', flexWrap: 'wrap' } },
         h('span', {}, h('span', { class: 'ear-swatch left' }), 'Venstre øre'), h('span', {}, h('span', { class: 'ear-swatch right', style: { marginLeft: '4px' } }), 'Højre øre'),
