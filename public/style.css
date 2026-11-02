@@ -428,3 +428,7 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .app-name .badge { align-self: flex-start; width: fit-content; margin: 2px 0; }
 .now-playing .np-text { min-width: 0; }
 .now-playing .np-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.day-row { display: flex; gap: 3px; flex-wrap: wrap; margin: 6px 0; }
+.day-row .btn.day { padding: 3px 7px; min-width: 0; opacity: .55; }
+.day-row .btn.day.on { opacity: 1; border-color: var(--accent); color: var(--accent); }
+.schedule-rule input[type=time] { width: auto; }

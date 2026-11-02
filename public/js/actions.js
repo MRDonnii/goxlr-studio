@@ -1,4 +1,5 @@
 import { MEDIA_COMMANDS } from './media.js';
+import { HEARING_DEFAULTS } from './hearing.js';
 import { playSound, stopSounds, soundNames } from './soundboard.js';
 import { obsScene, streamSafeMusic } from './obs.js';
 import { toast, logActivity } from './ui.js';
@@ -122,6 +123,12 @@ export async function runAction(ctx, id, source = 'handling') {
       if (safe == null) return;
       return notify(ctx, safe ? 'Stream-sikker musik: musikken er ude af streamen' : 'Musikken er med i streamen igen', safe ? 'ok' : 'info');
     }
+    case 'hearing-cap': {
+      const hp = (ctx.prefs.hearing = { ...HEARING_DEFAULTS, ...(ctx.prefs.hearing || {}) });
+      if (arg === 'off') hp.cap = false; else { hp.cap = true; hp.max = Math.max(10, Math.min(100, Number(arg) || hp.max)); }
+      ctx.savePrefs?.();
+      return notify(ctx, hp.cap ? `Høreværn: hovedtelefoner højst ${hp.max} %` : 'Høreværn: intet loft', 'info');
+    }
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
     // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
@@ -211,6 +218,10 @@ export async function actionCatalog(ctx) {
     ...sounds.map((x) => ({ id: `sound:${x.file}`, label: `Afspil "${x.name}"` })),
     { id: 'sounds-stop', label: 'Stop alle lyde' },
   ] : []);
+  g('Høreværn', [
+    ...[50, 60, 70, 80].map((p) => ({ id: `hearing-cap:${p}`, label: `Loft for hovedtelefonerne: ${p} %` })),
+    { id: 'hearing-cap:off', label: 'Intet loft for hovedtelefonerne' },
+  ]);
   g('Medier', MEDIA_COMMANDS.map(([c, label]) => ({ id: `media:${c}`, label })));
   g('Andet', [
     m?.effects ? { id: 'fx-toggle', label: 'Effekter til/fra' } : null,
@@ -251,6 +262,7 @@ export function actionLabel(ctx, id) {
     case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
     case 'hold': return arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
     case 'sounds-stop': return 'Stop alle lyde';
+    case 'hearing-cap': return arg === 'off' ? 'Intet loft for hovedtelefonerne' : `Loft for hovedtelefonerne: ${arg} %`;
     case 'media': return MEDIA_COMMANDS.find(([c]) => c === arg)?.[1] || arg;
     case 'mute-fader': return `Mute fader ${arg}`;
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;
