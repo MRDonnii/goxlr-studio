@@ -38,6 +38,11 @@ export function discoveryConfigs({ node, version = '', model = 'GoXLR', profiles
   add('switch', 'eq', 'EQ', { icon: 'mdi:tune-vertical', state_topic: st('eq'), command_topic: cmd('eq') });
   // A scene has no lasting state: Home Assistant keeps the last choice itself.
   if (scenes.length) add('select', 'scene', 'Scene', { icon: 'mdi:palette', options: scenes, command_topic: cmd('scene'), optimistic: true });
+  // 0.9.0: ChatMix, the mic limiter, game mode and audio clips.
+  add('number', 'chatmix', 'ChatMix (spil ↔ chat)', { icon: 'mdi:headset', min: -100, max: 100, step: 5, mode: 'slider', state_topic: st('chatmix'), command_topic: cmd('chatmix') });
+  add('switch', 'mic_limiter', 'Mikrofon-limiter', { icon: 'mdi:shield-check', state_topic: st('mic_limiter'), command_topic: cmd('mic_limiter') });
+  add('binary_sensor', 'game_active', 'Spiltilstand aktiv', { icon: 'mdi:controller', state_topic: st('game_active') });
+  add('button', 'clip_save', 'Gem lydklip', { icon: 'mdi:content-save', command_topic: cmd('clip_save') });
   for (const ch of channels) {
     if (!VOLUME_CHANNELS[ch]) continue;
     const o = `vol_${slug(ch)}`;
@@ -51,6 +56,9 @@ export function discoveryConfigs({ node, version = '', model = 'GoXLR', profiles
 export function stateMessages(node, s) {
   const base = baseTopic(node);
   const out = { [`${base}/connected/state`]: s.connected ? 'ON' : 'OFF', [`${base}/eq/state`]: s.eqOn ? 'ON' : 'OFF' };
+  out[`${base}/mic_limiter/state`] = s.limiter ? 'ON' : 'OFF';
+  out[`${base}/game_active/state`] = s.gameActive ? 'ON' : 'OFF';
+  out[`${base}/chatmix/state`] = String(Math.round(Number(s.chatMix) || 0));
   if (s.eqPreset && (!s.presets || s.presets.includes(s.eqPreset))) out[`${base}/eq_preset/state`] = s.eqPreset;
   if (s.connected) {
     out[`${base}/mic_mute/state`] = s.micMuted ? 'ON' : 'OFF';
@@ -72,6 +80,12 @@ export function parseCommand(topic, payload, node, { profiles = [], presets = []
   switch (object) {
     case 'mic_mute': return onOff('mic_mute');
     case 'eq': return onOff('eq');
+    case 'mic_limiter': return p === 'ON' || p === 'OFF' ? { kind: 'action', id: `mic-limiter:${p === 'ON' ? 'on' : 'off'}`, label: `mikrofon-limiter ${p === 'ON' ? 'til' : 'fra'}` } : null;
+    case 'clip_save': return { kind: 'action', id: 'clip-save', label: 'gem lydklip' };
+    case 'chatmix': {
+      const v = Number(p);
+      return p !== '' && Number.isFinite(v) ? { kind: 'chatmix', value: Math.max(-100, Math.min(100, Math.round(v))) } : null;
+    }
     case 'profile': return profiles.includes(p) ? { kind: 'action', id: `profile:${p}`, label: `profil "${p}"` } : null;
     case 'eq_preset': return presets.includes(p) ? { kind: 'action', id: `eq-preset:${p}`, label: `EQ-preset "${p}"` } : null;
     case 'scene': {

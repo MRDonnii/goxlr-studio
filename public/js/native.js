@@ -364,6 +364,12 @@ export async function clipsSave(seconds) {
 }
 export async function clipsOpenDir() { if (isNative()) return invoke('clips_open_dir'); }
 
+/** An output's format ({ rate, bits } or null). The demo's Chat output runs 48 kHz. */
+export async function deviceFormat(id) {
+  if (isNative()) return invoke('device_format', { id });
+  return { rate: 48000, bits: 24 };
+}
+
 const demoB64 = (t) => btoa(t);
 export async function moveCollect(dirs) {
   if (isNative()) return invoke('move_collect', { dirs });

@@ -461,6 +461,12 @@ async fn history_restore(kind: String, name: String, version: String, folder: St
 }
 
 /// Lydtjek (soundcheck.rs): Windows settings that change or hide the sound.
+/// One output's shared-mode format (sample rate, bits) – e.g. so the chat's noise removal can say it needs 48 kHz.
+#[tauri::command]
+async fn device_format(id: String) -> Result<Option<audio::DeviceFormat>, String> {
+    blocking(move || Ok(audio::device_format(&id))).await
+}
+
 #[tauri::command]
 async fn soundcheck_report() -> Result<soundcheck::Report, String> {
     blocking(|| Ok(soundcheck::report())).await
@@ -948,6 +954,7 @@ pub fn run() {
             history_list,
             history_restore,
             soundcheck_report,
+            device_format,
             soundcheck_set_ducking,
             soundcheck_restore_ducking,
             soundcheck_set_endpoint,

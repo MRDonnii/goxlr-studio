@@ -31,9 +31,9 @@ test('state: mute, open mic, profile and volumes in percent', () => {
   assert.equal(s[`${base}/vol_music/state`], '50');
   assert.ok(!(`${base}/vol_mic/state` in s));
   assert.equal(s[`${base}/eq_preset/state`], 'Flad');
-  // A changed preset isn't one of the options; the GoXLR away: only connected/EQ.
+  // A changed preset isn't one of the options; the GoXLR away: only the app's own states.
   const off = q.stateMessages(node, { connected: false, eqOn: false, eqPreset: 'Mit eget', presets: ['Flad'] });
-  assert.deepEqual(Object.keys(off).sort(), [`${base}/connected/state`, `${base}/eq/state`]);
+  assert.deepEqual(Object.keys(off).sort(), ['chatmix', 'connected', 'eq', 'game_active', 'mic_limiter'].map((o) => `${base}/${o}/state`));
 });
 
 test('commands from Home Assistant', () => {

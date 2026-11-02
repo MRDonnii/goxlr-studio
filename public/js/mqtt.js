@@ -3,6 +3,7 @@
 import { h, toast, logActivity } from './ui.js';
 import { mqttStart, mqttStop, mqttPublish, onMqttEvents, appInfo } from './native.js';
 import { discoveryConfigs, stateMessages, parseCommand, diffMessages, newNodeId, baseTopic } from './mqttmodel.js';
+import { setChatMix } from './chatmix.js';
 import { micIsMuted } from './extras.js';
 import { pttMuteState, toggleEq } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
@@ -40,6 +41,9 @@ function snapshot(ctx, presets) {
     eqOn: !!eq?.enabled,
     eqPreset: ctx.outputEq?.presetName || null,
     presets,
+    limiter: !!ctx.prefs.micLimiter?.enabled,
+    gameActive: !!ctx.gameMode?.active,
+    chatMix: ctx.prefs.chatMix?.enabled ? ctx.prefs.chatMix.position || 0 : 0,
   };
 }
 
@@ -89,6 +93,11 @@ async function onCommand(ctx, { topic, payload }) {
       if (!!eq.enabled !== c.on) { logActivity(`Home Assistant: EQ ${c.on ? 'til' : 'fra'}`); toggleEq(ctx); }
       return;
     }
+    case 'chatmix':
+      if (!ctx.prefs.chatMix?.enabled) { logActivity('Home Assistant: ChatMix er slået fra i appen'); return; }
+      logActivity(`Home Assistant: ChatMix ${c.value}`);
+      setChatMix(ctx, c.value);
+      return;
     case 'volume':
       if (mixer) { logActivity(`Home Assistant: ${c.channel} ${Math.round(c.value / 2.55)} %`); ctx.conn.command('SetVolume', c.channel, c.value); }
       return;

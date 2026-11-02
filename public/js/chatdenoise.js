@@ -3,7 +3,7 @@
 // VST plugin on the GoXLR's Chat output (Discord etc.), so it needs the engine on that output.
 // Your own mic is not touched: the GoXLR's gate and the mic EQ handle that in the hardware.
 import { h, toast } from './ui.js';
-import { engineInfo, engineTask, listAudioDevices } from './native.js';
+import { engineInfo, engineTask, listAudioDevices, deviceFormat } from './native.js';
 import { channelEndpoint } from './extras.js';
 
 export function chatDenoiseCard(ctx, { state, save, apply }) {
@@ -13,10 +13,12 @@ export function chatDenoiseCard(ctx, { state, save, apply }) {
     const [info, devs] = await Promise.all([engineInfo().catch(() => null), listAudioDevices().catch(() => [])]);
     const chatId = channelEndpoint('Chat', devs);
     const onChat = !!info?.devices?.some((d) => d.installed && chatId && d.id.toLowerCase() === chatId.toLowerCase());
+    const fmt = chatId ? await deviceFormat(chatId).catch(() => null) : null;
     const sw = h('input', { type: 'checkbox', 'data-testid': 'chat-denoise-on', checked: !!state.chatDenoise.enabled, onchange: () => { state.chatDenoise.enabled = sw.checked; save(); apply(); render(); } });
     const notes = [];
     if (!chatId) notes.push('Fandt ikke GoXLR’ens Chat-udgang.');
     else if (info && info.kind === 'builtin' && !onChat) notes.push('EQ-motoren er ikke sat på Chat-udgangen – gør det under "EQ-motor" ovenfor (eller "Sæt motoren på" i EQ pr. kanal).');
+    if (fmt?.rate && fmt.rate !== 48000) notes.push(`Chat-udgangen kører ${fmt.rate / 1000} kHz – støjfjerneren virker kun ved 48 kHz. Skift det i Windows (Lyd → Chat (TC-Helicon GoXLR) → Egenskaber → Avanceret → 48000 Hz), eller under Lydtjek.`);
     if (info && info.kind !== 'builtin') notes.push('Kræver GoXLR Studios EQ-motor.');
     else if (info && !info.denoise_bundled) notes.push('Denne udgave af appen har ikke støjfjerneren med.');
     const needFiles = info?.kind === 'builtin' && info.denoise_bundled && !info.denoise_installed;
