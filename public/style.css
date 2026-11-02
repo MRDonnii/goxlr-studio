@@ -352,3 +352,7 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .dlg-body hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .toast.warn { border-left-color: var(--warn); }
 .slope-sel { margin-left: 4px; max-width: 96px; }
+.ear-sel { max-width: 90px; }
+.ear-swatch { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin: 0 6px 0 4px; }
+.ear-swatch.left { background: linear-gradient(90deg, #22d3ee, #a855f7); }
+.ear-swatch.right { background: #f472b6; margin-left: 12px; }

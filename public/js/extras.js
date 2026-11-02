@@ -75,7 +75,7 @@ export const PRESET_FILE_TYPE = 'goxlr-studio-eq-presets';
 export function exportPresets(presets, version = '') {
   const clean = Object.fromEntries(Object.entries(presets || {}).map(([n, eq]) => [n, {
     enabled: eq.enabled !== false, preamp: Number(eq.preamp) || 0,
-    bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q, slope }) => ({ enabled, type, freq, gain, q, ...(slope > 12 ? { slope } : {}) })),
+    bands: (eq.bands || []).map(({ enabled = true, type, freq, gain = 0, q, slope, channel }) => ({ enabled, type, freq, gain, q, ...(slope > 12 ? { slope } : {}), ...(channel === 'L' || channel === 'R' ? { channel } : {}) })),
   }]));
   return JSON.stringify({ type: PRESET_FILE_TYPE, version: 1, app: version, presets: clean }, null, 1);
 }
@@ -94,6 +94,7 @@ export function importPresets(existing, text) {
     const bands = (eq?.bands || []).filter(validBand).slice(0, 30).map((b) => ({
       enabled: b.enabled !== false, type: b.type, freq: +b.freq, gain: Math.max(-30, Math.min(30, +b.gain || 0)), q: +b.q,
       ...([24, 36, 48].includes(+b.slope) ? { slope: +b.slope } : {}),
+      ...(b.channel === 'L' || b.channel === 'R' ? { channel: b.channel } : {}),
     }));
     let n = String(name).trim().slice(0, 80) || 'Preset';
     for (let i = 2; n in out; i++) n = `${String(name).trim().slice(0, 74)} (${i})`;
@@ -104,7 +105,7 @@ export function importPresets(existing, text) {
 }
 
 // ---------- presets ----------
-const bandKey = (b) => [b.enabled !== false, b.type, +b.freq, +(b.gain || 0), +b.q, +(b.slope || 12)].join('|');
+const bandKey = (b) => [b.enabled !== false, b.type, +b.freq, +(b.gain || 0), +b.q, +(b.slope || 12), b.channel || 'all'].join('|');
 // True when the active slot no longer matches the preset it was loaded from.
 export function presetModified(eq, preset) {
   if (!preset) return false;

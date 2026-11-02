@@ -1,7 +1,7 @@
 // The whole playback chain as the engine plays it – your EQ plus Loudness and Crossfeed – for the
 // headroom display, "Klip-beskyttelse", the "Auto" preamp and the loudness-matched A/B.
 // Pure functions, tested in tests/eqchain.test.mjs.
-import { coefficients, magnitudeDb, logFreqs, totalResponse } from './eq.js';
+import { coefficients, magnitudeDb, logFreqs, totalResponse, usesEars } from './eq.js';
 import { enginePayload } from './extras.js';
 
 export const CHAIN_FREQS = logFreqs(240);
@@ -17,15 +17,23 @@ export function crossfeedDb(cf, f) {
 }
 
 /** dB response of everything the engine plays for this slot. A switched-off EQ plays flat (0 dB). */
-export function chainResponse(eq, extras = {}, freqs = CHAIN_FREQS, offset = 0) {
+export function chainResponse(eq, extras = {}, freqs = CHAIN_FREQS, offset = 0, ear = 'L') {
   if (!eq?.enabled) return freqs.map(() => 0);
-  const r = totalResponse(enginePayload(eq, extras || {}, null, offset), freqs);
+  const r = totalResponse(enginePayload(eq, extras || {}, null, offset), freqs, ear);
   const cf = extras?.crossfeed;
   if (cf?.enabled) for (let i = 0; i < freqs.length; i++) r[i] += crossfeedDb(cf, freqs[i]);
   return r;
 }
 
-export const chainPeak = (eq, extras, freqs = CHAIN_FREQS) => Math.max(...chainResponse(eq, extras, freqs));
+/** The loudest point of the chain – of either ear when left and right differ. */
+export const chainPeak = (eq, extras, freqs = CHAIN_FREQS) => Math.max(...chainResponse(eq, extras, freqs),
+  ...(usesEars(eq) ? chainResponse(eq, extras, freqs, 0, 'R') : []));
+
+/** How loud the chain sounds (dB, see loudnessDb) – the average of the two ears when they differ. */
+export function chainLoudness(eq, extras, offset = 0) {
+  const l = loudnessDb(chainResponse(eq, extras, CHAIN_FREQS, offset));
+  return usesEars(eq) ? (l + loudnessDb(chainResponse(eq, extras, CHAIN_FREQS, offset, 'R'))) / 2 : l;
+}
 
 // A boosted signal can peak a little higher between the samples than the curve shows, so a chain
 // that boosts is taken down to −0,5 dB, not 0 dB.
@@ -94,7 +102,7 @@ export function abMatch(state) {
   if (!A || !B) return { diff: 0, match: { A: 0, B: 0 }, unmatched: true };
   const level = (eq) => {
     const g = guard ? clipGuard(eq, extras) : 0;
-    return loudnessDb(chainResponse(eq, extras, CHAIN_FREQS, g));
+    return chainLoudness(eq, extras, g);
   };
   const diff = Math.round((level(B) - level(A)) * 10) / 10 || 0;
   const unmatched = !A.enabled || !B.enabled;

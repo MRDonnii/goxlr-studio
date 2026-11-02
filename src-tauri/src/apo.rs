@@ -13,6 +13,19 @@ pub struct Band {
     pub freq: f64,
     pub gain: f64,
     pub q: f64,
+    /// Venstre/højre øre: "L" or "R" for one ear only; None/"all" for both.
+    #[serde(default)]
+    pub channel: Option<String>,
+}
+
+impl Band {
+    fn ear(&self) -> Option<&'static str> {
+        match self.channel.as_deref() {
+            Some("L") => Some("L"),
+            Some("R") => Some("R"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -125,7 +138,33 @@ pub fn render_with(eq: &OutputEq, device_name: Option<&str>, name_of: &dyn Fn(&s
 
 fn body(out: &mut String, preamp: f64, bands: &[Band], extra: &[String]) {
     out.push_str(&format!("Preamp: {:.1} dB\n", preamp));
-    for b in bands.iter().filter(|b| b.enabled) {
+    filters(out, bands.iter().filter(|b| b.enabled && b.ear().is_none()));
+    // One ear only: lines after "Channel: L" apply to the left channel until the next "Channel:".
+    let mut ears = false;
+    for ear in ["L", "R"] {
+        let own: Vec<&Band> = bands.iter().filter(|b| b.enabled && b.ear() == Some(ear)).collect();
+        if !own.is_empty() {
+            out.push_str(&format!("Channel: {ear}"));
+            out.push('\n');
+            filters(out, own.into_iter());
+            ears = true;
+        }
+    }
+    if ears {
+        out.push_str("Channel: all");
+        out.push('\n');
+    }
+    for line in extra {
+        let line = line.trim();
+        if !line.contains(['\n', '\r']) && EXTRA_ALLOWED.iter().any(|p| line.starts_with(p)) {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+}
+
+fn filters<'a>(out: &mut String, bands: impl Iterator<Item = &'a Band>) {
+    for b in bands {
         let kind = match b.kind.as_str() {
             "HP" => "HPQ",
             "LP" => "LPQ",
@@ -134,13 +173,6 @@ fn body(out: &mut String, preamp: f64, bands: &[Band], extra: &[String]) {
         let has_gain = matches!(b.kind.as_str(), "PK" | "LSC" | "HSC");
         let gain = if has_gain { format!(" Gain {:.1} dB", b.gain) } else { String::new() };
         out.push_str(&format!("Filter: ON {kind} Fc {:.1} Hz{gain} Q {:.3}\n", b.freq, b.q));
-    }
-    for line in extra {
-        let line = line.trim();
-        if !line.contains(['\n', '\r']) && EXTRA_ALLOWED.iter().any(|p| line.starts_with(p)) {
-            out.push_str(line);
-            out.push('\n');
-        }
     }
 }
 
@@ -293,7 +325,7 @@ mod tests {
         let eq = OutputEq {
             enabled: true,
             preamp: -4.0,
-            bands: vec![Band { enabled: true, kind: "PK".into(), freq: 2500.0, gain: 4.0, q: 1.2 }],
+            bands: vec![Band { enabled: true, kind: "PK".into(), freq: 2500.0, gain: 4.0, q: 1.2, channel: None }],
             target: Some("{0.0.0.00000000}.{58a6a695-a61b-4549-8340-5b88409d9be5}".into()),
             extra: vec![],
             devices: None,
@@ -306,11 +338,41 @@ mod tests {
     }
 
     #[test]
+    fn one_ear_bands_get_their_own_channel_section() {
+        let band = |freq, ch: Option<&str>| Band { enabled: true, kind: "PK".into(), freq, gain: 2.0, q: 1.0, channel: ch.map(String::from) };
+        let eq = OutputEq {
+            enabled: true,
+            preamp: -2.0,
+            bands: vec![band(100.0, None), band(3000.0, Some("R")), band(2000.0, Some("L")), band(500.0, Some("all"))],
+            target: None,
+            extra: vec!["Copy: L=0.5*L+0.5*R R=0.5*L+0.5*R".into()],
+            devices: None,
+            channels: vec![],
+        };
+        let text = render(&eq, None);
+        let lines: Vec<&str> = text.lines().skip(2).collect();
+        assert_eq!(
+            lines,
+            vec![
+                "Preamp: -2.0 dB",
+                "Filter: ON PK Fc 100.0 Hz Gain 2.0 dB Q 1.000",
+                "Filter: ON PK Fc 500.0 Hz Gain 2.0 dB Q 1.000",
+                "Channel: L",
+                "Filter: ON PK Fc 2000.0 Hz Gain 2.0 dB Q 1.000",
+                "Channel: R",
+                "Filter: ON PK Fc 3000.0 Hz Gain 2.0 dB Q 1.000",
+                "Channel: all",
+                "Copy: L=0.5*L+0.5*R R=0.5*L+0.5*R",
+            ]
+        );
+    }
+
+    #[test]
     fn band_pass_and_all_pass_have_no_gain() {
         let eq = OutputEq {
             enabled: true,
             preamp: 0.0,
-            bands: vec![Band { enabled: true, kind: "BP".into(), freq: 1000.0, gain: 3.0, q: 2.0 }, Band { enabled: true, kind: "AP".into(), freq: 500.0, gain: 0.0, q: 0.7 }],
+            bands: vec![Band { enabled: true, kind: "BP".into(), freq: 1000.0, gain: 3.0, q: 2.0, channel: None }, Band { enabled: true, kind: "AP".into(), freq: 500.0, gain: 0.0, q: 0.7, channel: None }],
             target: None,
             extra: vec![],
             devices: None,
@@ -323,7 +385,7 @@ mod tests {
 
     #[test]
     fn channel_eq_writes_one_section_per_output() {
-        let pk = |gain| vec![Band { enabled: true, kind: "PK".into(), freq: 1000.0, gain, q: 1.0 }];
+        let pk = |gain| vec![Band { enabled: true, kind: "PK".into(), freq: 1000.0, gain, q: 1.0, channel: None }];
         let eq = OutputEq {
             enabled: true,
             preamp: -2.0,

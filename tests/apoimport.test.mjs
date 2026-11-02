@@ -89,3 +89,29 @@ test('lines that are not imported are reported, and only the first device sectio
 test('a shelf too steep for its gain is reported, not imported as nonsense', () => {
   assert.equal(apoShelf({ type: 'LS', freq: 100, gain: 20, slope: 48 }), null);
 });
+
+test('venstre/højre øre: Channel: lines import per ear and export back', async () => {
+  const { totalResponse, usesEars } = await import('../public/js/eq.js');
+  const { eq, ignored } = parseApoConfigReport([
+    'Preamp: -3 dB', 'Filter: ON PK Fc 100 Hz Gain 2 dB Q 1',
+    'Channel: L', 'Filter: ON PK Fc 2000 Hz Gain -4 dB Q 2', 'Preamp: -1 dB',
+    'Channel: 2', 'Filter: ON PK Fc 3000 Hz Gain 3 dB Q 1',
+    'Channel: C SUB', 'Filter: ON PK Fc 50 Hz Gain 6 dB Q 1',
+    'Channel: all', 'Filter: ON HSC Fc 9000 Hz Gain 1 dB Q 0.7',
+  ].join('\n'));
+  assert.deepEqual(eq.bands.map((b) => [b.freq, b.channel || 'all']), [[100, 'all'], [2000, 'L'], [3000, 'R'], [9000, 'all']]);
+  assert.equal(ignored.length, 2); // the one-ear preamp, and the C/SUB section
+  assert.ok(usesEars(eq));
+  const [l, r] = ['L', 'R'].map((ear) => totalResponse(eq, [2000, 3000], ear));
+  assert.ok(l[0] < r[0] - 3 && r[1] > l[1] + 2);
+  const again = parseApoConfigReport(toApoConfig(eq)).eq;
+  assert.deepEqual(again.bands.map((b) => [b.freq, b.channel || 'all']).sort(), eq.bands.map((b) => [b.freq, b.channel || 'all']).sort());
+});
+
+test('clip protection and A/B loudness look at both ears', async () => {
+  const { chainPeak, chainLoudness } = await import('../public/js/eqchain.js');
+  const right = { enabled: true, preamp: 0, bands: [{ enabled: true, type: 'PK', freq: 1000, gain: 5, q: 1, channel: 'R' }] };
+  assert.ok(chainPeak(right, {}) > 4.9);
+  const both = { ...right, bands: [{ ...right.bands[0], channel: undefined }] };
+  assert.ok(Math.abs(chainLoudness(right, {}) - chainLoudness(both, {}) / 2) < 0.6);
+});

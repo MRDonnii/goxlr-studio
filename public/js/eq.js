@@ -110,10 +110,17 @@ export function bandResponse(band, freqs) {
   return freqs.map((f) => cs.reduce((sum, c) => sum + magnitudeDb(c, f), 0));
 }
 
-export function totalResponse(eq, freqs) {
+// Venstre/højre øre: a band can apply to both ears (no channel / 'all') or one of them.
+export const EAR_LABEL = { all: 'Begge', L: 'Venstre', R: 'Højre' };
+export const onEar = (b, ear) => !b.channel || b.channel === 'all' || b.channel === ear;
+/** True when some band is for one ear only (then left and right differ). */
+export const usesEars = (eq) => !!eq?.bands?.some((b) => b.enabled !== false && (b.channel === 'L' || b.channel === 'R'));
+
+/** dB response for one ear ('L' or 'R'); bands for both ears count for both. */
+export function totalResponse(eq, freqs, ear = 'L') {
   const out = new Array(freqs.length).fill(eq.preamp || 0);
   for (const band of eq.bands) {
-    if (!band.enabled) continue;
+    if (!band.enabled || !onEar(band, ear)) continue;
     const r = bandResponse(band, freqs);
     for (let i = 0; i < out.length; i++) out[i] += r[i];
   }
@@ -140,7 +147,7 @@ const APO_TYPES = { PK: 'PK', PEQ: 'PK', MODAL: 'PK', LP: 'LP', LPQ: 'LP', HP: '
 const NOT_IMPORTED = {
   copy: 'blander kanalerne', delay: 'forsinkelse', convolution: 'impulssvar (convolution)', vstplugin: 'VST-plugin',
   include: 'henviser til en anden fil', stage: 'trin i lydmotoren', if: 'betingelse', elseif: 'betingelse', else: 'betingelse',
-  endif: 'betingelse', eval: 'udregning', loudnesscorrection: 'Loudness Correction', channel: 'gælder kun nogle kanaler',
+  endif: 'betingelse', eval: 'udregning', loudnesscorrection: 'Loudness Correction',
 };
 
 /** Fc as Equalizer APO reads it – including Room EQ Wizard's "1.000" = 1000 Hz. */
@@ -191,6 +198,7 @@ export function parseApoConfigReport(text) {
   const ignored = [];
   const skip = (line, reason) => ignored.push({ line: line.length > 90 ? `${line.slice(0, 87)}…` : line, reason });
   let device = null, stopped = false;
+  let ear = 'all'; // after "Channel: L" the filters are for the left ear only
   for (const rawLine of String(text).split(/\r?\n/)) {
     const line = rawLine.replace(/#.*/, '').trim();
     if (!line) continue;
@@ -208,11 +216,22 @@ export function parseApoConfigReport(text) {
       continue;
     }
     if (stopped) continue;
+    if (name === 'channel') {
+      const words = rest.toUpperCase().split(/\s+/).filter(Boolean);
+      const set = new Set(words.map((w) => ({ 1: 'L', 2: 'R' })[w] || w));
+      if (set.has('ALL') || (set.has('L') && set.has('R') && set.size === 2)) ear = 'all';
+      else if (set.size === 1 && (set.has('L') || set.has('R'))) ear = [...set][0];
+      else { ear = 'skip'; skip(line, 'filtre til andre kanaler end venstre/højre importeres ikke'); }
+      continue;
+    }
+    if (ear === 'skip') continue;
+    if (name === 'preamp' && ear !== 'all') { skip(line, 'Preamp for kun ét øre (fx balance) – brug Balance under Lytte-forbedringer'); continue; }
     if (name === 'preamp') {
       const pre = rest.replace(/,/g, '.').match(/^([-+0-9.eE]+)\s*dB/i);
       if (pre) eq.preamp = round(eq.preamp + Number(pre[1]), 2); else skip(line, 'kunne ikke læse værdien');
       continue;
     }
+    if (name === 'graphiceq' && ear !== 'all') { skip(line, 'GraphicEQ for kun ét øre importeres ikke'); continue; }
     if (name === 'graphiceq') {
       const value = rest.includes('.') ? rest : rest.replace(/,/g, '.');
       eq.bands.push(...graphicEqToBands(value));
@@ -254,7 +273,7 @@ export function parseApoConfigReport(text) {
       }
       band = { type: apoType, freq, gain: hasGain ? gain : 0, q };
     }
-    eq.bands.push({ ...newBand(round(band.freq, 2), band.type), gain: round(band.gain, 2), q: round(band.q, 4), enabled: tm[1].toUpperCase() === 'ON' });
+    eq.bands.push({ ...newBand(round(band.freq, 2), band.type), gain: round(band.gain, 2), q: round(band.q, 4), enabled: tm[1].toUpperCase() === 'ON', ...(ear !== 'all' ? { channel: ear } : {}) });
   }
   return { eq, ignored };
 }
@@ -289,12 +308,21 @@ function graphicEqToBands(spec) {
 export function toApoConfig(eq) {
   const fmt = (n, d = 2) => Number(n.toFixed(d)).toString();
   const lines = [`Preamp: ${fmt(eq.preamp, 1)} dB`];
-  expandBands(eq.bands).forEach((b, i) => {
-    let line = `Filter ${i + 1}: ${b.enabled ? 'ON' : 'OFF'} ${APO_EXPORT_TYPE[b.type] || b.type} Fc ${fmt(b.freq, 1)} Hz`;
+  let i = 0;
+  const filter = (b) => {
+    let line = `Filter ${++i}: ${b.enabled ? 'ON' : 'OFF'} ${APO_EXPORT_TYPE[b.type] || b.type} Fc ${fmt(b.freq, 1)} Hz`;
     if (FILTER_TYPES[b.type].gain) line += ` Gain ${fmt(b.gain, 1)} dB`;
     line += ` Q ${fmt(b.q, 3)}`;
     lines.push(line);
-  });
+  };
+  const bands = expandBands(eq.bands);
+  bands.filter((b) => !b.channel || b.channel === 'all').forEach(filter);
+  // One ear only: Equalizer APO's "Channel:" applies the following filters to that channel.
+  for (const ear of ['L', 'R']) {
+    const own = bands.filter((b) => b.channel === ear);
+    if (own.length) { lines.push(`Channel: ${ear}`); own.forEach(filter); }
+  }
+  if (bands.some((b) => b.channel === 'L' || b.channel === 'R')) lines.push('Channel: all');
   return lines.join('\n') + '\n';
 }
 
@@ -343,7 +371,7 @@ export const SOUND_FIXES = [
  *  adjusted (gain added, limited to ±12 dB); otherwise a new band is added. */
 export function fixMove(eq, move) {
   const out = { ...eq, bands: eq.bands.map((b) => ({ ...b })) };
-  const near = out.bands.find((b) => b.enabled !== false && b.type === move.type && Math.abs(Math.log2(b.freq / move.freq)) <= 1 / 3);
+  const near = out.bands.find((b) => b.enabled !== false && onEar(b, 'all') && b.type === move.type && Math.abs(Math.log2(b.freq / move.freq)) <= 1 / 3);
   if (near) near.gain = Math.max(-12, Math.min(12, Math.round(((near.gain || 0) + move.gain) * 10) / 10));
   else out.bands.push({ ...newBand(move.freq, move.type), gain: move.gain, q: move.q });
   return out;

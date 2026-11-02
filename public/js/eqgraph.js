@@ -230,6 +230,19 @@ export class EqGraph {
     g.stroke();
     g.shadowBlur = 0;
 
+    // Venstre/højre øre: the right ear's curve when it differs from the left (main curve).
+    const right = this.opts.curveR?.(this.freqs);
+    if (right) {
+      g.beginPath();
+      right.forEach((db, k) => {
+        const x = this.xOf(this.freqs[k]), y = this.yOf(Math.min(Math.max(db, minDb - 5), maxDb + 5));
+        k ? g.lineTo(x, y) : g.moveTo(x, y);
+      });
+      g.strokeStyle = '#f472b6';
+      g.lineWidth = 2;
+      g.stroke();
+    }
+
     // The whole chain as played (Loudness, Crossfeed, klip-beskyttelse), dashed.
     const chain = this.opts.chainCurve?.(this.freqs);
     if (chain) {

@@ -1,9 +1,9 @@
 import { h, toggle, toast, debounce, confirmDialog, promptDialog } from './ui.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
-import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, expandBands, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
-import { chainResponse, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
+import { BUILTIN_PRESETS, PRESET_INFO, SOUND_FIXES, fixMove, FILTER_TYPES, SLOPES, EAR_LABEL, usesEars, onEar, expandBands, parseApoConfigReport, ignoredText, newBand, defaultOutputEq, totalResponse, bandResponse, toApoConfig, coefficients, formatFreq } from './eq.js';
+import { chainResponse, chainLoudness, safePreamp, headroomInfo, bandWarnings, abMatch, abText, playbackOffset, blindVerdict, slotsEqual, loudnessDb, CHAIN_FREQS } from './eqchain.js';
 import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, engineInfo, engineTask, isNative, spectrumRead, audioLevels } from './native.js';
-import { t } from './i18n.js';
+import { t, language } from './i18n.js';
 import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
 import { shortName, CHANNEL_LABEL } from './views-mixer.js';
 import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChannels } from './channeleq.js';
@@ -246,14 +246,17 @@ export function outputEqView(ctx) {
   const bar = presetBar(ctx);
   const fmt1 = (v) => String(Math.round(Math.abs(v) * 10) / 10).replace('.', ',');
   const chainLegend = h('div', { class: 'hint chain-legend' }, h('span', { class: 'chain-dash' }), 'Stiplet: det der faktisk spilles – med Loudness, Crossfeed, klip-beskyttelse og udligning af A/B.');
+  // Venstre/højre øre: when a band is for one ear only, the graph shows a curve per ear.
+  const earLegend = h('div', { class: 'hint chain-legend', 'data-testid': 'ear-legend' }, h('span', { class: 'ear-swatch left' }), h('span', {}, 'Venstre øre'), h('span', { class: 'ear-swatch right' }), h('span', {}, 'Højre øre'));
   const canvas = h('canvas', { class: 'eq-canvas', style: { height: '360px' } });
   const graph = new EqGraph(canvas, {
     minDb: -18, maxDb: 18,
     getPoints: () => eq().bands.map((b, i) => ({
       freq: b.freq, gain: FILTER_TYPES[b.type].gain ? b.gain : 0, q: b.q, enabled: b.enabled && eq().enabled,
-      color: BAND_COLORS[i % BAND_COLORS.length], label: String(i + 1), fixedGain: !FILTER_TYPES[b.type].gain,
+      color: BAND_COLORS[i % BAND_COLORS.length], label: `${i + 1}${b.channel === 'L' ? (language() === 'en' ? 'L' : 'V') : b.channel === 'R' ? (language() === 'en' ? 'R' : 'H') : ''}`, fixedGain: !FILTER_TYPES[b.type].gain,
     })),
-    curve: (freqs) => (eq().enabled ? totalResponse(eq(), freqs) : freqs.map(() => 0)),
+    curve: (freqs) => (eq().enabled ? totalResponse(eq(), freqs, 'L') : freqs.map(() => 0)),
+    curveR: (freqs) => (eq().enabled && usesEars(eq()) ? totalResponse(eq(), freqs, 'R') : null),
     // What is really played (Loudness, Crossfeed, klip-beskyttelse) – only when it differs.
     chainCurve: (freqs) => (chainDiffers() ? chainResponse(eq(), state.extras, freqs, offsetDb()) : null),
     bandCurve: (i, freqs) => (eq().bands[i] ? bandResponse(eq().bands[i], freqs) : null),
@@ -297,6 +300,8 @@ export function outputEqView(ctx) {
         h('td', {}, h('span', { class: 'band-dot', style: { background: BAND_COLORS[i % BAND_COLORS.length] } })),
         h('td', {}, h('label', { class: 'switch' }, en, h('span'))),
         h('td', {}, type),
+        h('td', {}, h('select', { class: 'ear-sel', 'data-testid': 'band-ear', title: 'Hvilket øre båndet gælder for', onchange: (e) => { if (e.target.value === 'all') delete b.channel; else b.channel = e.target.value; changed(); renderBands(); } },
+          Object.entries(EAR_LABEL).map(([k, v]) => h('option', { value: k, selected: (b.channel || 'all') === k }, v)))),
         h('td', {}, num('freq', 20, 20000, 1), ' Hz'),
         h('td', {}, num('gain', -24, 24, 0.1, !FILTER_TYPES[b.type].gain), ' dB'),
         h('td', {}, num('q', 0.1, 30, 0.01, b.slope > 12), FILTER_TYPES[b.type].slope
@@ -341,6 +346,7 @@ export function outputEqView(ctx) {
         : head.kind === 'ok' ? 'Afstanden fra EQ’ens højeste punkt (inkl. Loudness og Crossfeed) til 0 dB. Over 0 dB kan lyden klippe.' : '';
     guardBox.checked = guardOn();
     chainLegend.style.display = chainDiffers() ? '' : 'none';
+    earLegend.style.display = usesEars(eq()) ? '' : 'none';
     bypass.checked = eq().enabled;
     // Keep the "modified" dot on the active preset chip in sync while editing.
     const active = bar.querySelector('.chip.on:not(.power)');
@@ -434,8 +440,8 @@ export function outputEqView(ctx) {
     h('div', { class: 'eq-wrap live', style: { marginTop: '12px' } }, specCanvas, canvas),
     spectrumRow,
     h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Træk punkter · scroll = Q · dobbeltklik = nyt bånd · Alt+træk = kun frekvens · Del = slet · B = bypass · Ctrl+Z/Y = fortryd/gentag'),
-    chainLegend,
-    h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody));
+    chainLegend, earLegend,
+    h('table', { class: 'band-table' }, h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Til'), h('th', {}, 'Type'), h('th', {}, 'Øre'), h('th', {}, 'Frekvens'), h('th', {}, 'Gain'), h('th', {}, 'Q'), h('th'))), bandsBody));
 
   // Blind test: X and Y are A and B in random order each round, the curve is hidden, and both
   // play at the same loudness. After 5 rounds: which one you chose.
@@ -799,7 +805,7 @@ export function outputEqView(ctx) {
   renderChannels();
 
   // "Uden EQ" in the Lyttetest plays at the EQ's loudness when "Udlign lydstyrke" is on.
-  const bypassGainDb = () => (state.abMatch !== false && eq().enabled ? Math.min(0, Math.round(loudnessDb(chainResponse(eq(), state.extras, CHAIN_FREQS, offsetDb())) * 10) / 10) : 0);
+  const bypassGainDb = () => (state.abMatch !== false && eq().enabled ? Math.min(0, Math.round(chainLoudness(eq(), state.extras, offsetDb()) * 10) / 10) : 0);
   // "Det lyder forkert?": one click per problem, on top of the EQ you have (Ctrl+Z undoes it).
   const fixCard = h('div', { class: 'card' }, h('h2', {}, 'Lyder det forkert?'),
     h('div', { class: 'hint', style: { marginBottom: '8px' } }, 'Vælg det, du hører. EQ’en justeres et lille skridt – tryk igen for mere, eller Ctrl+Z for at fortryde.'),
@@ -900,11 +906,26 @@ function makePreview(getEq, bypassGainDb = () => 0) {
       const pre = ac.createGain();
       pre.gain.value = Math.pow(10, eq.preamp / 20);
       node.connect(pre); node = pre; chainIn.push(pre);
-      for (const b of expandBands(eq.bands)) {
-        if (!b.enabled) continue;
-        const c = coefficients(b, ac.sampleRate);
-        const f = ac.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
-        node.connect(f); node = f; chainIn.push(f);
+      const chain = (from, bands) => {
+        let n = from;
+        for (const b of expandBands(bands)) {
+          if (!b.enabled) continue;
+          const c = coefficients(b, ac.sampleRate);
+          const f = ac.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]);
+          n.connect(f); n = f; chainIn.push(f);
+        }
+        return n;
+      };
+      node = chain(node, eq.bands.filter((b) => onEar(b, 'all') && b.channel !== 'L' && b.channel !== 'R'));
+      // Venstre/højre øre: split, filter each side, merge.
+      if (usesEars(eq)) {
+        const split = ac.createChannelSplitter(2), merge = ac.createChannelMerger(2);
+        node.connect(split); chainIn.push(split, merge);
+        ['L', 'R'].forEach((ear, i) => {
+          const g = ac.createGain(); split.connect(g, i); chainIn.push(g);
+          chain(g, eq.bands.filter((b) => b.channel === ear)).connect(merge, 0, i);
+        });
+        node = merge;
       }
     }
     // Without EQ at the EQ's loudness, so the louder one doesn't win by being louder.
