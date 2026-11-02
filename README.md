@@ -45,7 +45,7 @@ Kanalerne fra din GoXLR med samme LED-farver som på hardwaren, et VU-meter ved 
 - Presets, også dine gamle Peace/Equalizer APO-presets, som importeres med ét klik og lyder præcis som før (også GraphicEQ)
 - AutoEQ-søgning, der finder korrektion til netop dine hovedtelefoner
 - **Høretest:** find den svageste tone, du kan høre, på hvert øre, og få en personlig EQ til dine ører og dine hovedtelefoner
-- **Rumkorrektion:** importér dine REW-målinger (.mdat eller tekst) fra en målemikrofon som UMIK-1 – også uden kalibreringsfil, den kan lægges på bagefter. GoXLR Studio lægger målingerne sammen og laver et preset efter en rum-kurve: toppe dæmpes, smalle huller fyldes ikke op, og der løftes ikke under det, højttalerne kan spille
+- **Rumkorrektion:** importér dine REW-målinger (.mdat eller tekst) fra en målemikrofon som UMIK-1 – også uden kalibreringsfil, den kan lægges på bagefter. GoXLR Studio lægger målingerne sammen og laver et preset efter en rum-kurve: toppe og rumtoppe dæmpes, smalle huller fyldes ikke op, og der løftes ikke under det, højttalerne kan spille. Venstre og højre kan korrigeres hver for sig, og en kontrolmåling vises sammen med det beregnede
 - **Højttalere:** afstand til hver højttaler giver den rigtige forsinkelse, polariteten kan vendes, og dit eget FIR-filter (WAV fra REW, rePhase eller DRC) kan lægges oven i
 - **Dynamik:** GoXLR Studios egen limiter og kompressor sidst i kæden – beskyt mod pludselige spidser, eller brug Natmode, så stille tale og høje effekter ligger tættere
 - **Linkwitz-Riley** (LR 12/24/48) på low/high cut, til delefiltre og subwoofer
