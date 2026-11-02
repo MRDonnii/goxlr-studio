@@ -6,6 +6,7 @@ import { storeGet, storeSet, listAudioDevices, apoReadConfig, apoListConfigs, en
 import { t, language } from './i18n.js';
 import { SPECTRUM_BANDS, SPECTRUM_FLOOR, SPECTRUM_FREQS, smoothSpectrum, pickSpectrumDevice, bandsFromBins } from './spectrum.js';
 import { shortName, CHANNEL_LABEL } from './views-mixer.js';
+import { levelMatchCard } from './levelmatch.js';
 import { hearingTestCard } from './views-hearingtest.js';
 import { EQ_CHANNELS, FLAT, ALL_PROFILES, channelPresetFor, presetEq, activeChannels } from './channeleq.js';
 import { channelEndpoint } from './extras.js';
@@ -1007,6 +1008,12 @@ export function outputEqView(ctx) {
         persist(); renderPresets?.(); ctx.onStateChanged?.('eq');
       },
       addToCurrent: (bands) => { eq().bands.push(...bands.map((b) => ({ ...newBand(b.freq, b.type), ...b }))); changed(); renderBands(); },
+    }), levelMatchCard(ctx, {
+      state,
+      save: () => storeSet('output-eq', state),
+      apply: () => ctx.applyOutputEq().catch((e) => toast(`EQ-motor: ${e}`)),
+      label: (ch) => CHANNEL_LABEL[ch] || ch,
+      eqOff: () => !eq().enabled,
     })));
 }
 

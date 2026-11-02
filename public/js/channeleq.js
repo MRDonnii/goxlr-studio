@@ -6,6 +6,7 @@
 import { enginePayload, channelEndpoint } from './extras.js';
 import { clipGuard, playbackOffset } from './eqchain.js';
 import { BUILTIN_PRESETS } from './eq.js';
+import { levelOffsets } from './levelmatch.js';
 
 export const EQ_CHANNELS = ['Game', 'Music', 'Chat', 'System'];
 /** "Ingen EQ" on a channel: the channel is left out of the main EQ and gets nothing. */
@@ -50,18 +51,32 @@ export function engineConfig(state, { devices = [], profile = null, target = sta
   const main = enginePayload(state.slots[state.active], state.extras, target, playbackOffset(state));
   if (!main.enabled) return main;
   const chans = activeChannels(state, devices, profile, builtins);
+  // Lige lydniveau: a channel that is lowered needs its own section, even without its own preset.
+  const levels = levelOffsets(state);
+  const pool = target ? [target] : devices.filter((d) => d.flow === 'render').map((d) => d.id);
+  for (const channel of EQ_CHANNELS) {
+    if (!levels[channel] || chans.some((c) => c.channel === channel)) continue;
+    const id = channelEndpoint(channel, devices);
+    if (id) chans.push({ channel, name: null, id, eq: null, main: pool.some((x) => sameId(x, id)) });
+  }
   if (!chans.length) return main;
   const taken = (id) => chans.some((c) => sameId(c.id, id));
-  const pool = target ? [target] : devices.filter((d) => d.flow === 'render').map((d) => d.id);
   return {
     ...main,
     devices: pool.filter((id) => !taken(id)),
     channels: chans.map((c) => {
+      const level = levels[c.channel] || 0;
+      // Only lowered: the main EQ where it applied, otherwise nothing but the cut.
+      if (!c.eq) {
+        const eq = c.main ? state.slots[state.active] : FLAT_EQ;
+        const extras = c.main ? state.extras : {};
+        return { ...enginePayload({ ...eq, enabled: true }, extras, c.id, (c.main ? playbackOffset(state) : 0) + level), channel: c.channel, name: null, level };
+      }
       // "Ingen EQ" is really nothing: no Loudness/Crossfeed either.
       const extras = c.name === FLAT ? {} : state.extras;
       const eq = { ...c.eq, enabled: true };
       const guard = state.clipGuard !== false ? clipGuard(eq, extras) : 0;
-      return { ...enginePayload(eq, extras, c.id, guard), channel: c.channel, name: c.name };
+      return { ...enginePayload(eq, extras, c.id, guard + level), channel: c.channel, name: c.name, level };
     }),
   };
 }

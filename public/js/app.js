@@ -29,6 +29,7 @@ import { startSchedule } from './schedule.js';
 import { runAction, actionCatalog, applyEqPreset, toggleEq, eqPresetNames, releaseAction, pttMuteState } from './actions.js';
 import { BUILTIN_PRESETS } from './eq.js';
 import { engineConfig, usesChannelEq, hasProfileSets } from './channeleq.js';
+import { levelOffsets } from './levelmatch.js';
 
 const PAGES = [
   { id: 'mixer', title: 'Mixer', icon: 'mixer', view: mixerView },
@@ -167,7 +168,7 @@ async function applyOutputEq() {
   const st = ctx.outputEq;
   let target = st.target;
   // EQ pr. kanal needs the GoXLR's Windows outputs (found by name, so driver updates don't matter).
-  const devs = target || usesChannelEq(st) ? await listAudioDevices().catch(() => []) : [];
+  const devs = target || usesChannelEq(st) || Object.keys(levelOffsets(st)).length ? await listAudioDevices().catch(() => []) : [];
   if (target) {
     const r = resolveDevice(devs, target, st.target_name, 'render');
     if (r && r !== target) { st.target = target = r; storeSet('output-eq', st); }
@@ -724,7 +725,7 @@ async function meterLoop() {
   ctx.onMicLevel?.(db);
   if (ctx.prefs.trayMeter && performance.now() - trayMeterAt > 200) { trayMeterAt = performance.now(); trayMicLevel = db; syncTrayStatus(); }
   // Windows' peak meters: for the VU meters, chat-ducking and høreværn.
-  const wantLevels = ctx.onLevels || ctx.ducker.settings.chat?.enabled || ctx.wantLevels;
+  const wantLevels = ctx.onLevels || ctx.ducker.settings.chat?.enabled || ctx.wantLevels || ctx.levelMeasuring;
   const levels = wantLevels ? await audioLevels().catch(() => null) : null;
   ctx.levels = levels;
   if (ctx.onLevels) ctx.onLevels(levels);

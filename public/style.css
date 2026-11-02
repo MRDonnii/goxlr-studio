@@ -432,3 +432,6 @@ select[data-testid="mic-model"] { min-width: 0; max-width: 100%; }
 .day-row .btn.day { padding: 3px 7px; min-width: 0; opacity: .55; }
 .day-row .btn.day.on { opacity: 1; border-color: var(--accent); color: var(--accent); }
 .schedule-rule input[type=time] { width: auto; }
+.level-row .lbl { min-width: 70px; }
+.level-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; min-width: 60px; }
+.level-bar .vu-fill { height: 100%; width: 0; background: var(--accent); transition: width .1s linear; }
