@@ -3,6 +3,7 @@ import { MIC_MODELS, USB_ONLY, micSettings, micPresetCommands, describeMic } fro
 import { GATE_TIMES, RATIOS, ATTACKS, RELEASES, enumIndex } from './micenums.js';
 import { limiterBox } from './miclimiter.js';
 import { voiceEnhanceCard } from './voiceenhance.js';
+import { openMicCard } from './openmic.js';
 import { analyzeMicTest, micSnapshot, snapshotCommands, SPEECH_TARGET, micShareFile, readMicShare } from './micassist.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
@@ -375,5 +376,5 @@ export function micView(ctx) {
     h('div', { class: 'hint' }, 'Del: gem dine mikrofonindstillinger som en fil og send den til en ven – eller brug en, du har fået.'));
 
   const undo = micUndo(ctx);
-  return h('div', { class: 'grid' }, h('div', { class: 'grid cols-2' }, micPresetCard(ctx, undo), micAssistCard(ctx, undo)), eqCard, voiceEnhanceCard(ctx), h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp));
+  return h('div', { class: 'grid' }, h('div', { class: 'grid cols-2' }, micPresetCard(ctx, undo), micAssistCard(ctx, undo)), eqCard, voiceEnhanceCard(ctx), h('div', { class: 'grid cols-2' }, setup, profiles, gate, comp, openMicCard(ctx)));
 }

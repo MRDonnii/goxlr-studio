@@ -12,7 +12,7 @@ import { releaseAction } from './actions.js';
 export const CHATMIX = 'ChatMix';
 
 export const HOLD_MS = 400;
-export const HOLD_ACTIONS = [['hold:ptt', 'Push-to-talk (tal mens du holder)'], ['hold:ptm', 'Push-to-mute (mute mens du holder)']];
+export const HOLD_ACTIONS = [['hold:ptt', 'Push-to-talk (tal mens du holder)'], ['hold:ptm', 'Push-to-mute (mute mens du holder)'], ['hold:open-mic', 'Fang alt (noise gate fra mens du holder)']];
 export const PEDAL_MODES = { press: 'Tryk', hold: 'Hold', taphold: 'Tryk og hold', fader: 'Fader → lydstyrke' };
 
 /** A MIDI message as a pedal sees it. Note on (velocity > 0) is down, note off is up; a control

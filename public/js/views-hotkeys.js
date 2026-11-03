@@ -24,6 +24,9 @@ export function prettyAccel(accel) {
   return accel.split('+').map((p) => ({ Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Super: 'Win', PageUp: 'PgUp', PageDown: 'PgDn', Up: '↑', Down: '↓', Left: '←', Right: '→' }[p] || p)).join(' + ');
 }
 
+// Bindings with their own card (push-to-talk here, "Fang alt" on the Mikrofon page).
+const OWN_CARD = ['ptt', 'open-mic'];
+
 // Push-to-talk / push-to-mute: a binding with the fixed id "ptt" and action hold:ptt / hold:ptm.
 function pttCard(ctx, onChange) {
   const p = ctx.prefs;
@@ -118,7 +121,7 @@ export function hotkeysView(ctx) {
 
   const render = () => {
     // Push-to-talk has its own card.
-    list.replaceChildren(...ctx.hotkeys.filter((b) => b.id !== 'ptt').map((b) => {
+    list.replaceChildren(...ctx.hotkeys.filter((b) => !OWN_CARD.includes(b.id)).map((b) => {
       const status = ctx.hotkeyStatus[b.id];
       const keyBtn = h('button', { class: 'btn keycap', onclick: () => capture(b, keyBtn) }, prettyAccel(b.accel));
       const sel = h('select', { onchange: () => { b.action = sel.value; save(); } },
@@ -135,7 +138,7 @@ export function hotkeysView(ctx) {
         h('button', { class: 'btn sm', title: 'Test handlingen', onclick: () => b.action && ctx.runAction(b.action, 'Test-knap under Genveje') }, 'Test'),
         h('button', { class: 'btn sm', onclick: () => { ctx.hotkeys.splice(ctx.hotkeys.indexOf(b), 1); save(); } }, '✕'));
     }));
-    if (!ctx.hotkeys.some((b) => b.id !== 'ptt')) list.append(h('div', { class: 'hint' }, 'Ingen genveje endnu.'));
+    if (!ctx.hotkeys.some((b) => !OWN_CARD.includes(b.id))) list.append(h('div', { class: 'hint' }, 'Ingen genveje endnu.'));
   };
 
   const add = (action = '', accel = '') => { ctx.hotkeys.push({ id: crypto.randomUUID(), accel, action }); save(); };

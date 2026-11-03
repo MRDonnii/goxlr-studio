@@ -6,6 +6,7 @@ import { setLimiter, limiterSettings } from './miclimiter.js';
 import { playSound, stopSounds, soundNames } from './soundboard.js';
 import { obsScene, streamSafeMusic } from './obs.js';
 import { toast, logActivity } from './ui.js';
+import { openMicDown, openMicUp, OPEN_MIC_ACTION } from './openmic.js';
 
 // Toast in the app, plus the on-screen display when the app is in the background.
 const notify = (ctx, text, kind = 'info') => (ctx.notify ? ctx.notify(text, kind) : toast(text, 'info'));
@@ -55,7 +56,8 @@ export const pttMuteState = (ctx) => (ctx.prefs.ptt?.target === 'x' ? 'MutedToX'
 /** A held key was let go (push-to-talk / push-to-mute). */
 export function releaseAction(ctx, id) {
   if (!ctx.conn.mixer) return;
-  if (id === 'hold:ptt') ctx.conn.command('SetCoughMuteState', pttMuteState(ctx));
+  if (id === OPEN_MIC_ACTION) openMicUp(ctx);
+  else if (id === 'hold:ptt') ctx.conn.command('SetCoughMuteState', pttMuteState(ctx));
   else if (id === 'hold:ptm') ctx.conn.command('SetCoughMuteState', 'Unmuted');
 }
 
@@ -143,7 +145,10 @@ export async function runAction(ctx, id, source = 'handling') {
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
     // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
-    case 'hold': if (m) ctx.conn.command('SetCoughMuteState', arg === 'ptt' ? 'Unmuted' : pttMuteState(ctx)); return;
+    case 'hold':
+      if (arg === 'open-mic') return openMicDown(ctx);
+      if (m) ctx.conn.command('SetCoughMuteState', arg === 'ptt' ? 'Unmuted' : pttMuteState(ctx));
+      return;
     case 'sound': return playSound(ctx, arg).then(() => notify(ctx, `▶ ${arg.replace(/\.[^.]+$/, '')}`)).catch((e) => notify(ctx, `Lyd: ${e.message || e}`, 'mute'));
     case 'sounds-stop': stopSounds(); return notify(ctx, 'Lyde stoppet');
     case 'media': {
@@ -279,7 +284,7 @@ export function actionLabel(ctx, id) {
     case 'mute-mic': return 'Mute/unmute mikrofon';
     case 'mic-limiter': return arg === 'on' ? 'Mikrofon-limiter til' : arg === 'off' ? 'Mikrofon-limiter fra' : 'Mikrofon-limiter til/fra';
     case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
-    case 'hold': return arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
+    case 'hold': return arg === 'open-mic' ? 'Fang alt (noise gate fra mens du holder)' : arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
     case 'sounds-stop': return 'Stop alle lyde';
     case 'hearing-cap': return arg === 'off' ? 'Intet loft for hovedtelefonerne' : `Loft for hovedtelefonerne: ${arg} %`;
     case 'sampler-bank': return `Sampler: bank ${arg}`;

@@ -7,6 +7,7 @@ import { effectsView, scenesView, lightingView, profilesView, settingsView, appl
 import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, daemonInfo, daemonTakeover, engineLog, openEngineLogDir, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { troubleshoot, bannerFinding } from './troubleshoot.js';
+import { restoreOpenMic } from './openmic.js';
 import { soundcheckView } from './views-soundcheck.js';
 import { deckView } from './views-deck.js';
 import { pedalsView } from './views-pedals.js';
@@ -771,6 +772,7 @@ function maybeStartLevels() {
   if (startLevelsDone.has(key)) return;
   startLevelsDone.add(key);
   if (ctx.prefs.startLevels?.enabled) setTimeout(() => applyStartLevels(ctx), 1500);
+  setTimeout(() => restoreOpenMic(ctx), 1700);
   // Push-to-talk: the mic is closed until the key is held – also right after a start.
   if (ctx.hotkeys.some((b) => b.action === 'hold:ptt' && b.accel)) setTimeout(() => conn.command('SetCoughMuteState', pttMuteState(ctx)), 1600);
 }
