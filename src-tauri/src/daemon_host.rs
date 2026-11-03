@@ -3,7 +3,8 @@
 //! There is no separate goxlr-daemon.exe, no GoXLR Utility tray icon and no GoXLR Utility UI.
 //! It uses the same settings/profile folders as GoXLR Utility, so existing profiles keep working,
 //! and the same local API (127.0.0.1:14564), which `daemon.rs` and the UI talk to.
-use std::path::PathBuf;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -19,6 +20,7 @@ struct Engine {
 }
 
 static ENGINE: Mutex<Engine> = Mutex::new(Engine { thread: None, last_error: None });
+static HISTORY: Mutex<VecDeque<Attempt>> = Mutex::new(VecDeque::new());
 static ON_STOPPED: OnceLock<Box<dyn Fn(Option<String>) + Send + Sync>> = OnceLock::new();
 
 /// This build contains the GoXLR engine (always on Windows).
@@ -55,8 +57,68 @@ pub fn last_error() -> Option<String> {
     ENGINE.lock().unwrap().last_error.clone()
 }
 
+/// One start (or stop) of the engine, for Diagnose and the troubleshooter.
+#[derive(Clone, serde::Serialize)]
+pub struct Attempt {
+    /// Unix time in milliseconds.
+    pub at: u64,
+    pub ok: bool,
+    pub text: String,
+}
+
+fn note(ok: bool, text: &str) {
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    if ok {
+        log::info!("GoXLR-motor: {text}");
+    } else {
+        log::warn!("GoXLR-motor: {text}");
+    }
+    let mut h = HISTORY.lock().unwrap();
+    h.push_back(Attempt { at, ok, text: text.to_string() });
+    while h.len() > 20 {
+        h.pop_front();
+    }
+}
+
+/// The latest starts and stops of the engine (oldest first).
+pub fn attempts() -> Vec<Attempt> {
+    HISTORY.lock().unwrap().iter().cloned().collect()
+}
+
 /// Starts the engine on its own thread and waits (up to `wait`) until it is up or has failed.
 pub fn start_and_wait(wait: Duration) -> Result<String, String> {
+    let res = start_inner(wait);
+    match &res {
+        Ok(t) => note(true, t),
+        Err(e) => note(false, e),
+    }
+    res
+}
+
+/// Errors where trying again does not help (the user has to do something first).
+pub fn worth_retrying(e: &str) -> bool {
+    let l = e.to_lowercase();
+    !(l.contains("driver") || l.contains("administrator") || l.contains("goxlr utility kører") || l.contains("kun i windows"))
+}
+
+/// Starts the engine and tries again after each of `delays` (seconds) while it fails with an
+/// error that can pass by itself – right after an update the old GoXLR Studio can still be
+/// closing and hold the engine's pipe and port for a few seconds.
+pub fn start_with_retry(delays: &[u64]) -> Result<String, String> {
+    let mut last = start();
+    for &d in delays {
+        match &last {
+            Err(e) if worth_retrying(e) => {}
+            _ => break,
+        }
+        note(false, &format!("Prøver igen om {d} s"));
+        std::thread::sleep(Duration::from_secs(d));
+        last = start();
+    }
+    last
+}
+
+fn start_inner(wait: Duration) -> Result<String, String> {
     if !bundled() {
         return Err("GoXLR-motoren findes kun i Windows-udgaven".into());
     }
@@ -102,6 +164,10 @@ fn run_engine() {
     #[cfg(not(windows))]
     let error: Option<String> = None;
     ENGINE.lock().unwrap().last_error = error.clone();
+    match &error {
+        Some(e) => note(false, &format!("Stoppede: {e}")),
+        None => note(true, "Stoppede"),
+    }
     if let Some(f) = ON_STOPPED.get() {
         f(error);
     }
@@ -111,7 +177,15 @@ fn run_engine() {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn friendly_error(e: &str) -> String {
     let l = e.to_lowercase();
-    if l.contains("driver was not found") {
+    if l.contains("goxlr daemon is already running") {
+        "En anden GoXLR-motor svarer allerede – typisk den gamle GoXLR Studio, der stadig er ved at lukke efter en opdatering, eller GoXLR Utility".into()
+    } else if l.contains("named pipe error") {
+        format!("GoXLR-motorens interne forbindelse (named pipe) svarer ikke – genstart pc'en ({e})")
+    } else if l.contains("unable to create log directory") {
+        format!("GoXLR-motoren kan ikke oprette sin log-mappe ({e})")
+    } else if l.contains("run as root") {
+        "GoXLR-motoren må ikke køre som administrator – start GoXLR Studio normalt".into()
+    } else if l.contains("driver was not found") {
         "TC-Helicons GoXLR-driver blev ikke fundet – installér den og start GoXLR Studio igen".into()
     } else if l.contains("official goxlr application") {
         "TC-Helicons GoXLR-app kører – luk den, så kan GoXLR Studio styre GoXLR'en".into()
@@ -122,6 +196,36 @@ fn friendly_error(e: &str) -> String {
     } else {
         e.to_string()
     }
+}
+
+/// goxlr-daemon.log (the engine's own log; same folder as GoXLR Utility's).
+pub fn log_file() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return goxlr_engine::log_directory().map(|d| d.join("goxlr-daemon.log"));
+    #[cfg(not(windows))]
+    None
+}
+
+/// The last `n` lines of a log file (only its end is read).
+pub fn tail_lines(path: &Path, n: usize) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else { return Vec::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(256 * 1024);
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return Vec::new();
+    }
+    let mut buf = Vec::new();
+    if f.read_to_end(&mut buf).is_err() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if start > 0 && !lines.is_empty() {
+        lines.remove(0); // cut in the middle of a line
+    }
+    let from = lines.len().saturating_sub(n);
+    lines[from..].iter().map(|l| l.trim_end().to_string()).filter(|l| !l.is_empty()).collect()
 }
 
 /// Stops the engine cleanly (called when the app quits) – waits a few seconds for it to finish.
@@ -348,7 +452,30 @@ mod tests {
         assert!(friendly_error("The official GoXLR Application is currently running, Please close it").contains("TC-Helicons GoXLR-app"));
         assert!(friendly_error("GoXLR Utility is already running, please stop it and try again.").contains("GoXLR Utility kører"));
         assert!(friendly_error("Unable to Start HTTP Server: address in use").contains("14564"));
+        assert!(friendly_error("The GoXLR Daemon is already running.").contains("gamle GoXLR Studio"));
         assert_eq!(friendly_error("something else"), "something else");
+    }
+
+    #[test]
+    fn retries_only_what_can_pass() {
+        assert!(worth_retrying(&friendly_error("The GoXLR Daemon is already running.")));
+        assert!(worth_retrying(&friendly_error("Unable to Start HTTP Server: address in use")));
+        assert!(!worth_retrying(&friendly_error("The GoXLR Driver was not found, please install it and try again.")));
+        assert!(!worth_retrying("GoXLR Utility kører stadig og styrer GoXLR'en"));
+        assert!(!worth_retrying(&friendly_error("The GoXLR engine is not designed to be run as root")));
+    }
+
+    #[test]
+    fn reads_the_end_of_a_log() {
+        let dir = std::env::temp_dir().join(format!("gxs-tail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("x.log");
+        let body = (0..30000).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        std::fs::write(&p, body).unwrap();
+        let t = tail_lines(&p, 3);
+        assert_eq!(t, vec!["line 29997", "line 29998", "line 29999"]);
+        assert!(tail_lines(&dir.join("missing.log"), 3).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

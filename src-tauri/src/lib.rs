@@ -286,6 +286,10 @@ struct DaemonInfo {
     foreign: Vec<String>,
     /// Why the built-in engine last stopped with an error.
     last_error: Option<String>,
+    /// The latest starts/stops of the engine (for the troubleshooter).
+    attempts: Vec<daemon_host::Attempt>,
+    /// goxlr-daemon.log.
+    log_path: Option<String>,
 }
 
 /// Switches from an installed GoXLR Utility to GoXLR Studio's own engine.
@@ -304,9 +308,32 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
             process_running: daemon_host::daemon_process_running(),
             foreign: daemon_host::foreign_engines(),
             last_error: daemon_host::last_error(),
+            attempts: daemon_host::attempts(),
+            log_path: daemon_host::log_file().map(|p| p.display().to_string()),
         })
     })
     .await
+}
+
+/// The end of the GoXLR engine's own log (goxlr-daemon.log), for Diagnose and the troubleshooter.
+#[tauri::command]
+async fn engine_log(lines: Option<usize>) -> Result<Value, String> {
+    blocking(move || {
+        let path = daemon_host::log_file();
+        let tail = path.as_deref().map(|p| daemon_host::tail_lines(p, lines.unwrap_or(200).min(2000))).unwrap_or_default();
+        Ok(serde_json::json!({ "path": path.map(|p| p.display().to_string()), "lines": tail }))
+    })
+    .await
+}
+
+/// Opens the folder with goxlr-daemon.log in Explorer.
+#[tauri::command]
+fn open_engine_log_dir() -> Result<(), String> {
+    let dir = daemon_host::log_file().and_then(|p| p.parent().map(|d| d.to_path_buf())).ok_or("Fandt ikke GoXLR-motorens log-mappe")?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    std::process::Command::new("explorer").arg(&dir).spawn().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// GoXLR software that starts with Windows (scheduled tasks, Startup shortcuts).
@@ -871,9 +898,12 @@ pub fn run() {
                             }
                         }
                     } else if retired || !h.state::<AppState>().daemon.connected() {
-                        let res = if daemon_host::bundled() { daemon_host::start() } else { start_installed_utility() };
+                        // Tries again a few times: right after an update the old GoXLR Studio
+                        // can still be closing and hold the engine's pipe/port.
+                        let res = if daemon_host::bundled() { daemon_host::start_with_retry(&[2, 4, 8, 15, 30]) } else { start_installed_utility() };
                         if let Err(e) = res {
                             log::warn!("GoXLR-motor: {e}");
+                            let _ = h.emit("engine-start-failed", e);
                         }
                     }
                 });
@@ -947,6 +977,8 @@ pub fn run() {
             engine_info,
             engine_task,
             daemon_info,
+            engine_log,
+            open_engine_log_dir,
             daemon_takeover,
             migrate_scan,
             migrate_autostarts,

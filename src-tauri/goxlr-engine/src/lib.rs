@@ -7,6 +7,7 @@
 extern crate core;
 
 use std::fs::create_dir_all;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
@@ -109,6 +110,7 @@ static ACTIVATE_HOOK: Mutex<Option<Hook>> = Mutex::new(None);
 static GLOBAL_TX: Mutex<Option<mpsc::Sender<EventTriggers>>> = Mutex::new(None);
 static READY: AtomicBool = AtomicBool::new(false);
 static LOGGER: Once = Once::new();
+static LOG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Called whenever something asks the engine to show its UI (a client's "Activate"/"OpenUi").
 /// GoXLR Studio shows its own window; GoXLR Utility's UI is never opened.
@@ -120,6 +122,15 @@ pub(crate) fn activate_ui() {
     if let Some(hook) = ACTIVATE_HOOK.lock().unwrap().as_ref() {
         hook();
     }
+}
+
+/// The folder of the engine's log (goxlr-daemon.log): the one it used, or the default one
+/// (`%APPDATA%\\GoXLR-on-Linux\\GoXLR-Utility\\data\\logs`) before it has started.
+pub fn log_directory() -> Option<PathBuf> {
+    if let Some(dir) = LOG_DIR.lock().unwrap().clone() {
+        return Some(dir);
+    }
+    directories::ProjectDirs::from("org", "GoXLR-on-Linux", "GoXLR-Utility").map(|d| d.data_dir().join("logs"))
 }
 
 /// True while the engine is running and its IPC and HTTP/WebSocket API are up.
@@ -173,6 +184,8 @@ async fn run_utility() -> Result<()> {
         bail!("Unable to create log directory: {}", e);
     }
     let log_file = log_path.join("goxlr-daemon.log");
+    // GoXLR Studio: remember where the log is, so the app can show it (Diagnose).
+    LOG_DIR.lock().unwrap().replace(log_path.clone());
 
     // We need to ignore a couple of packages log output so create a builder.
     let mut config = ConfigBuilder::new();

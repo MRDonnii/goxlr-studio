@@ -4,7 +4,7 @@ GoXLR Utility's daemon (`daemon/` from [GoXLR-on-Linux/goxlr-utility](https://gi
 
 Changes from upstream (marked `GoXLR Studio:` in the code):
 
-- `src/main.rs` → `src/lib.rs`: `run()` (blocking, restartable), `request_stop()`, `is_ready()`, `set_activate_hook()` instead of `main()`; no command line of its own; no message box or process exit on errors (they are returned to GoXLR Studio); the logger is installed once per process; the tray icon is never shown and no UI is opened on launch.
+- `src/main.rs` → `src/lib.rs`: `run()` (blocking, restartable), `request_stop()`, `is_ready()`, `set_activate_hook()` instead of `main()`; no command line of its own; no message box or process exit on errors (they are returned to GoXLR Studio); the logger is installed once per process; the tray icon is never shown and no UI is opened on launch; `log_directory()` tells GoXLR Studio where goxlr-daemon.log is.
 - `src/events.rs`: "Activate"/"OpenUi" show GoXLR Studio's window instead of GoXLR Utility's UI.
 - `src/platform/mod.rs`: autostart is left to GoXLR Studio (no `GoXLR Utility.lnk`).
 - `src/platform/windows.rs`: the "already running" check looks for another `goxlr-daemon.exe`.
