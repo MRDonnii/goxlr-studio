@@ -177,6 +177,7 @@ GoXLR Studio tager backup af det hele og henter dine AutoHotkey-genveje, Peace-p
 - **Lydtjek**, der finder Windows-indstillinger, som ændrer lyden (fx at Windows skruer ned for spillet under opkald), og retter dem med ét klik
 - Dansk og engelsk: appen følger Windows' sprog og kan skiftes under Indstillinger
 - En side med **Diagnose**, hvor du kan kopiere eller gemme en rapport (uden adgangskoder), hvis noget driller
+- **Fejlfinder**: appen genkender kendte fejl (driver, GoXLR Utility, USB, port optaget …), viser årsagen med en løsning og starter selv GoXLR-motoren igen; GoXLR-motorens log kan ses på Diagnose
 - Effekter på den store GoXLR: reverb, echo, pitch, gender, megafon, robot og hardtune
 
 *Billederne er taget med appens demo-data i GoXLR Mini-layout.*

@@ -183,6 +183,7 @@ GoXLR Studio backs everything up and brings over your AutoHotkey hotkeys, Peace 
 - Local API, e.g. for Stream Deck
 - **Sound check** that finds Windows settings that change the sound (e.g. Windows turning the game down during calls) and fixes them with one click
 - A **Diagnostics** page where you can copy or save a report (without passwords) if something acts up
+- **Troubleshooter**: the app recognises known problems (driver, GoXLR Utility, USB, port in use …), shows the cause with a fix and restarts the GoXLR engine by itself; the GoXLR engine's log can be seen on Diagnostics
 - Effects on the full-size GoXLR: reverb, echo, pitch, gender, megaphone, robot and hardtune
 
 *The screenshots are taken with the app's demo data in the GoXLR Mini layout, with the Danish UI.*
