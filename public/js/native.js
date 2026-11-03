@@ -295,10 +295,33 @@ export async function startDaemon() {
   return invoke('start_daemon');
 }
 
+// Browser demo: ?engineerror shows the engine that did not start after an update.
+const demoEngineError = typeof location !== 'undefined' && new URLSearchParams(location.search).has('engineerror');
 const demoDaemon = { started_by_us: false, foreign: ['C:\\Program Files\\GoXLR Utility\\goxlr-daemon.exe'] };
 export async function daemonInfo() {
   if (isNative()) return invoke('daemon_info');
-  return { bundled: true, version: '1.2.4', started_by_us: demoDaemon.started_by_us, process_running: true, foreign: [...demoDaemon.foreign], last_error: null };
+  if (demoEngineError) {
+    const e = 'En anden GoXLR-motor svarer allerede – typisk den gamle GoXLR Studio, der stadig er ved at lukke efter en opdatering, eller GoXLR Utility';
+    const now = Date.now();
+    return { bundled: true, version: '1.2.4', started_by_us: false, process_running: false, foreign: [], last_error: e, log_path: null,
+      attempts: [{ at: now - 70000, ok: false, text: e }, { at: now - 68000, ok: false, text: 'Prøver igen om 2 s' }, { at: now - 60000, ok: false, text: e }] };
+  }
+  return { bundled: true, version: '1.2.4', started_by_us: demoDaemon.started_by_us, process_running: true, foreign: [...demoDaemon.foreign], last_error: null, attempts: [] };
+}
+
+// The end of the GoXLR engine's own log (goxlr-daemon.log): { path, lines }.
+export async function engineLog(lines = 200) {
+  if (isNative()) return invoke('engine_log', { lines });
+  const t = '10:00:00';
+  return { path: 'C:\\Users\\<bruger>\\AppData\\Roaming\\GoXLR-on-Linux\\GoXLR-Utility\\data\\logs\\goxlr-daemon.log',
+    lines: demoEngineError ? [`${t} [INFO] Starting GoXLR Daemon v1.2.4 (inside GoXLR Studio)`, `${t} [INFO] Performing Platform Preflight...`,
+      `${t} [ERROR] GoXLR engine stopped: The GoXLR Daemon is already running.`]
+      : [`${t} [INFO] Starting GoXLR Daemon v1.2.4 (inside GoXLR Studio)`, `${t} [INFO] Performing Platform Preflight...`, `${t} [INFO] Bound IPC Socket @ "@goxlr.socket"`, `${t} [INFO] Started GoXLR configuration interface at http://localhost:14564/`] };
+}
+
+export async function openEngineLogDir() {
+  if (isNative()) return invoke('open_engine_log_dir');
+  throw new Error('Kun i Windows-appen');
 }
 
 // GoXLR software that starts with Windows (scheduled tasks, Startup shortcuts) – mindre fejl 3.

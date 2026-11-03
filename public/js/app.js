@@ -4,8 +4,9 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene, snapshotProfiles } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, daemonInfo, daemonTakeover, engineLog, openEngineLogDir, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
+import { troubleshoot, bannerFinding } from './troubleshoot.js';
 import { soundcheckView } from './views-soundcheck.js';
 import { deckView } from './views-deck.js';
 import { pedalsView } from './views-pedals.js';
@@ -379,9 +380,20 @@ function renderBanners() {
   const el = document.getElementById('banners');
   if (!el) return;
   const items = [];
-  if (isNative() && conn.mode === 'demo') {
+  // Fejlfinder: the most serious known problem with its solution (see troubleshoot.js).
+  // Findings from before the GoXLR came back are stale – check again.
+  const fresh = (ctx.troublesMode === 'live') === (conn.mode === 'live');
+  if (troubleOn() && !fresh) setTimeout(() => selfCheck(), 0);
+  const trouble = troubleOn() && fresh ? bannerFinding(ctx.troubles, { skip: ctx.driverMissing ? ['driver-missing'] : [] }) : null;
+  if (trouble && (conn.mode !== 'live' || !ctx.troubleDismissed?.includes(trouble.id))) {
+    items.push(h('div', { class: 'banner warn', 'data-testid': 'banner-trouble', 'data-trouble': trouble.id },
+      h('div', { style: { flex: '1 1 100%' } }, h('strong', {}, trouble.title), h('div', {}, trouble.text)),
+      ...trouble.fixes.slice(0, 2).map((f, i) => h('button', { class: `btn sm ${i ? '' : 'primary'}`, 'data-testid': `trouble-fix-${f.action}`, onclick: () => runFix(f.action) }, f.label)),
+      h('button', { class: 'btn sm', onclick: () => navigate('diag') }, 'Se fejlfinding'),
+      conn.mode === 'live' ? h('button', { class: 'btn sm', onclick: () => { (ctx.troubleDismissed ||= []).push(trouble.id); renderBanners(); } }, 'Luk') : null));
+  } else if (isNative() && conn.mode === 'demo' && !ctx.driverMissing) {
     items.push(h('div', { class: 'banner warn' }, 'GoXLR-motoren kører ikke, eller mixeren er ikke tilsluttet – du ser demo-data.',
-      h('button', { class: 'btn sm primary', onclick: () => startDaemon().then((t) => toast(t, 'info')).catch((e) => toast(String(e))) }, 'Start GoXLR-motoren')));
+      h('button', { class: 'btn sm primary', onclick: () => runFix('start-engine') }, 'Start GoXLR-motoren')));
   }
   if (ctx.soundRescue) {
     const r = ctx.soundRescue;
@@ -501,12 +513,75 @@ async function repairEngine(manual) {
 }
 ctx.repairEngine = (manual = true) => repairEngine(manual);
 
-// The built-in GoXLR engine is started by the app at launch; restart it if it stops while we run.
-let daemonRetry = 0;
+// The built-in GoXLR engine is started by the app at launch (with a few retries); if it is still
+// not up – or stops while we run – it is started again after 15 s, 30 s, 1, 2, 4 and 8 min.
+const RETRY_TICKS = [1, 2, 4, 8, 16, 32];
+let daemonTicks = 0;
+let checkTicks = 0;
 function daemonWatchdog() {
-  if (!isNative() || ctx.prefs.autoStartDaemon === false || conn.mode !== 'demo') { daemonRetry = 0; return; }
-  if (daemonRetry++ < 3) startDaemon().catch(() => {});
+  if (!troubleOn()) return;
+  // Self-check: while the GoXLR is missing every tick, otherwise once a minute (USB problems …).
+  if (conn.mode !== 'live' || ++checkTicks % 4 === 0) selfCheck();
+  if (!isNative() || ctx.prefs.autoStartDaemon === false || conn.mode !== 'demo') { daemonTicks = 0; return; }
+  daemonTicks++;
+  const stuck = (ctx.troubles || []).some((f) => ['driver-missing', 'utility-running', 'tc-app', 'admin'].includes(f.id));
+  if (RETRY_TICKS.includes(daemonTicks) && !stuck) {
+    logActivity('GoXLR-motoren kører ikke – appen starter den igen');
+    startDaemon().then(() => selfCheck()).catch(() => selfCheck());
+  }
 }
+
+// ---------- fejlfinder (troubleshoot.js) ----------
+const troublesSeen = new Set();
+let selfChecking = false;
+// In the browser demo ?engineerror shows the fejlfinder (the engine that did not start after an update).
+function troubleOn() { return isNative() || new URLSearchParams(location.search).has('engineerror'); }
+async function selfCheck() {
+  if (!troubleOn() || selfChecking) return ctx.troubles || [];
+  selfChecking = true;
+  try {
+    const [daemon, driver, log] = await Promise.all([daemonInfo().catch(() => null), driverInfo().catch(() => null), engineLog(400).catch(() => null)]);
+    const found = troubleshoot({ native: true, mode: conn.mode, autoStart: ctx.prefs.autoStartDaemon !== false, daemon: daemon || {}, driver, log: log?.lines || [] });
+    for (const f of found) {
+      if (troublesSeen.has(f.id)) continue;
+      troublesSeen.add(f.id);
+      logActivity(`Fejlfinder: ${f.title}${f.details[0] ? ` (${f.details[0]})` : ''}`);
+    }
+    const key = (list) => list.map((f) => f.id).join(',');
+    const changed = key(found) !== key(ctx.troubles || []);
+    const modeChanged = ctx.troublesMode !== conn.mode;
+    ctx.troubles = found;
+    ctx.troublesMode = conn.mode;
+    if (changed || modeChanged) renderBanners();
+    return found;
+  } finally {
+    selfChecking = false;
+  }
+}
+ctx.selfCheck = selfCheck;
+
+const DRIVER_PAGES = { 'driver-mini': 'https://www.tchelicon.com/en/products/0803-AAB', 'driver-full': 'https://www.tchelicon.com/en/products/0803-AAA' };
+async function runFix(action) {
+  try {
+    if (action === 'start-engine') {
+      toast('Starter GoXLR-motoren…', 'info');
+      toast(await startDaemon(), 'info');
+    } else if (action === 'takeover') {
+      const m = takeoverMessage(await daemonTakeover());
+      toast(m.text, m.ok ? 'info' : undefined);
+    } else if (action === 'open-log') {
+      await openEngineLogDir();
+    } else if (DRIVER_PAGES[action]) {
+      openUrl(ctx.driverMissing?.[action === 'driver-mini' ? 'download_mini' : 'download_full'] || DRIVER_PAGES[action]);
+    } else if (action.startsWith('goto:')) {
+      navigate(action.slice(5));
+    }
+  } catch (e) {
+    toast(String(e.message || e));
+  }
+  if (!action.startsWith('goto:')) setTimeout(() => selfCheck(), 1500);
+}
+ctx.runFix = runFix;
 
 // ---------- per-profile EQ + tray status ----------
 let lastProfile;
@@ -847,7 +922,8 @@ async function registerNativeHooks() {
   await listen('engine-takeover-failed', (ev) => toast(`Kunne ikke starte den indbyggede GoXLR-motor: ${ev.payload}`));
   // The GoXLR engine runs inside the app; it stops by itself only on errors (or if TC-Helicon's
   // own app takes the GoXLR). The watchdog starts it again.
-  await listen('engine-stopped', (ev) => { if (ev.payload) toast(`GoXLR-motoren stoppede: ${ev.payload}`); });
+  await listen('engine-stopped', (ev) => { if (ev.payload) toast(`GoXLR-motoren stoppede: ${ev.payload}`); setTimeout(() => selfCheck(), 500); });
+  await listen('engine-start-failed', () => selfCheck());
   // Tray ids are action ids: profile:…, eq-preset:…, eq-toggle, scene:…, mute-mic.
   await listen('tray-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'bakke-menuen'); });
   await listen('api-action', (ev) => { if (typeof ev.payload === 'string') ctx.runAction(ev.payload, 'lokalt API'); });
@@ -901,6 +977,7 @@ async function boot() {
   setTimeout(apoWatchdog, 4000);
   setTimeout(checkEngineRegistration, 3000);
   setInterval(daemonWatchdog, 15000);
+  setTimeout(() => selfCheck(), 6000);
   setTimeout(() => reportUpdateResult(), 2000);
   setTimeout(() => showWhatsNew(), 4000);
   setTimeout(() => checkDriver(), 2500);

@@ -477,3 +477,10 @@ input.num { width: 64px; }
 .room-row { flex-wrap: wrap; }
 .room-row select { font-size: 12px; padding: 2px 6px; max-width: 150px; }
 .ab-load { max-width: 220px; }
+
+/* Diagnose: GoXLR-motorens log + fejlfinding */
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.log-lines { max-height: 360px; overflow-y: auto; }
+.log-lines .item { padding-top: 4px; padding-bottom: 4px; }
+.list .item.log-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.list .item.log-warn { color: var(--warn); }

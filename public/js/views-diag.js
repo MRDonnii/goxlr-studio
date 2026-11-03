@@ -1,5 +1,6 @@
 import { h, toast, errorLog, activityLog } from './ui.js';
-import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo, updateLog, driverInfo, soundcheckReport, engineInfo, storeGet } from './native.js';
+import { engineStatus, listAudioDevices, appSessions, appInfo, isNative, daemonInfo, updateLog, driverInfo, soundcheckReport, engineInfo, storeGet, engineLog, openEngineLogDir } from './native.js';
+import { troubleshoot, sessionLines, lineLevel, scrubLine } from './troubleshoot.js';
 import { soundcheckFindings } from './soundcheckmodel.js';
 import { engineTestSummary } from './views-outeq.js';
 import { prettyAccel } from './views-hotkeys.js';
@@ -19,6 +20,9 @@ export async function collectDiagnostics(ctx) {
     updateLog().catch(() => []),
   ]);
   const driver = await driverInfo().catch((e) => ({ error: String(e) }));
+  const elog = await engineLog(600).catch(() => ({ path: null, lines: [] }));
+  const troubleDemo = new URLSearchParams(location.search).has('engineerror');
+  const troubles = troubleshoot({ native: isNative() || troubleDemo, mode: conn.mode, autoStart: ctx.prefs.autoStartDaemon !== false, daemon: daemon.error ? {} : daemon, driver, log: elog.lines || [] });
   // Lydtjek and the last EQ-motor test belong in the report too (no passwords, no tokens).
   const [sc, engInfo, engTest] = await Promise.all([
     soundcheckReport().catch((e) => ({ error: String(e) })),
@@ -34,6 +38,7 @@ export async function collectDiagnostics(ctx) {
     status: ctx.hotkeyStatus[b.id] ? (ctx.hotkeyStatus[b.id].ok ? 'aktiv' : ctx.hotkeyStatus[b.id].error) : 'ikke registreret',
   })));
   return {
+    _troubles: troubles,
     created: new Date().toISOString(),
     app: { ...info, native: isNative(), userAgent: navigator.userAgent },
     goxlr: m ? {
@@ -90,6 +95,14 @@ export async function collectDiagnostics(ctx) {
       voice_enhance: Object.keys(ctx.prefs.voiceEnhance || {}).filter((k) => ctx.prefs.voiceEnhance[k]),
       tts: ctx.conn.status?.config?.tts_enabled ?? null,
     },
+    // Fejlfinder + the GoXLR engine's own log (this run; user names in paths are removed).
+    troubleshoot: troubles.map((f) => ({ level: f.level, problem: f.title, details: f.details.map(scrubLine) })),
+    engine_log: {
+      file: elog.path ? scrubLine(elog.path) : null,
+      starts: (daemon.attempts || []).map((a) => `${new Date(a.at).toISOString()} ${a.ok ? '✓' : '✗'} ${a.text}`),
+      problems: (elog.lines || []).filter((l) => lineLevel(l)).slice(-40).map(scrubLine),
+      last: sessionLines(elog.lines).slice(-60).map(scrubLine),
+    },
     errors: errorLog.slice(-20),
     activity: activityLog.slice(-40),
     update: { latest: ctx.updateState?.latest || null, error: ctx.updateState?.error || null, log: updLog },
@@ -100,6 +113,38 @@ function section(title, rows) {
   return h('div', { class: 'card' }, h('h2', {}, title), h('div', { class: 'list' }, rows.length ? rows : h('div', { class: 'hint' }, 'Intet')));
 }
 const row = (k, v, cls) => h('div', { class: 'item' }, k, h('div', { class: 'spacer' }), cls ? h('span', { class: `badge ${cls}` }, v) : v);
+
+const reportText = (r) => JSON.stringify({ ...r, _troubles: undefined }, null, 2);
+const LEVEL_TEXT = { error: 'Fejl', warn: 'Advarsel', info: 'Info' };
+
+// Fejlfinding: known problems with what to do about them (troubleshoot.js).
+function troubleCard(ctx, r, reload) {
+  const list = r._troubles || [];
+  return h('div', { class: 'card', 'data-testid': 'trouble-card' },
+    h('h2', {}, 'Fejlfinding', h('span', { class: 'row' }, h('button', { class: 'btn sm', 'data-testid': 'trouble-recheck', onclick: () => { ctx.selfCheck?.(); reload(); } }, 'Tjek igen'))),
+    h('div', { class: 'hint' }, 'Appen holder selv øje med GoXLR-motoren, driveren og motorens log og foreslår en løsning, når den genkender en fejl. Den starter selv GoXLR-motoren igen, hvis den ikke kommer op.'),
+    h('div', { class: 'list' }, list.length ? list.map((f) => h('div', { class: 'item', 'data-testid': 'trouble-item', 'data-trouble': f.id, style: { flexDirection: 'column', alignItems: 'stretch', gap: '6px' } },
+      h('div', { class: 'row' }, h('span', { class: `badge ${f.level === 'info' ? '' : 'warn'}` }, LEVEL_TEXT[f.level]), h('b', {}, f.title)),
+      h('div', {}, f.text),
+      ...f.details.map((d) => h('div', { class: 'hint mono', 'data-no-i18n': '' }, scrubLine(d))),
+      f.fixes.length ? h('div', { class: 'row' }, ...f.fixes.map((x, i) => h('button', { class: `btn sm ${i ? '' : 'primary'}`, onclick: () => ctx.runFix ? ctx.runFix(x.action).then(() => setTimeout(reload, 1600)) : toast('Kun i Windows-appen') }, x.label))) : null))
+      : h('div', { class: 'item' }, h('span', { class: 'badge ok' }, 'OK'), 'Ingen kendte problemer fundet.')));
+}
+
+// GoXLR-motorens log (goxlr-daemon.log): this run, with errors and warnings marked.
+function engineLogCard(r) {
+  const e = r.engine_log || {};
+  const lines = e.last || [];
+  return h('div', { class: 'card', 'data-testid': 'engine-log-card' },
+    h('h2', {}, 'GoXLR-motorens log',
+      h('span', { class: 'row' },
+        h('button', { class: 'btn sm', onclick: () => openEngineLogDir().catch((err) => toast(String(err.message || err))) }, 'Åbn log-mappen'),
+        h('button', { class: 'btn sm', onclick: () => navigator.clipboard.writeText([...(e.starts || []), '', ...lines].join('\n')).then(() => toast('Loggen er kopieret', 'info')).catch((err) => toast(String(err))) }, 'Kopiér log'))),
+    e.file ? h('div', { class: 'hint mono', 'data-no-i18n': '' }, e.file) : null,
+    e.starts?.length ? h('div', { class: 'list' }, h('div', { class: 'item hint' }, 'Start af motoren'), ...e.starts.slice(-8).reverse().map((x) => h('div', { class: 'item mono', 'data-no-i18n': '' }, x))) : null,
+    h('div', { class: 'list log-lines' }, lines.length ? lines.slice().reverse().map((l) => h('div', { class: `item mono log-${lineLevel(l) || 'info'}`, 'data-testid': 'engine-log-line', 'data-no-i18n': '' }, l))
+      : h('div', { class: 'hint' }, 'Loggen er tom – GoXLR-motoren er ikke startet endnu.')));
+}
 
 export function diagView(ctx) {
   const root = h('div', { class: 'grid' }, h('div', { class: 'card hint' }, 'Samler oplysninger…'));
@@ -113,12 +158,13 @@ export function diagView(ctx) {
       h('div', { class: 'card' }, h('h2', {}, 'Rapport',
         h('span', { class: 'row' },
           h('button', { class: 'btn sm', onclick: load }, 'Opdatér'),
-          h('button', { class: 'btn sm primary', onclick: () => navigator.clipboard.writeText(JSON.stringify(r, null, 2)).then(() => toast('Rapport kopieret – indsæt den, hvor du beder om hjælp', 'info')).catch((err) => toast(String(err))) }, 'Kopiér rapport'),
+          h('button', { class: 'btn sm primary', onclick: () => navigator.clipboard.writeText(reportText(r)).then(() => toast('Rapport kopieret – indsæt den, hvor du beder om hjælp', 'info')).catch((err) => toast(String(err))) }, 'Kopiér rapport'),
           h('button', { class: 'btn sm', 'data-testid': 'diag-save', onclick: () => {
-            const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' })), download: `GoXLR Studio rapport ${r.created.slice(0, 16).replace(/[T:]/g, '-')}.json` });
+            const a = h('a', { href: URL.createObjectURL(new Blob([reportText(r)], { type: 'application/json' })), download: `GoXLR Studio rapport ${r.created.slice(0, 16).replace(/[T:]/g, '-')}.json` });
             a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
           } }, 'Gem som fil'))),
         h('div', { class: 'hint' }, 'Alt her bliver på din pc. "Kopiér rapport" og "Gem som fil" giver én samlet rapport – med lydtjek, EQ-motor-test og log, men uden adgangskoder og tokens – som du selv kan sende videre.')),
+      troubleCard(ctx, r, load),
       h('div', { class: 'grid cols-3' },
         section('App', [row('Version', r.app.version || '–'), row('Installation', r.app.browser ? 'Browser' : r.app.installed ? 'Installeret' : 'Portable'),
           row('API', r.api?.enabled ? (r.api.error ? 'Fejl' : `Port ${r.api.port}`) : 'Fra', r.api?.error ? 'warn' : null)]),
@@ -137,6 +183,7 @@ export function diagView(ctx) {
       h('div', { class: 'grid cols-2' },
         section(`Genveje${bad.length ? ` – ${bad.length} virker ikke` : ''}`, r.hotkeys.map((x) => row(`${x.key} → ${x.action}`, x.status === 'aktiv' ? 'Aktiv' : x.status, x.status === 'aktiv' ? 'ok' : 'warn'))),
         section('Seneste fejl', r.errors.slice().reverse().map((x) => h('div', { class: 'item' }, h('span', { class: 'hint' }, new Date(x.at).toLocaleTimeString('da-DK')), x.msg)))),
+      engineLogCard(r),
       section('Opdateringer (update.log)', (r.update?.log || []).slice(-15).reverse().map((l) => h('div', { class: 'item hint', 'data-testid': 'update-log-line' }, l))),
       section('Seneste hændelser (presetskift, administrator-opgaver …)', (r.activity || []).slice().reverse().map((x) => h('div', { class: 'item', 'data-testid': 'activity-item' }, h('span', { class: 'hint' }, new Date(x.at).toLocaleTimeString('da-DK')), x.msg))),
       h('div', { class: 'grid cols-2' },
