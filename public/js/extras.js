@@ -211,6 +211,7 @@ export function updateOutcome(result, current) {
     '-2': 'installeren blev ikke færdig',
     '-3': 'installeren kunne ikke startes – måske blokeret af antivirus',
     '-4': 'exe-filen kunne ikke udskiftes',
+    '-5': 'exe-filen blev ikke udskiftet – typisk fordi en anden GoXLR Studio (startet som administrator eller af en planlagt opgave) holdt den låst',
   }[String(result.code ?? null)] || `installeren sluttede med kode ${result.code}`;
   return { ok: false, text: `Opdateringen til ${result.to} blev ikke installeret: ${why}. Du kører stadig ${current}.` };
 }

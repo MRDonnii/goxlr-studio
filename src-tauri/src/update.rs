@@ -344,8 +344,27 @@ if ($old) {{
   Start-Sleep -Seconds 1
 }}
 Start-Sleep -Milliseconds 800
+# Another GoXLR Studio (started as administrator or as another account, e.g. by a scheduled task)
+# keeps the exe locked, and the installer cannot replace it. Stop what may be stopped, log the rest.
+$others = @(Get-Process -Name {name} -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {pid} }})
+if ($others.Count -gt 0) {{
+  Log ('Andre GoXLR Studio-processer kører: ' + (($others | ForEach-Object {{ $_.Id }}) -join ', ') + ' – stopper dem')
+  $others | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 1
+  $left = @(Get-Process -Name {name} -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {pid} }})
+  if ($left.Count -gt 0) {{ Log ('Kunne ikke stoppe ' + $left.Count + ' GoXLR Studio (kører som administrator eller anden konto) – exe-filen kan være låst') }}
+}}
 Log 'Installerer {to}'
 {install}
+# The installer can end with 0 without replacing a locked exe: check the version it left behind.
+if ($code -eq 0) {{
+  try {{
+    $v = (Get-Item -LiteralPath {exe}).VersionInfo.ProductVersion
+    $now = ([version]($v -replace '[^0-9.]', '')).ToString(3)
+    if ($now -ne ({to_q} -replace '^[vV]', '')) {{ $code = -5; Log ('Exe-filen er stadig version ' + $now + ' efter installationen – den blev ikke udskiftet') }}
+    else {{ Log ('Exe-filen er nu version ' + $now) }}
+  }} catch {{ Log ('Kunne ikke læse exe-filens version: ' + $_.Exception.Message) }}
+}}
 try {{ [ordered]@{{ 'from' = {from_q}; 'to' = {to_q}; 'code' = $code; 'installed' = {installed}; 'at' = (Get-Date -Format 's') }} | ConvertTo-Json | Set-Content -LiteralPath {result} -Encoding UTF8 }} catch {{ }}
 Start-Sleep -Seconds 1
 $running = @(Get-Process -Name {name} -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq {exe} }})
@@ -474,6 +493,9 @@ mod tests {
         // Only GoXLR Studio itself is waited for or stopped (Windows can reuse a process id).
         assert!(s.contains("Get-Process -Id 4242 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq 'C:\\Users\\Søren O''Hara\\AppData\\Local\\GoXLR Studio\\goxlr-studio.exe' }"));
         assert!(s.contains("$old | Stop-Process -Force"));
+        // A locked exe (another GoXLR Studio as administrator) is found by its version.
+        assert!(s.contains("VersionInfo.ProductVersion"));
+        assert!(s.contains("$code = -5"));
         assert!(!s.contains("Stop-Process -Id"));
         // Quotes in paths are doubled, so the script stays valid.
         assert!(s.contains("'C:\\Users\\Søren O''Hara\\AppData\\Local\\GoXLR Studio\\goxlr-studio.exe'"));
