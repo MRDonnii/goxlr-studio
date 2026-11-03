@@ -9,10 +9,16 @@ const START = { label: 'Start GoXLR-motoren', action: 'start-engine' };
 const TAKEOVER = { label: 'Skift til GoXLR Studios motor', action: 'takeover' };
 const LOG = { label: 'Åbn motorens log', action: 'open-log' };
 const DIAG = { label: 'Se fejlfinding', action: 'goto:diag' };
+const CLOSE_OTHER = { label: 'Luk den anden GoXLR Studio', action: 'close-other' };
+const RESTART = { label: 'Genstart GoXLR-motoren', action: 'restart-engine' };
 const DRIVER = [{ label: 'Hent driver til GoXLR Mini', action: 'driver-mini' }, { label: 'Hent driver til GoXLR', action: 'driver-full' }];
 
 /** What each known problem means and what to do about it. */
 export const PROBLEMS = {
+  'other-instance': { level: 'error', title: 'En anden GoXLR Studio styrer GoXLR’en',
+    text: 'Den kører som administrator eller som en anden Windows-konto – typisk startet af en planlagt opgave – og bruger derfor ikke dine indstillinger: profilen hedder “Default”, og dine profiler mangler. Luk den, så starter denne GoXLR Studio sin egen motor med dine profiler. Starter du GoXLR Studio med en planlagt opgave, så slet den (eller fjern “Kør med højeste rettigheder”) – appen starter selv med Windows.', fixes: [CLOSE_OTHER] },
+  'wrong-state': { level: 'error', title: 'GoXLR-motoren kører uden dine indstillinger',
+    text: 'Den har indlæst profilen “Default” og ser ingen af dine profilfiler, selv om dine indstillinger siger noget andet. Intet er slettet – genstart motoren, så indlæser den dine profiler igen.', fixes: [RESTART, LOG] },
   'driver-missing': { level: 'error', title: 'TC-Helicons GoXLR-driver mangler',
     text: 'Uden driveren kan Windows og GoXLR Studio ikke tale med GoXLR’en. Installér driveren fra TC-Helicon og start GoXLR Studio igen.', fixes: DRIVER },
   'utility-running': { level: 'warn', title: 'GoXLR Utility kører og styrer GoXLR’en',
@@ -85,7 +91,14 @@ const ERROR_PATTERNS = [
 ];
 
 // Problems that stop the engine (they explain "kører ikke" better than the general findings).
-const STOP_CAUSES = ['driver-missing', 'utility-running', 'old-instance', 'port-busy', 'tc-app', 'pipe', 'log-dir', 'admin', 'crash'];
+const STOP_CAUSES = ['other-instance', 'driver-missing', 'utility-running', 'old-instance', 'port-busy', 'tc-app', 'pipe', 'log-dir', 'admin', 'crash'];
+
+const otherFlags = (o) => [o.elevated ? 'administrator' : null, o.same_user === false ? 'anden Windows-konto' : o.same_user == null ? 'administrator eller anden konto' : null, o.session === 0 ? 'session 0' : null].filter(Boolean);
+/** One other GoXLR Studio process, for the details. */
+export function describeOther(o) {
+  const f = otherFlags(o);
+  return f.length ? `goxlr-studio.exe ${o.pid} (${f.join(', ')})` : `goxlr-studio.exe ${o.pid}`;
+}
 
 /** The problem an error text is about (`engine-error` if unknown). */
 export function classifyError(text) {
@@ -133,7 +146,8 @@ export function scrubLine(line) {
 /**
  * Findings, most serious first: [{ id, level, title, text, fixes, details }].
  * input = { native, mode ('live'|'demo'|'connecting'), autoStart, daemon (daemon_info),
- *           driver (driver_info), log (lines of goxlr-daemon.log) }
+ *           driver (driver_info), log (lines of goxlr-daemon.log),
+ *           state: { settings: engine_settings_check, profile (loaded), files (listed profiles) } }
  */
 export function troubleshoot(input = {}) {
   if (!input.native) return [];
@@ -151,6 +165,20 @@ export function troubleshoot(input = {}) {
   const failed = (d.attempts || []).filter((a) => !a.ok && !/^Prøver igen/.test(a.text));
 
   if (input.driver?.installed === false) add('driver-missing');
+
+  // Another GoXLR Studio (administrator / another account) answers on the engine's port.
+  const others = d.others || [];
+  const portOther = d.port_pid && d.own_pid && d.port_pid !== d.own_pid && /goxlr-studio/i.test(d.port_process || '');
+  if (portOther || (others.length && !running)) {
+    add('other-instance', others.map(describeOther));
+  }
+  // The engine runs, but with default settings (profile "Default", no files) – not the user's.
+  const st = input.state;
+  if (live && st?.settings?.found && st.settings.profile_files > 0) {
+    const empty = Array.isArray(st.files) && st.files.length === 0;
+    const wrongProfile = st.profile === 'Default' && st.settings.profile && st.settings.profile !== 'Default';
+    if (empty || wrongProfile) add(out.has('other-instance') ? 'other-instance' : 'wrong-state', [`Profil nu: ${st.profile || '?'} · i dine indstillinger: ${st.settings.profile || '?'} · profilfiler: ${st.settings.profile_files}, motoren ser ${Array.isArray(st.files) ? st.files.length : '?'}`]);
+  }
   if (d.foreign?.length && !running) add('utility-running', d.foreign);
 
   if (!live) {
@@ -175,6 +203,7 @@ export function troubleshoot(input = {}) {
   // A stopped engine is explained by a more specific problem when there is one.
   if ([...out.keys()].some((id) => STOP_CAUSES.includes(id))) { out.delete('engine-stopped'); out.delete('engine-error'); }
   if (out.has('usb-open') || out.has('usb-unstable')) out.delete('no-device');
+  if (out.has('other-instance')) { out.delete('old-instance'); out.delete('port-busy'); out.delete('no-device'); }
   return [...out.values()].sort((a, b) => LEVELS[a.level] - LEVELS[b.level]);
 }
 

@@ -300,6 +300,10 @@ const demoEngineError = typeof location !== 'undefined' && new URLSearchParams(l
 const demoDaemon = { started_by_us: false, foreign: ['C:\\Program Files\\GoXLR Utility\\goxlr-daemon.exe'] };
 export async function daemonInfo() {
   if (isNative()) return invoke('daemon_info');
+  if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('otherinstance')) {
+    return { bundled: true, version: '1.2.4', started_by_us: false, process_running: true, foreign: [], last_error: 'En anden GoXLR-motor svarer allerede', attempts: [],
+      own_pid: 100, port_pid: 200, port_process: 'goxlr-studio.exe', others: [{ pid: 200, path: null, same_user: null, elevated: null, session: 1 }] };
+  }
   if (demoEngineError) {
     const e = 'En anden GoXLR-motor svarer allerede – typisk den gamle GoXLR Studio, der stadig er ved at lukke efter en opdatering, eller GoXLR Utility';
     const now = Date.now();
@@ -317,6 +321,23 @@ export async function engineLog(lines = 200) {
     lines: demoEngineError ? [`${t} [INFO] Starting GoXLR Daemon v1.2.4 (inside GoXLR Studio)`, `${t} [INFO] Performing Platform Preflight...`,
       `${t} [ERROR] GoXLR engine stopped: The GoXLR Daemon is already running.`]
       : [`${t} [INFO] Starting GoXLR Daemon v1.2.4 (inside GoXLR Studio)`, `${t} [INFO] Performing Platform Preflight...`, `${t} [INFO] Bound IPC Socket @ "@goxlr.socket"`, `${t} [INFO] Started GoXLR configuration interface at http://localhost:14564/`] };
+}
+
+// Another GoXLR Studio (administrator / another account) holding the engine: stop it, start ours.
+export async function stopOtherInstances() {
+  if (isNative()) return invoke('stop_other_instances');
+  throw new Error('Kun i Windows-appen');
+}
+
+export async function restartEngine() {
+  if (isNative()) return invoke('restart_engine');
+  throw new Error('Kun i Windows-appen');
+}
+
+// What settings.json says for a GoXLR: { found, profile, mic_profile, profile_files }.
+export async function engineSettingsCheck(serial) {
+  if (isNative()) return invoke('engine_settings_check', { serial });
+  return { found: false };
 }
 
 export async function openEngineLogDir() {

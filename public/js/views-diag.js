@@ -21,7 +21,7 @@ export async function collectDiagnostics(ctx) {
   ]);
   const driver = await driverInfo().catch((e) => ({ error: String(e) }));
   const elog = await engineLog(600).catch(() => ({ path: null, lines: [] }));
-  const troubleDemo = new URLSearchParams(location.search).has('engineerror');
+  const troubleDemo = ['engineerror', 'otherinstance'].some((k) => new URLSearchParams(location.search).has(k));
   const troubles = troubleshoot({ native: isNative() || troubleDemo, mode: conn.mode, autoStart: ctx.prefs.autoStartDaemon !== false, daemon: daemon.error ? {} : daemon, driver, log: elog.lines || [] });
   // Lydtjek and the last EQ-motor test belong in the report too (no passwords, no tokens).
   const [sc, engInfo, engTest] = await Promise.all([

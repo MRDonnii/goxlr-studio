@@ -87,3 +87,32 @@ test('log levels and scrubbing of user names', () => {
   assert.equal(lineLevel('10:00:00 [INFO] Error handling enabled'), null);
   assert.equal(scrubLine('Loading C:\\Users\\Someone\\AppData\\Roaming\\x.goxlr'), 'Loading C:\\Users\\<bruger>\\AppData\\Roaming\\x.goxlr');
 });
+
+test('another GoXLR Studio (administrator / another account) holds the engine: the friend case', () => {
+  const daemon = { ...base.daemon, started_by_us: false, own_pid: 100, port_pid: 200, port_process: 'goxlr-studio.exe',
+    others: [{ pid: 200, path: null, same_user: null, elevated: null, session: 1 }], last_error: 'En anden GoXLR-motor svarer allerede' };
+  const state = { settings: { found: true, profile: 'Stue', mic_profile: 'Min mic', profile_files: 7 }, profile: 'Default', files: [] };
+  const f = troubleshoot({ ...base, mode: 'live', daemon, state });
+  assert.deepEqual(ids(f), ['other-instance']);
+  assert.equal(f[0].fixes[0].action, 'close-other');
+  assert.ok(f[0].details.some((d) => d.includes('goxlr-studio.exe 200')));
+  assert.ok(f[0].details.some((d) => d.includes('Stue')));
+});
+
+test('our own engine with default settings: restart it', () => {
+  const daemon = { ...base.daemon, started_by_us: true, own_pid: 100, port_pid: 100, port_process: 'goxlr-studio.exe', others: [] };
+  const state = { settings: { found: true, profile: 'Stue', profile_files: 7 }, profile: 'Default', files: [] };
+  const f = troubleshoot({ ...base, mode: 'live', daemon, state });
+  assert.deepEqual(ids(f), ['wrong-state']);
+  assert.equal(f[0].fixes[0].action, 'restart-engine');
+  // The user's own profiles and a profile actually called Default are fine.
+  assert.deepEqual(troubleshoot({ ...base, mode: 'live', daemon, state: { ...state, profile: 'Stue', files: ['Stue'] } }), []);
+  assert.deepEqual(troubleshoot({ ...base, mode: 'live', daemon, state: { settings: { found: true, profile: 'Default', profile_files: 2 }, profile: 'Default', files: ['Default', 'X'] } }), []);
+});
+
+test('an elevated GoXLR Studio that does not hold the port is still reported while ours is stopped', () => {
+  const daemon = { ...base.daemon, own_pid: 100, port_pid: null, others: [{ pid: 300, path: 'C:\\x\\goxlr-studio.exe', same_user: true, elevated: true, session: 1 }] };
+  const f = troubleshoot({ ...base, daemon });
+  assert.deepEqual(ids(f), ['other-instance']);
+  assert.match(f[0].details[0], /administrator/);
+});

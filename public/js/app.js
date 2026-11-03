@@ -4,7 +4,7 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene, snapshotProfiles } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, daemonInfo, daemonTakeover, engineLog, openEngineLogDir, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, daemonInfo, daemonTakeover, engineLog, openEngineLogDir, stopOtherInstances, restartEngine, engineSettingsCheck, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { troubleshoot, bannerFinding } from './troubleshoot.js';
 import { restoreOpenMic } from './openmic.js';
@@ -525,7 +525,7 @@ function daemonWatchdog() {
   if (conn.mode !== 'live' || ++checkTicks % 4 === 0) selfCheck();
   if (!isNative() || ctx.prefs.autoStartDaemon === false || conn.mode !== 'demo') { daemonTicks = 0; return; }
   daemonTicks++;
-  const stuck = (ctx.troubles || []).some((f) => ['driver-missing', 'utility-running', 'tc-app', 'admin'].includes(f.id));
+  const stuck = !!ctx.driverMissing || (ctx.troubles || []).some((f) => ['utility-running', 'tc-app', 'admin', 'other-instance'].includes(f.id));
   if (RETRY_TICKS.includes(daemonTicks) && !stuck) {
     logActivity('GoXLR-motoren kører ikke – appen starter den igen');
     startDaemon().then(() => selfCheck()).catch(() => selfCheck());
@@ -536,13 +536,25 @@ function daemonWatchdog() {
 const troublesSeen = new Set();
 let selfChecking = false;
 // In the browser demo ?engineerror shows the fejlfinder (the engine that did not start after an update).
-function troubleOn() { return isNative() || new URLSearchParams(location.search).has('engineerror'); }
+function troubleOn() { const q = new URLSearchParams(location.search); return isNative() || q.has('engineerror') || q.has('otherinstance'); }
 async function selfCheck() {
   if (!troubleOn() || selfChecking) return ctx.troubles || [];
   selfChecking = true;
   try {
     const [daemon, driver, log] = await Promise.all([daemonInfo().catch(() => null), driverInfo().catch(() => null), engineLog(400).catch(() => null)]);
-    const found = troubleshoot({ native: true, mode: conn.mode, autoStart: ctx.prefs.autoStartDaemon !== false, daemon: daemon || {}, driver, log: log?.lines || [] });
+    // Does the engine run with the user's settings (profile from settings.json, the profile files)?
+    const m = conn.mode === 'live' ? conn.mixer : null;
+    const settings = m && conn.serial ? await engineSettingsCheck(conn.serial).catch(() => null) : null;
+    const state = settings ? { settings, profile: m.profile_name, files: conn.status?.files?.profiles } : null;
+    // While an administrator task runs, its elevated helper is a goxlr-studio.exe too – not another app.
+    if (daemon && ctx.adminTask) daemon.others = [];
+    const found = troubleshoot({ native: true, mode: conn.mode, autoStart: ctx.prefs.autoStartDaemon !== false, daemon: daemon || {}, driver, log: log?.lines || [], state });
+    // The engine is ours but runs with default settings: restart it (at most every 10 minutes).
+    if (found.some((f) => f.id === 'wrong-state') && Date.now() - (ctx.lastEngineRestart || 0) > 600000) {
+      ctx.lastEngineRestart = Date.now();
+      logActivity('GoXLR-motoren kører uden dine indstillinger – appen genstarter den');
+      restartEngine().then((t) => logActivity(`GoXLR-motoren: ${t}`)).catch((e) => logActivity(`GoXLR-motoren kunne ikke genstartes: ${e}`));
+    }
     for (const f of found) {
       if (troublesSeen.has(f.id)) continue;
       troublesSeen.add(f.id);
@@ -567,6 +579,12 @@ async function runFix(action) {
     if (action === 'start-engine') {
       toast('Starter GoXLR-motoren…', 'info');
       toast(await startDaemon(), 'info');
+    } else if (action === 'close-other') {
+      toast('Lukker den anden GoXLR Studio – Windows kan bede om administrator-adgang', 'info');
+      toast(await stopOtherInstances(), 'info');
+    } else if (action === 'restart-engine') {
+      toast('Genstarter GoXLR-motoren…', 'info');
+      toast(await restartEngine(), 'info');
     } else if (action === 'takeover') {
       const m = takeoverMessage(await daemonTakeover());
       toast(m.text, m.ok ? 'info' : undefined);
