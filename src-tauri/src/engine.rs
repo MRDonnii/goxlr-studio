@@ -1458,6 +1458,9 @@ pub enum Task {
     UseExternal,
     /// Give a separate Equalizer APO its own config folder back.
     RestoreExternal,
+    /// Stop other GoXLR Studio processes started as administrator or as another account
+    /// (only goxlr-studio.exe is ever stopped).
+    StopInstances { pids: Vec<u32> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -1737,6 +1740,15 @@ pub fn run_task(task: &Task) -> TaskResult {
         Task::Uninstall => uninstall_engine(&mut log),
         Task::UseExternal => use_external(true, &mut log),
         Task::RestoreExternal => use_external(false, &mut log),
+        Task::StopInstances { pids } => {
+            let left = crate::daemon_host::stop_other_instances(pids);
+            if left.is_empty() {
+                log.push(format!("Stoppede {} anden GoXLR Studio", pids.len()));
+                Ok(false)
+            } else {
+                Err(format!("Kunne ikke stoppe GoXLR Studio med proces-id {left:?}"))
+            }
+        }
     };
     match res {
         Ok(reboot) => TaskResult { ok: true, error: None, log, reboot, tests, sound },

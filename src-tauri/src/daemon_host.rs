@@ -95,20 +95,24 @@ pub fn start_and_wait(wait: Duration) -> Result<String, String> {
     res
 }
 
-/// Errors where trying again does not help (the user has to do something first).
-pub fn worth_retrying(e: &str) -> bool {
+/// Errors where trying again does not help (the user has to do something first). Started with
+/// Windows (`at_boot`), a missing driver is worth waiting for: it can load a minute or two late.
+pub fn worth_retrying(e: &str, at_boot: bool) -> bool {
     let l = e.to_lowercase();
-    !(l.contains("driver") || l.contains("administrator") || l.contains("goxlr utility kører") || l.contains("kun i windows"))
+    if l.contains("driver") {
+        return at_boot;
+    }
+    !(l.contains("administrator") || l.contains("goxlr utility kører") || l.contains("kun i windows"))
 }
 
 /// Starts the engine and tries again after each of `delays` (seconds) while it fails with an
 /// error that can pass by itself – right after an update the old GoXLR Studio can still be
 /// closing and hold the engine's pipe and port for a few seconds.
-pub fn start_with_retry(delays: &[u64]) -> Result<String, String> {
+pub fn start_with_retry(delays: &[u64], at_boot: bool) -> Result<String, String> {
     let mut last = start();
     for &d in delays {
         match &last {
-            Err(e) if worth_retrying(e) => {}
+            Err(e) if worth_retrying(e, at_boot) => {}
             _ => break,
         }
         note(false, &format!("Prøver igen om {d} s"));
@@ -442,6 +446,197 @@ pub fn remove_ours() {
     remove_old_engine();
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Another GoXLR Studio: one started as administrator or as another account (a scheduled task
+// "with highest privileges", Windows 11's administrator protection) is not seen by the
+// single-instance check, nor stopped by the installer. It holds the GoXLR engine and port 14564
+// – and, being another account, it reads another settings.json: profile "Default", no files.
+// ---------------------------------------------------------------------------------------------
+
+/// Another goxlr-studio.exe than this one.
+#[derive(serde::Serialize, Clone, Debug, Default)]
+pub struct OtherInstance {
+    pub pid: u32,
+    /// None when Windows does not tell (another account).
+    pub path: Option<String>,
+    /// Same Windows account as this app (None = could not be read: another account or elevated).
+    pub same_user: Option<bool>,
+    pub elevated: Option<bool>,
+    pub session: Option<u32>,
+}
+
+/// The elevated helper (`--engine-task`) runs from here for a moment – it is not another app.
+pub fn is_helper_path(path: &str) -> bool {
+    let p = path.to_ascii_lowercase().replace('/', "\\");
+    p.contains("\\goxlr studio\\helper\\")
+}
+
+/// Other GoXLR Studio processes (the elevated helper not counted).
+pub fn other_instances() -> Vec<OtherInstance> {
+    let me = std::process::id();
+    processes()
+        .into_iter()
+        .filter(|(pid, n, path)| *pid != me && n.eq_ignore_ascii_case("goxlr-studio.exe") && !path.as_deref().is_some_and(is_helper_path))
+        .map(|(pid, _, path)| {
+            let (same_user, elevated) = token_info(pid);
+            OtherInstance { pid, path, same_user, elevated, session: session_of(pid) }
+        })
+        .collect()
+}
+
+/// This app runs elevated (as administrator).
+pub fn self_elevated() -> bool {
+    #[cfg(windows)]
+    return token_info(std::process::id()).1.unwrap_or(false);
+    #[cfg(not(windows))]
+    false
+}
+
+/// Same account as this process, and elevated – read from the process' token (None if not allowed).
+#[cfg(windows)]
+fn token_info(pid: u32) -> (Option<bool>, Option<bool>) {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{EqualSid, GetTokenInformation, TokenElevation, TokenUser, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
+    unsafe fn user(token: HANDLE) -> Option<Vec<u8>> {
+        let mut len = 0u32;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut len);
+        if len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len as usize];
+        GetTokenInformation(token, TokenUser, Some(buf.as_mut_ptr().cast()), len, &mut len).ok()?;
+        Some(buf)
+    }
+    unsafe {
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return (None, None) };
+        let mut token = HANDLE::default();
+        let opened = OpenProcessToken(h, TOKEN_QUERY, &mut token).is_ok();
+        let _ = CloseHandle(h);
+        if !opened {
+            return (None, None);
+        }
+        let mut elev = TOKEN_ELEVATION::default();
+        let mut len = 0u32;
+        let elevated = GetTokenInformation(token, TokenElevation, Some((&mut elev as *mut TOKEN_ELEVATION).cast()), std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut len)
+            .ok()
+            .map(|_| elev.TokenIsElevated != 0);
+        let theirs = user(token);
+        let _ = CloseHandle(token);
+        let mut mine_token = HANDLE::default();
+        let same = if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut mine_token).is_ok() {
+            let mine = user(mine_token);
+            let _ = CloseHandle(mine_token);
+            match (theirs, mine) {
+                (Some(a), Some(b)) => {
+                    let a = &*(a.as_ptr() as *const TOKEN_USER);
+                    let b = &*(b.as_ptr() as *const TOKEN_USER);
+                    Some(EqualSid(a.User.Sid, b.User.Sid).is_ok())
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        (same, elevated)
+    }
+}
+
+#[cfg(not(windows))]
+fn token_info(_pid: u32) -> (Option<bool>, Option<bool>) {
+    (None, None)
+}
+
+#[cfg(windows)]
+fn session_of(pid: u32) -> Option<u32> {
+    let mut s = 0u32;
+    unsafe { windows::Win32::System::RemoteDesktop::ProcessIdToSessionId(pid, &mut s).ok().map(|_| s) }
+}
+
+#[cfg(not(windows))]
+fn session_of(_pid: u32) -> Option<u32> {
+    None
+}
+
+/// The process listening on a local TCP port (the GoXLR engine's API: 14564).
+#[cfg(windows)]
+pub fn port_owner(port: u16) -> Option<u32> {
+    use windows::Win32::NetworkManagement::IpHelper::{GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER};
+    const AF_INET: u32 = 2;
+    unsafe {
+        let mut size = 0u32;
+        let _ = GetExtendedTcpTable(None, &mut size, false, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0);
+        if size == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; size as usize + 256];
+        size = buf.len() as u32;
+        if GetExtendedTcpTable(Some(buf.as_mut_ptr().cast()), &mut size, false, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0) != 0 {
+            return None;
+        }
+        let table = &*(buf.as_ptr() as *const MIB_TCPTABLE_OWNER_PID);
+        let rows = std::slice::from_raw_parts(table.table.as_ptr() as *const MIB_TCPROW_OWNER_PID, table.dwNumEntries as usize);
+        rows.iter().find(|r| u16::from_be((r.dwLocalPort & 0xffff) as u16) == port).map(|r| r.dwOwningPid)
+    }
+}
+
+#[cfg(not(windows))]
+pub fn port_owner(_port: u16) -> Option<u32> {
+    None
+}
+
+/// GoXLR Utility's settings.json (%APPDATA%\GoXLR-on-Linux\GoXLR-Utility\config).
+fn settings_json() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("GoXLR-on-Linux").join("GoXLR-Utility").join("config").join("settings.json"))
+}
+
+/// What settings.json says for one GoXLR, and how many profiles are in the profile folder.
+pub fn settings_check(serial: &str) -> serde_json::Value {
+    let Some(path) = settings_json() else { return serde_json::json!({ "found": false }) };
+    let v: serde_json::Value = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    settings_summary(&v, serial, |dir| count_profiles(dir), path.parent().and_then(Path::parent).map(|p| p.join("data").join("profiles")))
+}
+
+fn count_profiles(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .map(|it| it.flatten().filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("goxlr"))).count())
+        .unwrap_or(0)
+}
+
+/// Pure part of `settings_check` (tested).
+pub fn settings_summary(v: &serde_json::Value, serial: &str, count: impl Fn(&Path) -> usize, default_dir: Option<PathBuf>) -> serde_json::Value {
+    let device = v.get("devices").and_then(|d| d.get(serial));
+    let dir = v.get("profile_directory").and_then(|d| d.as_str()).map(PathBuf::from).or(default_dir);
+    serde_json::json!({
+        "found": device.is_some(),
+        "profile": device.and_then(|d| d.get("profile")).and_then(|p| p.as_str()),
+        "mic_profile": device.and_then(|d| d.get("mic_profile")).and_then(|p| p.as_str()),
+        "profile_files": dir.as_deref().map(count).unwrap_or(0),
+    })
+}
+
+/// Name of a running process.
+pub fn process_name(pid: u32) -> Option<String> {
+    processes().into_iter().find(|(p, _, _)| *p == pid).map(|(_, n, _)| n)
+}
+
+/// Stops other GoXLR Studio processes (only goxlr-studio.exe, never this one). Returns what
+/// could not be stopped (another account or elevated: that needs administrator rights).
+pub fn stop_other_instances(pids: &[u32]) -> Vec<u32> {
+    let me = std::process::id();
+    let mut left = Vec::new();
+    for &pid in pids {
+        if pid == me || !process_name(pid).is_some_and(|n| n.eq_ignore_ascii_case("goxlr-studio.exe")) {
+            continue;
+        }
+        if !kill(pid) {
+            left.push(pid);
+        }
+    }
+    left
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,11 +653,31 @@ mod tests {
 
     #[test]
     fn retries_only_what_can_pass() {
-        assert!(worth_retrying(&friendly_error("The GoXLR Daemon is already running.")));
-        assert!(worth_retrying(&friendly_error("Unable to Start HTTP Server: address in use")));
-        assert!(!worth_retrying(&friendly_error("The GoXLR Driver was not found, please install it and try again.")));
-        assert!(!worth_retrying("GoXLR Utility kører stadig og styrer GoXLR'en"));
-        assert!(!worth_retrying(&friendly_error("The GoXLR engine is not designed to be run as root")));
+        assert!(worth_retrying(&friendly_error("The GoXLR Daemon is already running."), false));
+        assert!(worth_retrying(&friendly_error("Unable to Start HTTP Server: address in use"), false));
+        let driver = friendly_error("The GoXLR Driver was not found, please install it and try again.");
+        assert!(!worth_retrying(&driver, false));
+        assert!(worth_retrying(&driver, true), "at Windows start the driver can be late");
+        assert!(!worth_retrying("GoXLR Utility kører stadig og styrer GoXLR'en", true));
+        assert!(!worth_retrying(&friendly_error("The GoXLR engine is not designed to be run as root"), true));
+    }
+
+    #[test]
+    fn the_elevated_helper_is_not_another_app() {
+        assert!(is_helper_path(r"C:\ProgramData\GoXLR Studio\helper\goxlr-studio.exe"));
+        assert!(!is_helper_path(r"C:\Users\x\AppData\Local\GoXLR Studio\goxlr-studio.exe"));
+        assert!(stop_other_instances(&[std::process::id()]).is_empty(), "never stops itself");
+    }
+
+    #[test]
+    fn reads_the_device_profile_from_settings() {
+        let v = serde_json::json!({ "devices": { "S000000000AAA": { "profile": "Stue", "mic_profile": "Min mic" } } });
+        let r = settings_summary(&v, "S000000000AAA", |_| 7, Some(PathBuf::from("x")));
+        assert_eq!(r["found"], true);
+        assert_eq!(r["profile"], "Stue");
+        assert_eq!(r["mic_profile"], "Min mic");
+        assert_eq!(r["profile_files"], 7);
+        assert_eq!(settings_summary(&v, "S000000000BBB", |_| 0, None)["found"], false);
     }
 
     #[test]

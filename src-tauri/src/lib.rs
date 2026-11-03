@@ -290,6 +290,12 @@ struct DaemonInfo {
     attempts: Vec<daemon_host::Attempt>,
     /// goxlr-daemon.log.
     log_path: Option<String>,
+    /// Other GoXLR Studio processes (as administrator / another account) and who has port 14564.
+    others: Vec<daemon_host::OtherInstance>,
+    own_pid: u32,
+    port_pid: Option<u32>,
+    port_process: Option<String>,
+    self_elevated: bool,
 }
 
 /// Switches from an installed GoXLR Utility to GoXLR Studio's own engine.
@@ -310,9 +316,61 @@ async fn daemon_info() -> Result<DaemonInfo, String> {
             last_error: daemon_host::last_error(),
             attempts: daemon_host::attempts(),
             log_path: daemon_host::log_file().map(|p| p.display().to_string()),
+            others: daemon_host::other_instances(),
+            own_pid: std::process::id(),
+            port_pid: daemon_host::port_owner(14564),
+            port_process: daemon_host::port_owner(14564).and_then(daemon_host::process_name),
+            self_elevated: daemon_host::self_elevated(),
         })
     })
     .await
+}
+
+/// Stops other GoXLR Studio processes (directly when allowed, otherwise in the elevated helper)
+/// and starts this app's own GoXLR engine.
+#[tauri::command]
+async fn stop_other_instances() -> Result<String, String> {
+    blocking(|| {
+        let others: Vec<u32> = daemon_host::other_instances().into_iter().map(|o| o.pid).collect();
+        if others.is_empty() {
+            return daemon_host::start();
+        }
+        let left = daemon_host::stop_other_instances(&others);
+        if !left.is_empty() {
+            #[cfg(windows)]
+            {
+                let r = engine::run_elevated(&engine::Task::StopInstances { pids: left })?;
+                if !r.ok {
+                    return Err(r.error.unwrap_or_else(|| "Kunne ikke stoppe den anden GoXLR Studio".into()));
+                }
+            }
+            #[cfg(not(windows))]
+            return Err("Kunne ikke stoppe den anden GoXLR Studio".into());
+        }
+        log::info!("Andre GoXLR Studio-processer stoppet: {others:?}");
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        daemon_host::start_with_retry(&[2, 4], false)
+    })
+    .await
+}
+
+/// Stops and starts the built-in GoXLR engine (it runs with default settings, see troubleshoot.js).
+#[tauri::command]
+async fn restart_engine() -> Result<String, String> {
+    blocking(|| {
+        log::warn!("GoXLR-motoren genstartes");
+        daemon_host::stop();
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        daemon_host::start_with_retry(&[2, 4, 8], false)
+    })
+    .await
+}
+
+/// What GoXLR Utility's settings.json says for a GoXLR (profile and mic profile) and how many
+/// profile files there are – to see whether the engine runs with the user's settings.
+#[tauri::command]
+async fn engine_settings_check(serial: String) -> Result<Value, String> {
+    blocking(move || Ok(daemon_host::settings_check(&serial))).await
 }
 
 /// The end of the GoXLR engine's own log (goxlr-daemon.log), for Diagnose and the troubleshooter.
@@ -819,6 +877,13 @@ fn prefs_close_to_tray(app: &AppHandle) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Started as administrator or as another account (a scheduled task "with highest privileges",
+    // Windows 11's administrator protection) while the user's own GoXLR Studio runs: the
+    // single-instance check cannot see across accounts, and this copy would take the GoXLR engine
+    // with another account's settings (profile "Default"). The user's own copy wins.
+    if daemon_host::self_elevated() && !daemon_host::other_instances().is_empty() {
+        std::process::exit(0);
+    }
     // Work from the app's own folder. Started by an installer, the app can inherit a temporary
     // folder that is deleted afterwards – then Windows cannot start anything as administrator
     // ("Den angivne sti findes ikke") and other programs the app starts can fail too.
@@ -900,7 +965,22 @@ pub fn run() {
                     } else if retired || !h.state::<AppState>().daemon.connected() {
                         // Tries again a few times: right after an update the old GoXLR Studio
                         // can still be closing and hold the engine's pipe/port.
-                        let res = if daemon_host::bundled() { daemon_host::start_with_retry(&[2, 4, 8, 15, 30]) } else { start_installed_utility() };
+                        // Started with Windows (--minimized), the GoXLR's driver can be a minute or
+                        // two late, so then a missing driver is waited for too.
+                        let autostart = std::env::args().any(|a| a == "--minimized");
+                        let delays: &[u64] = if autostart { &[2, 4, 8, 15, 30, 30, 30, 60, 60] } else { &[2, 4, 8, 15, 30] };
+                        let mut res = if daemon_host::bundled() { daemon_host::start_with_retry(delays, autostart) } else { start_installed_utility() };
+                        // Another GoXLR Studio of this account (not elevated) holds the engine: stop it
+                        // and start ours. One as administrator/another account needs the user's yes
+                        // (the troubleshooter offers it).
+                        if res.is_err() && daemon_host::bundled() {
+                            let mine: Vec<u32> = daemon_host::other_instances().into_iter().filter(|o| o.same_user == Some(true) && o.elevated == Some(false)).map(|o| o.pid).collect();
+                            if !mine.is_empty() && daemon_host::stop_other_instances(&mine).is_empty() {
+                                log::warn!("GoXLR-motor: stoppede en anden GoXLR Studio ({mine:?}) og starter igen");
+                                std::thread::sleep(std::time::Duration::from_millis(1500));
+                                res = daemon_host::start_with_retry(&[2, 4], autostart);
+                            }
+                        }
                         if let Err(e) = res {
                             log::warn!("GoXLR-motor: {e}");
                             let _ = h.emit("engine-start-failed", e);
@@ -977,6 +1057,9 @@ pub fn run() {
             engine_info,
             engine_task,
             daemon_info,
+            stop_other_instances,
+            restart_engine,
+            engine_settings_check,
             engine_log,
             open_engine_log_dir,
             daemon_takeover,
