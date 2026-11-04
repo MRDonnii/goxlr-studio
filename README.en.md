@@ -76,7 +76,7 @@ The mic EQ runs in the GoXLR's own chip, so it uses no CPU and adds no delay. He
 
 **Voice enhancer:** more body, more clarity, less nasal or muddy with one click.
 
-**Clean mic – play on speakers without bothering the others:** an echo canceller removes what the speakers play (the game, music and your teammates' own voices) from your mic, and noise suppression takes out fans, hum, keyboards and clicks. It runs in GoXLR Studio's EQ engine on the GoXLR's Chat Mic, so it works in Discord, games and every other program – without Discord's own noise suppression. GoXLR Studio keeps track of which channels play on the speakers, and how loud.
+**Clean mic – play on speakers without bothering the others:** an echo canceller removes what the speakers play (the game, music and your teammates' own voices) from your mic, and noise suppression takes out fans, hum, keyboards and clicks. With **Voice isolation** (DeepFilterNet 3, the same kind of neural network as Discord's noise suppression) only your voice comes through. It runs in GoXLR Studio's EQ engine on the GoXLR's Chat Mic, so it works in Discord, games and every other program – without Discord's own noise suppression. GoXLR Studio keeps track of which channels play on the speakers, and how loud.
 
 **Automatic noise gate:** the threshold follows the room's noise, so the gate neither cuts quiet speech nor lets game sound through.
 
