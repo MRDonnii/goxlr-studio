@@ -82,6 +82,9 @@ const demoEngine = brokenDemo
   ? { kind: 'builtin', mode: 'sfx-efx', uses_our_config: true, unregistered: true, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) }
   : { kind: 'external', mode: 'lfx-gfx', uses_our_config: false, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) };
 demoEngine.mics = new Set();
+// Demo ?oldvoice: Ren mikrofon from 0.13 (before Stemmeisolering) is installed.
+let demoOldVoice = typeof location !== 'undefined' && /[?&]oldvoice\b/.test(location.search);
+if (demoOldVoice) demoEngine.mics = new Set(['in-goxlr-chat']);
 
 export async function engineInfo() {
   if (isNative()) return invoke('engine_info');
@@ -108,6 +111,7 @@ export async function engineInfo() {
     dynamics_installed: demoEngine.kind === 'builtin',
     voice_bundled: true,
     voice_installed: demoEngine.kind === 'builtin',
+    voice_outdated: demoEngine.kind === 'builtin' && demoEngine.mics.size > 0 && demoOldVoice,
     mics: demoDevices.filter((d) => d.flow === 'capture').map((d) => {
       const installed = demoEngine.kind === 'builtin' && demoEngine.mics.has(d.id);
       return { id: d.id, guid: d.id, name: d.name, installed, mode: installed ? 'sfx-mfx' : null };
@@ -185,6 +189,7 @@ async function engineTaskRaw(task) {
   } else if (task.action === 'set-mics') {
     if (demoEngine.kind !== 'builtin') return { ok: false, error: 'GoXLR Studios EQ-motor er ikke installeret', log, reboot: false, tests: [], sound: [] };
     demoEngine.mics = new Set(task.devices);
+    if (demoOldVoice && task.devices.length) { demoOldVoice = false; log.push('goxlr_studio_voice.dll opdateret'); }
     for (const d of task.devices) log.push(`EQ-motor sat på mikrofonen: ${demoDevices.find((x) => x.id === d)?.name || d} (sfx-mfx)`);
     tests = task.devices.map((id) => ({ guid: id, name: demoDevices.find((x) => x.id === id)?.name || id, mode: 'sfx-mfx', pre_mix: true, post_mix: false, capture: true, ok: true, error: null }));
     for (const t of tests) log.push(`✓ ${t.name}: Ren mikrofon kører (SFX/MFX)`);
@@ -446,6 +451,11 @@ export async function clipsSave(seconds) {
 }
 export async function clipsOpenDir() { if (isNative()) return invoke('clips_open_dir'); }
 
+// Stemmeisolering in the demo: running when chosen (unless the old plugin is installed).
+function demoVoiceIsolate() {
+  try { return JSON.parse(localStorage.getItem('studio.prefs') || '{}').voiceClean?.noise === 'isolate' ? (demoOldVoice ? null : 'running') : null; } catch { return null; }
+}
+
 // Ren mikrofon's echo reference (voiceref.rs). The demo pretends the plugin runs while it is on.
 let demoVoice = { enabled: false, sources: [] };
 export async function voiceConfigure(config) {
@@ -457,7 +467,7 @@ export async function voiceStatus() {
   if (!demoVoice.enabled) return { enabled: false, connected: false, plugin: false, echo: false, noise: false, reference: false, bypassed: false, erle_db: null, delay_ms: null, playing: false, sources: [], error: null };
   const t = Date.now() / 1000;
   return {
-    enabled: true, connected: demoEngine.mics.size > 0, plugin: demoEngine.mics.size > 0, echo: demoVoice.sources.length > 0, noise: true, reference: demoVoice.sources.length > 0, bypassed: false,
+    enabled: true, connected: demoEngine.mics.size > 0, plugin: demoEngine.mics.size > 0, echo: demoVoice.sources.length > 0, noise: true, reference: demoVoice.sources.length > 0, bypassed: false, isolate: demoVoiceIsolate(),
     erle_db: 24 + 4 * Math.sin(t / 3), delay_ms: 38, playing: demoVoice.sources.length > 0,
     sources: demoVoice.sources.map((s) => ({ device: s.device, ok: true, rate: 48000, playing: s.gain > 0, error: null })), error: null,
   };

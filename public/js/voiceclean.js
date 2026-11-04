@@ -6,7 +6,7 @@
 import { h, toast, confirmDialog, logActivity } from './ui.js';
 import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus } from './native.js';
 import { channelEndpoint } from './extras.js';
-import { voiceSettings, NOISE_LEVELS, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText } from './voicemodel.js';
+import { voiceSettings, NOISE_LEVELS, NOISE_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText } from './voicemodel.js';
 
 let devCache = { at: 0, list: [] };
 async function audioDevices(force = false) {
@@ -116,6 +116,20 @@ export function voiceCleanCard(ctx) {
         }
       }
 
+      // A plugin from an older version (without Stemmeisolering): put the new one in.
+      const update = installed && info?.voice_outdated
+        ? h('div', { class: 'row', style: { marginTop: '8px' } }, h('span', { class: 'hint warn-text' }, cfg.noise === 'isolate' ? 'Ren mikrofon skal opdateres for at få Stemmeisolering – indtil da bruges Stærk. Kræver administrator; Windows’ lyd genstarter et øjeblik.' : 'Der er en nyere udgave af Ren mikrofon. Kræver administrator; Windows’ lyd genstarter et øjeblik.'),
+          h('button', { class: 'btn sm primary', 'data-testid': 'voice-update', onclick: async (e) => {
+            e.target.disabled = true;
+            try {
+              const r = await engineTask({ action: 'set-mics', devices: mics.filter((d) => d.installed).map((d) => d.id) });
+              toast(r?.ok ? 'Ren mikrofon er opdateret' : `Det lykkedes ikke: ${r?.error || '?'}`, r?.ok ? 'info' : 'error');
+            } catch (err) { toast(String(err)); }
+            await engineMics(true);
+            ctx.applyOutputEq?.();
+            render();
+          } }, 'Opdatér'))
+        : '';
       const install = builtin && info.voice_bundled && target && !installed
         ? h('div', { class: 'row', style: { marginTop: '8px' } }, h('span', { class: 'hint' }, `EQ-motoren skal sættes på ${target.name} (kræver administrator én gang; Windows’ lyd genstarter et øjeblik).`),
           h('button', { class: 'btn sm primary', 'data-testid': 'voice-install', onclick: async (e) => {
@@ -148,14 +162,12 @@ export function voiceCleanCard(ctx) {
         h('div', { class: 'row' }, h('label', {}, 'Rens mikrofonen'), h('div', { class: 'spacer' }), h('label', { class: 'switch' }, sw, h('span'))),
         h('div', { class: cfg.enabled ? '' : 'disabled-block' },
           h('div', { class: 'row' }, h('label', {}, 'Støjfjerner'), noise),
-          h('div', { class: 'hint' }, cfg.noise === 'strong'
-            ? 'Stærk: fjerner også tastatur, klik og spillyd mellem og under ordene (et lille neuralt netværk). Stemmen kan blive en anelse mere "tør".'
-            : cfg.noise === 'normal' ? 'Normal: fjerner jævn støj som blæser, pc og brum – stemmen røres næsten ikke.' : 'Ingen støjfjerner.'),
+          h('div', { class: 'hint', 'data-testid': 'voice-noise-hint' }, NOISE_HINT[cfg.noise] || NOISE_HINT.normal),
           h('div', { class: 'row' }, h('label', {}, 'Ekkofjerner (spiller du med højttalere)'), h('div', { class: 'spacer' }), h('label', { class: 'switch' }, echo, h('span'))),
           cfg.echo ? h('div', { class: 'row' }, h('label', {}, 'Højttalerne sidder på'), speakers) : '',
           h('div', { class: 'row' }, h('label', {}, 'Fjern rumlen (dybe lyde fra bord og fødder)'), h('div', { class: 'spacer' }), h('label', { class: 'switch' }, hp, h('span')))),
-        ...notes, install,
-        h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Det dine medspillere hører, renses: det, højttalerne spiller (spil, deres egne stemmer, musik), fjernes fra mikrofonen, og støj dæmpes. Det sker i GoXLR Studios EQ-motor på GoXLR’ens Chat Mic, som Discord og spil optager fra – ca. 10 ms forsinkelse. Streamen (Broadcast Mix) får mikrofonen som før.'),
+        update, ...notes, install,
+        h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Det dine medspillere hører, renses: det, højttalerne spiller (spil, deres egne stemmer, musik), fjernes fra mikrofonen, og støj dæmpes. Det sker i GoXLR Studios EQ-motor på GoXLR’ens Chat Mic, som Discord og spil optager fra – ca. 10 ms forsinkelse (40 ms med Stemmeisolering). Streamen (Broadcast Mix) får mikrofonen som før.'),
         h('div', { class: 'hint' }, 'I Discord: slå Støjreduktion (Krisp) og Ekko-annullering fra under Stemme og video, så lyden ikke renses to gange. Noise gaten (gerne Automatisk) kører stadig i GoXLR’en før Ren mikrofon.'),
         h('div', { class: 'hint' }, 'Prøv det: "Optag og lyt" i Mikrofon-assistenten optager fra Chat Mic. Sæt noget til at spille på højttalerne, og tal imens – spillyden skal være væk i optagelsen.'),
         remove ? h('div', { class: 'row', style: { marginTop: '6px' } }, remove) : '');

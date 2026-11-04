@@ -87,8 +87,35 @@ pub fn voice_bundled() -> bool {
     ENGINE_FILES.iter().any(|(n, _)| *n == VOICE_DLL)
 }
 
+/// GoXLR Studio's own plugins: replaced when this build carries a newer one (Equalizer APO's own
+/// files are only replaced by a full install).
+const OWN_PLUGINS: [&str; 2] = [VOICE_DLL, DYNAMICS_DLL];
+
+/// Pure: an installed file differs from the one this build carries.
+pub fn differs(installed: Option<&[u8]>, bundled: &[u8]) -> bool {
+    installed.is_some_and(|i| i != bundled)
+}
+
+fn bundled_file(name: &str) -> Option<&'static [u8]> {
+    ENGINE_FILES.iter().find(|(n, _)| *n == name).map(|(_, b)| *b)
+}
+
+/// One of our plugins is installed but older than the one in this build.
+pub fn plugin_outdated(name: &str) -> bool {
+    let Some(b) = bundled_file(name) else { return false };
+    let path = install_dir().join(name);
+    // The size first: reading the whole file only when it could be the same.
+    match std::fs::metadata(&path) {
+        Ok(m) if m.len() != b.len() as u64 => true,
+        Ok(_) => differs(std::fs::read(&path).ok().as_deref(), b),
+        Err(_) => false,
+    }
+}
+
 /// Files this build carries that an older install doesn't have yet (e.g. the noise-suppression
-/// plugin added in 0.8.0) are added; nothing is overwritten or re-registered.
+/// plugin added in 0.8.0) are added, and GoXLR Studio's own plugins are brought up to date. A
+/// plugin the audio engine has loaded cannot be overwritten, but it can be renamed: the old one
+/// moves aside (deleted next time) and the new one is used when the audio service restarts.
 fn add_missing_files(log: &mut Vec<String>) {
     let dir = install_dir();
     if !dir.join("EqualizerAPO.dll").exists() {
@@ -96,8 +123,15 @@ fn add_missing_files(log: &mut Vec<String>) {
     }
     for (name, bytes) in ENGINE_FILES {
         let target = dir.join(name);
-        if !target.exists() && std::fs::write(&target, bytes).is_ok() {
-            log.push(format!("{name} lagt i {}", dir.display()));
+        let old = dir.join(format!("{name}.old"));
+        let _ = std::fs::remove_file(&old);
+        if !target.exists() {
+            if std::fs::write(&target, bytes).is_ok() {
+                log.push(format!("{name} lagt i {}", dir.display()));
+            }
+        } else if OWN_PLUGINS.contains(name) && plugin_outdated(name) {
+            let ok = std::fs::write(&target, bytes).is_ok() || (std::fs::rename(&target, &old).is_ok() && std::fs::write(&target, bytes).is_ok());
+            log.push(if ok { format!("{name} opdateret") } else { format!("✗ {name} kunne ikke opdateres") });
         }
     }
 }
@@ -459,6 +493,9 @@ pub struct EngineInfo {
     pub voice_bundled: bool,
     #[serde(default)]
     pub voice_installed: bool,
+    /// The installed Ren mikrofon plugin is older than this build's (e.g. without Stemmeisolering).
+    #[serde(default)]
+    pub voice_outdated: bool,
     #[serde(default)]
     pub mics: Vec<EngineDevice>,
 }
@@ -560,6 +597,7 @@ pub fn info() -> EngineInfo {
         dynamics_installed: dynamics_path().exists(),
         voice_bundled: voice_bundled(),
         voice_installed: voice_path().exists(),
+        voice_outdated: plugin_outdated(VOICE_DLL),
         mics: if kind == "builtin" { mic_devices() } else { mic_devices().into_iter().map(|d| EngineDevice { installed: false, ..d }).collect() },
     }
 }
@@ -2173,6 +2211,14 @@ mod tests {
         let wanted = vec!["{0.0.0.00000000}.{aaaa}".to_string(), "{0.0.0.00000000}.{STEAM}".to_string()];
         let present = vec!["{AAAA}".to_string(), "{bbbb}".to_string()];
         assert_eq!(missing_outputs(&wanted, &present), vec![&wanted[1]]);
+    }
+
+    #[test]
+    fn own_plugins_are_updated_only_when_they_differ() {
+        assert!(differs(Some(b"old"), b"new"));
+        assert!(!differs(Some(b"same"), b"same"));
+        assert!(!differs(None, b"new"), "not installed: added, not updated");
+        assert!(OWN_PLUGINS.contains(&VOICE_DLL) && !OWN_PLUGINS.contains(&"EqualizerAPO.dll"));
     }
 
     #[test]

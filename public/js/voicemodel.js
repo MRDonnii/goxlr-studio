@@ -3,10 +3,17 @@
 // canceller needs to know what the speakers play: the GoXLR channels routed to the output the
 // speakers are on, each weighted by its fader – or another output that the speakers are on.
 
-export const NOISE_LEVELS = [['off', 'Fra'], ['normal', 'Normal'], ['strong', 'Stærk']];
-const NOISE_VALUE = { off: 0, normal: 0.5, strong: 1 };
+export const NOISE_LEVELS = [['off', 'Fra'], ['normal', 'Normal'], ['strong', 'Stærk'], ['isolate', 'Stemmeisolering']];
+// Stemmeisolering = the plugin's Isolate parameter; Noise 1 (strong) is what an older plugin uses.
+const NOISE_VALUE = { off: 0, normal: 0.5, strong: 1, isolate: 1 };
+export const NOISE_HINT = {
+  off: 'Ingen støjfjerner.',
+  normal: 'Normal: fjerner jævn støj som blæser, pc og brum – stemmen røres næsten ikke.',
+  strong: 'Stærk: fjerner også tastatur, klik og spillyd mellem og under ordene (RNNoise, et lille neuralt netværk). Stemmen kan blive en anelse mere "tør".',
+  isolate: 'Stemmeisolering: kun din stemme kommer igennem – tastatur, mus, blæser, spillyd, hund og alt andet fjernes, også under ordene, og der er stille mellem ordene. Samme slags neurale netværk som Discords støjreduktion (DeepFilterNet 3). Giver 30 ms ekstra forsinkelse og bruger lidt mere CPU.',
+};
 
-export const DEFAULT_VOICE = { enabled: false, echo: true, noise: 'normal', highPass: true, device: null, deviceName: null, speakers: 'Headphones' };
+export const DEFAULT_VOICE = { enabled: false, echo: true, noise: 'isolate', highPass: true, device: null, deviceName: null, speakers: 'Headphones' };
 
 // The settings object itself (filled with defaults in place, so every part shares it).
 export function voiceSettings(prefs) {
@@ -97,7 +104,7 @@ export function micPayload(cfg, mics = [], { openMicHeld = false } = {}) {
   if (!cfg?.enabled || !cfg.device || openMicHeld) return null;
   const on = mics.find((d) => d.installed && d.id.toLowerCase() === cfg.device.toLowerCase());
   if (!on) return null;
-  return { devices: [on.id], echo: !!cfg.echo, noise: NOISE_VALUE[cfg.noise] ?? 0.5, high_pass: cfg.highPass !== false };
+  return { devices: [on.id], echo: !!cfg.echo, noise: NOISE_VALUE[cfg.noise] ?? 0.5, high_pass: cfg.highPass !== false, isolate: cfg.noise === 'isolate' };
 }
 
 // For the echo reference writer (voiceref.rs). It also reads the plugin's status, so it runs
@@ -117,7 +124,10 @@ export function voiceStatusLine(cfg, st, { installed = false } = {}) {
   if (!st?.plugin) return line('idle', ['Klar – starter, når en app (fx Discord) bruger mikrofonen']);
   if (st.bypassed) return line('warn', ['Mikrofonen sendes urørt videre – Chat Mic skal køre 48 kHz']);
   const parts = [];
-  if (st.noise) parts.push('støjfjerner kører');
+  if (st.isolate === 'running') parts.push('stemmeisolering kører');
+  else if (st.isolate === 'loading') parts.push('stemmeisolering starter …');
+  else if (st.isolate === 'unavailable') parts.push('stemmeisolering findes ikke i denne udgave – bruger Stærk');
+  else if (st.noise) parts.push('støjfjerner kører');
   if (st.echo) {
     if (!st.reference) parts.push('ekkofjerneren får ingen højttalerlyd');
     else if (Number.isFinite(st.erle_db) && st.erle_db > 1) parts.push(`ekko dæmpes ${Math.round(st.erle_db)} dB`);

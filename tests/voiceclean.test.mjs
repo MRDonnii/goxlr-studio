@@ -80,6 +80,7 @@ test('payloads: the mic part only on a microphone with the engine, the reference
   const prefs = {};
   const cfg = voiceSettings(prefs);
   assert.equal(cfg.enabled, false);
+  assert.equal(cfg.noise, 'isolate', 'new users start with Stemmeisolering');
   assert.equal(prefs.voiceClean, cfg);
   cfg.noise = 'off';
   assert.equal(voiceSettings(prefs), cfg, 'the same object every time');
@@ -89,7 +90,9 @@ test('payloads: the mic part only on a microphone with the engine, the reference
   assert.equal(pickChatMic(mics).id, mics[0].id);
   assert.equal(pickChatMic([{ id: 'w', name: 'Mikrofon (Webcam)' }]), null);
   Object.assign(cfg, { enabled: true, device: '{0.0.1.00000000}.{aaa}', noise: 'strong' });
-  assert.deepEqual(micPayload(cfg, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true });
+  assert.deepEqual(micPayload(cfg, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: false });
+  // Stemmeisolering: the Isolate parameter, with strong noise suppression for an older plugin.
+  assert.deepEqual(micPayload({ ...cfg, noise: 'isolate' }, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: true });
   assert.equal(micPayload(cfg, [{ ...mics[0], installed: false }]), null);
   assert.equal(micPayload({ ...cfg, enabled: false }, mics), null);
   // "Fang alt" held: everything comes through untouched.
@@ -110,4 +113,7 @@ test('status line tells what is happening', () => {
   const noRef = voiceStatusLine(cfg, { plugin: true, echo: true, reference: false }, { installed: true });
   assert.equal(noRef.level, 'warn');
   assert.match(voiceStatusLine(cfg, { plugin: true, bypassed: true }, { installed: true }).text, /48 kHz/);
+  assert.match(voiceStatusLine(cfg, { plugin: true, noise: true, isolate: 'running', echo: true, reference: true, erle_db: 20 }, { installed: true }).text, /^stemmeisolering kører · ekko dæmpes 20 dB$/);
+  assert.match(voiceStatusLine(cfg, { plugin: true, noise: true, isolate: 'loading' }, { installed: true }).text, /starter/);
+  assert.match(voiceStatusLine(cfg, { plugin: true, noise: true, isolate: 'unavailable' }, { installed: true }).text, /Stærk/);
 });

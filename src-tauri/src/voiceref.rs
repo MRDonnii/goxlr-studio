@@ -53,6 +53,8 @@ pub struct Status {
     pub reference: bool,
     /// The plugin passes the mic through untouched (a problem, or not 48 kHz).
     pub bypassed: bool,
+    /// Stemmeisolering: "running", "loading", "unavailable" (RNNoise instead) or None (off).
+    pub isolate: Option<String>,
     /// How much echo is removed right now (WebRTC's ERLE).
     pub erle_db: Option<f32>,
     pub delay_ms: Option<i32>,
@@ -71,6 +73,15 @@ pub fn plugin_status(st: &mut Status, report: (u64, u32, f32, i32), now_ms: u64)
     st.noise = on(ring::FLAG_NS_ON);
     st.reference = on(ring::FLAG_REFERENCE);
     st.bypassed = on(ring::FLAG_BYPASSED);
+    st.isolate = if on(ring::FLAG_ISOLATE) {
+        Some("running".into())
+    } else if on(ring::FLAG_ISOLATE_LOADING) {
+        Some("loading".into())
+    } else if on(ring::FLAG_ISOLATE_UNAVAILABLE) {
+        Some("unavailable".into())
+    } else {
+        None
+    };
     st.erle_db = (st.echo && erle.is_finite()).then_some(erle);
     st.delay_ms = (st.echo && delay >= 0).then_some(delay);
 }
@@ -669,6 +680,11 @@ mod tests {
         plugin_status(&mut st, (1000, ring::FLAG_RUNNING | ring::FLAG_AEC_ON | ring::FLAG_REFERENCE | ring::FLAG_NS_ON, 23.5, 41), 1500);
         assert!(st.plugin && st.echo && st.reference && st.noise && !st.bypassed);
         assert_eq!((st.erle_db, st.delay_ms), (Some(23.5), Some(41)));
+        assert_eq!(st.isolate, None);
+        plugin_status(&mut st, (1000, ring::FLAG_RUNNING | ring::FLAG_ISOLATE, 0.0, -1), 1500);
+        assert_eq!(st.isolate.as_deref(), Some("running"));
+        plugin_status(&mut st, (1000, ring::FLAG_RUNNING | ring::FLAG_ISOLATE_UNAVAILABLE, 0.0, -1), 1500);
+        assert_eq!(st.isolate.as_deref(), Some("unavailable"));
         plugin_status(&mut st, (1000, ring::FLAG_AEC_ON, f32::NAN, -1), 1500);
         assert_eq!((st.erle_db, st.delay_ms), (None, None));
         // An old report: the plugin is not running (nothing records from the mic).

@@ -71,6 +71,10 @@ pub struct MicClean {
     pub noise: f64,
     #[serde(default = "yes")]
     pub high_pass: bool,
+    /// Stemmeisolering (DeepFilterNet 3 in the plugin). Written only when on, so a plugin from
+    /// before 0.14 never sees a parameter it does not know.
+    #[serde(default)]
+    pub isolate: bool,
 }
 
 fn yes() -> bool {
@@ -85,7 +89,11 @@ pub fn voice_line(dll: &str, m: &MicClean) -> String {
     line.push_str(" \"");
     line.push_str(dll);
     line.push('"');
-    line.push_str(&format!(" Echo {:.4} Noise {:.4} HighPass {:.4}\n", flag(m.echo), noise, flag(m.high_pass)));
+    line.push_str(&format!(" Echo {:.4} Noise {:.4} HighPass {:.4}", flag(m.echo), noise, flag(m.high_pass)));
+    if m.isolate {
+        line.push_str(" Isolate 1.0000");
+    }
+    line.push('\n');
     line
 }
 
@@ -104,7 +112,7 @@ pub fn with_mic(playback: &str, mic: Option<&MicClean>, dll: &str, name_of: &dyn
     out.push('\n');
     if let Some(m) = mic {
         let sel: Vec<String> = m.devices.iter().filter_map(|id| selector(id, name_of)).collect();
-        if !sel.is_empty() && (m.echo || m.noise > 0.0 || m.high_pass) {
+        if !sel.is_empty() && (m.echo || m.noise > 0.0 || m.high_pass || m.isolate) {
             out.push_str(&format!("Device: {}\n", sel.join("; ")));
             out.push_str(&voice_line(dll, m));
         }
@@ -344,6 +352,14 @@ pub fn apply(eq: &OutputEq) -> Result<(), String> {
     if !crate::engine::voice_path().exists() {
         eq.mic = None;
     }
+    // An older plugin (from before Stemmeisolering) gets the strong noise suppression instead,
+    // until "Opdatér" has put the new one in.
+    if let Some(m) = eq.mic.as_mut() {
+        if m.isolate && crate::engine::plugin_outdated(crate::engine::VOICE_DLL) {
+            m.isolate = false;
+            m.noise = 1.0;
+        }
+    }
     let eq = &eq;
     let mut text = render_with(eq, name.as_deref(), &|id| crate::audio::name_of(id));
     // Ren mikrofon: split by stage when the engine is on a microphone (or the mic part is wanted).
@@ -549,7 +565,7 @@ mod tests {
     use super::*;
 
     fn mic(devices: &[&str]) -> MicClean {
-        MicClean { devices: devices.iter().map(|d| d.to_string()).collect(), echo: true, noise: 0.5, high_pass: true }
+        MicClean { devices: devices.iter().map(|d| d.to_string()).collect(), echo: true, noise: 0.5, high_pass: true, isolate: false }
     }
 
     #[test]
@@ -558,6 +574,10 @@ mod tests {
         assert_eq!(l, "VSTPlugin: Library \"C:\\E\\goxlr_studio_voice.dll\" Echo 0.0000 Noise 1.0000 HighPass 1.0000\n");
         let l = voice_line("x.dll", &MicClean { noise: f64::NAN, ..mic(&[]) });
         assert!(l.trim_end().ends_with("Noise 0.5000 HighPass 1.0000"), "{l}");
+        // Stemmeisolering: the extra parameter, only when on.
+        let l = voice_line("x.dll", &MicClean { isolate: true, ..mic(&[]) });
+        assert!(l.trim_end().ends_with("HighPass 1.0000 Isolate 1.0000"), "{l}");
+        assert!(!voice_line("x.dll", &mic(&[])).contains("Isolate"));
     }
 
     #[test]
