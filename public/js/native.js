@@ -323,6 +323,17 @@ export async function engineLog(lines = 200) {
       : [`${t} [INFO] Starting GoXLR Daemon v1.2.4 (inside GoXLR Studio)`, `${t} [INFO] Performing Platform Preflight...`, `${t} [INFO] Bound IPC Socket @ "@goxlr.socket"`, `${t} [INFO] Started GoXLR configuration interface at http://localhost:14564/`] };
 }
 
+// "Start med Windows" as Windows sees it: { registered, points_here, quoted, approved, enabled, started_minimized }.
+export async function autostartStatus() {
+  if (isNative()) return invoke('autostart_status');
+  return { registered: false, enabled: false, approved: true, started_minimized: false };
+}
+
+export async function setAutostart(enabled) {
+  if (isNative()) return invoke('set_autostart', { enabled });
+  throw new Error('Kun i Windows-appen');
+}
+
 // Another GoXLR Studio (administrator / another account) holding the engine: stop it, start ours.
 export async function stopOtherInstances() {
   if (isNative()) return invoke('stop_other_instances');

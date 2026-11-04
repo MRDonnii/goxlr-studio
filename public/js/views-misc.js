@@ -1,7 +1,7 @@
 import { h, slider, selectBox, toggle, toast, segmented, confirmDialog, promptDialog, logActivity, infoDialog } from './ui.js';
 import { CHANNELS } from './demo.js';
 import { CHANNEL_LABEL, shortName } from './views-mixer.js';
-import { listAudioDevices, setDefaultDevice, storeSet, isNative, historySnapshot, historyList, historyRestore } from './native.js';
+import { listAudioDevices, setDefaultDevice, storeSet, isNative, historySnapshot, historyList, historyRestore, setAutostart } from './native.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { resolveDevice } from './extras.js';
 import { systemSettings } from './views-system.js';
@@ -538,10 +538,24 @@ export function settingsView(ctx) {
   // Sprog / language – in both languages, so it can be found whichever is shown.
   const langSel = h('select', { 'data-testid': 'language', 'data-no-i18n': '', onchange: () => ctx.setLanguage?.(langSel.value) },
     [['auto', 'Automatisk (som Windows) / Automatic'], ['da', 'Dansk'], ['en', 'English']].map(([v, label]) => h('option', { value: v, selected: (ctx.prefs.lang || 'auto') === v }, label)));
+  // Windows can switch the app off under its own Startup apps – then the toggle is off and says why.
+  const autostartHint = () => (ctx.autostart?.registered && !ctx.autostart.approved
+    ? [h('div', { class: 'hint warn-text', 'data-testid': 'autostart-disabled' }, 'Windows har slået GoXLR Studio fra under Indstillinger → Apps → Start. Slå “Start med Windows” til her igen for at tænde den.')]
+    : []);
+  const autostartNote = h('div', {}, ...autostartHint());
+  if (isNative()) ctx.checkAutostart?.().then(() => autostartNote.replaceChildren(...autostartHint()));
   const app = h('div', { class: 'card' }, h('h2', {}, 'App'),
     h('div', { class: 'row' }, h('label', { 'data-no-i18n': '' }, 'Sprog / Language'), langSel),
     toggle(binder, { label: 'Auto-ducking', get: () => ctx.ducker.settings.enabled, set: (v) => { ctx.ducker.settings.enabled = v; ctx.ducker.save(); } }),
-    isNative() ? toggle(binder, { label: 'Start med Windows', get: () => ctx.prefs.autostart, set: (v) => { ctx.prefs.autostart = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_autostart', { enabled: v }).catch((e) => toast(String(e))); } }) : null,
+    isNative() ? toggle(binder, { label: 'Start med Windows', get: () => ctx.autostart?.enabled ?? ctx.prefs.autostart, set: async (v) => {
+      try {
+        ctx.autostart = await setAutostart(v);
+        ctx.prefs.autostart = ctx.autostart.registered; ctx.savePrefs();
+        if (v && !ctx.autostart.enabled) toast('Windows starter stadig ikke GoXLR Studio – se Indstillinger → Apps → Start i Windows');
+      } catch (e) { toast(String(e)); }
+      autostartNote.replaceChildren(...autostartHint());
+    } }) : null,
+    autostartNote,
     toggle(binder, { label: 'Niveaumåler i bakke-ikonet (mikrofon)', get: () => !!ctx.prefs.trayMeter, set: (v) => { ctx.prefs.trayMeter = v; ctx.savePrefs(); } }),
     isNative() ? toggle(binder, { label: 'Luk til bakke-ikon', get: () => ctx.prefs.closeToTray, set: (v) => { ctx.prefs.closeToTray = v; ctx.savePrefs(); window.__TAURI__.core.invoke('set_close_to_tray', { enabled: v }).catch(() => {}); } }) : null,
     h('div', { class: 'hint' }, 'Auto-ducking skruer ned for Music og Game, mens du taler. GoXLR Studio styrer GoXLR’en med sin egen indbyggede motor – GoXLR Utility og TC-Helicons app skal ikke køre.'));

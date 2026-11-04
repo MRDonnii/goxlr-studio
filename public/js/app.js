@@ -4,7 +4,7 @@ import { mixerView, routingView, devicesView } from './views-mixer.js';
 import { micView } from './views-mic.js';
 import { outputEqView, loadOutputEqState } from './views-outeq.js';
 import { effectsView, scenesView, lightingView, profilesView, settingsView, applyScene, snapshotProfiles } from './views-misc.js';
-import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, daemonInfo, daemonTakeover, engineLog, openEngineLogDir, stopOtherInstances, restartEngine, engineSettingsCheck, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
+import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, showOsd, setApi, apiPublish, setTrayStatus, appInfo, installUpdate, latestRelease, updateResult, takeLaunchAction, driverInfo, startDaemon, daemonInfo, daemonTakeover, engineLog, openEngineLogDir, stopOtherInstances, restartEngine, engineSettingsCheck, autostartStatus, engineStatus, engineInfo, engineTask, listAudioDevices, openUrl, audioLevels } from './native.js';
 import { diagView } from './views-diag.js';
 import { troubleshoot, bannerFinding } from './troubleshoot.js';
 import { restoreOpenMic } from './openmic.js';
@@ -532,6 +532,23 @@ function daemonWatchdog() {
   }
 }
 
+// "Start med Windows": the toggle shows what Windows really does (the Run entry is repaired at
+// start by Rust when the setting is on). Started that way, a one-time note says where the app is –
+// in the tray, which Windows 11 hides behind ^ for a new app.
+async function checkAutostart() {
+  if (!isNative()) return;
+  const s = await autostartStatus().catch(() => null);
+  if (!s) return;
+  ctx.autostart = s;
+  if (ctx.prefs.autostart !== s.registered) { ctx.prefs.autostart = s.registered; ctx.savePrefs(); }
+  if (s.registered && !s.approved) logActivity('Start med Windows er slået fra under Windows’ Start-apps');
+  if (s.started_minimized && !ctx.prefs.trayNoticeShown) {
+    ctx.prefs.trayNoticeShown = true; ctx.savePrefs();
+    setTimeout(() => ctx.notify('GoXLR Studio er startet – du finder den i bakken ved uret', 'info'), 4000);
+  }
+}
+ctx.checkAutostart = checkAutostart;
+
 // ---------- fejlfinder (troubleshoot.js) ----------
 const troublesSeen = new Set();
 let selfChecking = false;
@@ -971,6 +988,7 @@ async function boot() {
   await loadPedals(ctx);
   buildNav();
   await registerNativeHooks();
+  checkAutostart();
   startPedals(ctx);
   registerHotkeys();
   syncTray();
