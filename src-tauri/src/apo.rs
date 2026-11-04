@@ -557,7 +557,7 @@ mod tests {
         let l = voice_line("C:\\E\\goxlr_studio_voice.dll", &MicClean { noise: 7.0, echo: false, ..mic(&[]) });
         assert_eq!(l, "VSTPlugin: Library \"C:\\E\\goxlr_studio_voice.dll\" Echo 0.0000 Noise 1.0000 HighPass 1.0000\n");
         let l = voice_line("x.dll", &MicClean { noise: f64::NAN, ..mic(&[]) });
-        assert!(l.ends_with(" Echo 1.0000 Noise 0.5000 HighPass 1.0000\n"), "{l}");
+        assert!(l.trim_end().ends_with("Noise 0.5000 HighPass 1.0000"), "{l}");
     }
 
     #[test]

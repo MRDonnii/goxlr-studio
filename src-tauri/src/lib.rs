@@ -29,6 +29,7 @@ mod spectrum;
 mod store;
 mod streamdock;
 mod update;
+mod voiceref;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -604,6 +605,17 @@ async fn soundcheck_set_endpoint(id: String, volume: Option<f32>, mute: Option<b
     blocking(move || soundcheck::set_endpoint(&id, volume, mute)).await
 }
 
+/// Ren mikrofon: the echo reference (what the speakers play) for the plugin on the microphone.
+#[tauri::command]
+fn voice_configure(config: voiceref::Config) {
+    voiceref::configure(config);
+}
+
+#[tauri::command]
+fn voice_status() -> voiceref::Status {
+    voiceref::status()
+}
+
 /// Live spectrum of an output (None = Windows' default output) for the EQ graph.
 #[tauri::command]
 async fn spectrum_read(device: Option<String>) -> spectrum::Spectrum {
@@ -1111,6 +1123,8 @@ pub fn run() {
             send_keys,
             audio_levels,
             spectrum_read,
+            voice_configure,
+            voice_status,
             obs_request,
             lan_ip,
             history_snapshot,
