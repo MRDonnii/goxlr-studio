@@ -8,6 +8,7 @@ import { storeGet, storeSet, isNative, setOutputEqEngine, setHotkeys, setTray, s
 import { diagView } from './views-diag.js';
 import { troubleshoot, bannerFinding } from './troubleshoot.js';
 import { restoreOpenMic } from './openmic.js';
+import { autoGateTick } from './autogate.js';
 import { soundcheckView } from './views-soundcheck.js';
 import { deckView } from './views-deck.js';
 import { pedalsView } from './views-pedals.js';
@@ -734,6 +735,7 @@ function mount() {
   ctx.cleanup.splice(0).forEach((fn) => fn());
   ctx.binder = new Binder();
   ctx.onMicLevel = null;
+  ctx.onGateMeter = null;
   ctx.onLevels = null;
   ctx.refreshDevices = null;
   const view = document.getElementById('view');
@@ -853,6 +855,8 @@ async function meterLoop() {
     db = talking ? -22 - Math.random() * 12 : -62 - Math.random() * 6;
   }
   ctx.onMicLevel?.(db);
+  autoGateTick(ctx, db);
+  ctx.onGateMeter?.(db);
   if (ctx.prefs.trayMeter && performance.now() - trayMeterAt > 200) { trayMeterAt = performance.now(); trayMicLevel = db; syncTrayStatus(); }
   // Windows' peak meters: for the VU meters, chat-ducking and høreværn.
   const wantLevels = ctx.onLevels || ctx.ducker.settings.chat?.enabled || ctx.wantLevels || ctx.levelMeasuring;

@@ -7,6 +7,7 @@ import { playSound, stopSounds, soundNames } from './soundboard.js';
 import { obsScene, streamSafeMusic } from './obs.js';
 import { toast, logActivity } from './ui.js';
 import { openMicDown, openMicUp, OPEN_MIC_ACTION } from './openmic.js';
+import { setAutoGate } from './autogate.js';
 
 // Toast in the app, plus the on-screen display when the app is in the background.
 const notify = (ctx, text, kind = 'info') => (ctx.notify ? ctx.notify(text, kind) : toast(text, 'info'));
@@ -137,6 +138,7 @@ export async function runAction(ctx, id, source = 'handling') {
       ctx.savePrefs?.();
       return notify(ctx, hp.cap ? `Høreværn: hovedtelefoner højst ${hp.max} %` : 'Høreværn: intet loft', 'info');
     }
+    case 'auto-gate': return setAutoGate(ctx, arg === 'on' ? true : arg === 'off' ? false : !ctx.prefs.autoGate?.enabled);
     case 'mic-limiter': return setLimiter(ctx, arg === 'on' ? true : arg === 'off' ? false : !limiterSettings(ctx).enabled);
     case 'sampler-pad': { const [bank, pad] = arg.split('|'); if (m?.sampler) ctx.conn.command('PlayNextSample', bank, pad); return; }
     case 'sampler-bank': if (m?.sampler) { ctx.conn.command('SetActiveSamplerBank', arg); notify(ctx, `Sampler: bank ${arg}`); } return;
@@ -214,6 +216,7 @@ export async function actionCatalog(ctx) {
   g('Mute', [
     { id: 'mute-mic', label: 'Mute/unmute mikrofon (cough)' },
     { id: 'mic-limiter', label: 'Mikrofon-limiter til/fra' },
+    { id: 'auto-gate', label: 'Automatisk noise gate til/fra' },
     { id: 'cough:MutedToX', label: 'Mute mikrofon' },
     { id: 'cough:Unmuted', label: 'Unmute mikrofon' },
     ...['A', 'B', 'C', 'D'].map((f) => ({ id: `mute-fader:${f}`, label: `Mute fader ${f}${m ? ` (${m.fader_status[f].scribble?.bottom_text || CHANNEL_LABEL[m.fader_status[f].channel]})` : ''}` })),
@@ -282,6 +285,7 @@ export function actionLabel(ctx, id) {
     case 'vol-down': return `${CHANNEL_LABEL[arg] || arg} ned`;
     case 'cough': return arg === 'Unmuted' ? 'Unmute mikrofon' : 'Mute mikrofon';
     case 'mute-mic': return 'Mute/unmute mikrofon';
+    case 'auto-gate': return arg === 'on' ? 'Automatisk noise gate til' : arg === 'off' ? 'Automatisk noise gate fra' : 'Automatisk noise gate til/fra';
     case 'mic-limiter': return arg === 'on' ? 'Mikrofon-limiter til' : arg === 'off' ? 'Mikrofon-limiter fra' : 'Mikrofon-limiter til/fra';
     case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
     case 'hold': return arg === 'open-mic' ? 'Fang alt (noise gate fra mens du holder)' : arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';

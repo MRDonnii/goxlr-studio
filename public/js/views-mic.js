@@ -4,6 +4,7 @@ import { GATE_TIMES, RATIOS, ATTACKS, RELEASES, enumIndex } from './micenums.js'
 import { limiterBox } from './miclimiter.js';
 import { voiceEnhanceCard } from './voiceenhance.js';
 import { openMicCard } from './openmic.js';
+import { autoGateSettings, setAutoGate, manualGateChange } from './autogate.js';
 import { analyzeMicTest, micSnapshot, snapshotCommands, SPEECH_TARGET, micShareFile, readMicShare } from './micassist.js';
 import { EQ_BANDS, MINI_EQ_BANDS } from './demo.js';
 import { EqGraph, BAND_COLORS } from './eqgraph.js';
@@ -325,8 +326,39 @@ export function micView(ctx) {
     slider(binder, { label: 'De-esser', min: 0, max: 100, get: () => m().levels.deess, set: (v) => conn.command('SetDeeser', v), fmt: (v) => `${v} %` }),
   );
 
-  const gate = h('div', { class: 'card' }, h('h2', {}, 'Noise gate', toggle(binder, { get: () => mic().noise_gate.enabled, set: (v) => conn.command('SetGateActive', v) })),
-    slider(binder, { label: 'Tærskel', min: -59, max: 0, get: () => mic().noise_gate.threshold, set: (v) => conn.command('SetGateThreshold', v), fmt: (v) => `${v} dB` }),
+  // Automatisk: the threshold follows the room's noise (autogate.js).
+  const ag = autoGateSettings(ctx);
+  const sens = h('select', { 'data-testid': 'auto-gate-sensitivity', onchange: () => { ag.sensitivity = sens.value; ctx.savePrefs(); } },
+    h('option', { value: 'high' }, 'Følsom – tager også stille tale med'),
+    h('option', { value: 'normal' }, 'Normal'),
+    h('option', { value: 'low' }, 'Kun tydelig tale – mere støj skæres væk'));
+  sens.value = ag.sensitivity || 'normal';
+  const meterFill = h('div', { class: 'gate-meter-fill' });
+  const meterMark = h('div', { class: 'gate-meter-mark' });
+  const meterText = h('div', { class: 'hint', 'data-testid': 'auto-gate-status' });
+  const pct = (db) => `${Math.max(0, Math.min(100, ((db + 72) / 72) * 100))}%`;
+  const autoBox = h('div', { class: 'auto-gate', 'data-testid': 'auto-gate' },
+    toggle(binder, { label: 'Automatisk', get: () => !!ag.enabled, set: (v) => { setAutoGate(ctx, v); binder.run(); } }),
+    h('div', { class: 'row' }, h('label', {}, 'Følsomhed'), sens),
+    h('div', { class: 'gate-meter' }, meterFill, meterMark), meterText,
+    h('div', { class: 'hint' }, 'GoXLR Studio lytter hele tiden til rummets støj – blæser, pc, spillyd fra højttalere – og holder tærsklen lige over den og under din stemme. Den følger med, når støjen ændrer sig. Flytter du tærsklen selv, slås det automatiske fra.'));
+  ctx.onGateMeter = (db) => {
+    if (!document.body.contains(autoBox)) return;
+    meterFill.style.width = Number.isFinite(db) ? pct(db) : '0%';
+    const t = mic()?.noise_gate?.threshold;
+    meterMark.style.left = Number.isFinite(t) ? pct(t) : '0%';
+    const open = Number.isFinite(db) && Number.isFinite(t) && db > t;
+    meterFill.classList.toggle('open', open);
+    const a = ctx.autoGate;
+    meterText.textContent = ag.enabled
+      ? (a?.threshold == null ? 'Lytter til rummet …'
+        : a.speech != null ? `Rummets støj ${Math.round(a.noise)} dB · tærskel ${a.threshold} dB · din stemme ${Math.round(a.speech)} dB`
+          : `Rummets støj ${Math.round(a.noise)} dB · tærskel ${a.threshold} dB`)
+      : (open ? 'Gaten er åben' : 'Gaten er lukket');
+  };
+  const gate = h('div', { class: 'card' }, h('h2', {}, 'Noise gate', toggle(binder, { get: () => mic().noise_gate.enabled, set: (v) => { if (!v) manualGateChange(ctx); conn.command('SetGateActive', v); } })),
+    autoBox,
+    slider(binder, { label: 'Tærskel', min: -59, max: 0, get: () => mic().noise_gate.threshold, set: (v) => { manualGateChange(ctx); conn.command('SetGateThreshold', v); }, fmt: (v) => `${v} dB` }),
     slider(binder, { label: 'Dæmpning', min: 0, max: 100, get: () => mic().noise_gate.attenuation, set: (v) => conn.command('SetGateAttenuation', v), fmt: (v) => `${v} %` }),
     enumSlider(binder, { label: 'Attack', list: GATE_TIMES, get: () => mic().noise_gate.attack, set: (v) => conn.command('SetGateAttack', v), fmt: ms }),
     enumSlider(binder, { label: 'Release', list: GATE_TIMES, get: () => mic().noise_gate.release, set: (v) => conn.command('SetGateRelease', v), fmt: ms }),
