@@ -45,6 +45,8 @@ export function openMicDown(ctx) {
   s.saved = saved; // in prefs, so the mic is put back even if the app closed while held
   ctx.savePrefs?.();
   for (const c of press) ctx.conn.command(...c);
+  // Ren mikrofon steps aside too (voiceclean.js), so nothing is removed while held.
+  if (ctx.prefs.voiceClean?.enabled) ctx.applyOutputEq?.();
   ctx.notify?.('Fang alt: mikrofonen tager alt med', 'ok');
 }
 
@@ -56,6 +58,7 @@ export function openMicUp(ctx) {
   delete s.saved;
   ctx.savePrefs?.();
   if (ctx.conn.mixer) for (const c of cmds) ctx.conn.command(...c);
+  if (ctx.prefs.voiceClean?.enabled) ctx.applyOutputEq?.();
 }
 
 /** At start: the app closed while "Fang alt" was held – put the mic back. */
@@ -102,7 +105,7 @@ export function openMicCard(ctx) {
   };
   render();
   return h('div', { class: 'card', 'data-testid': 'open-mic-card' }, h('h2', {}, 'Fang alt (hold)'),
-    h('div', { class: 'hint' }, 'Mens du holder tasten, slås noise gaten fra, så mikrofonen også tager stille lyde med, der ikke er tale – grin, prut og andet sjov. Slip tasten, og mikrofonen er som før.'),
+    h('div', { class: 'hint' }, 'Mens du holder tasten, slås noise gaten og Ren mikrofon (støj- og ekkofjerner) fra, så mikrofonen også tager stille lyde med, der ikke er tale – grin, prut og andet sjov. Slip tasten, og mikrofonen er som før.'),
     h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Tast'), keyBtn, remove),
     h('div', { class: 'row', style: { flexWrap: 'wrap' } }, h('label', {}, 'Ekstra'), boost),
     h('div', { class: 'hint' }, 'Kan også lægges på en fodpedal (Fodpedal → Hold → Fang alt). GoXLR’ens Bleep-knap kan ikke bruges: GoXLR’en muter selv mikrofonen og bipper, mens den holdes.'),

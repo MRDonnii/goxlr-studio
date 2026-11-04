@@ -23,7 +23,7 @@ async function engineMics(force = false) {
 export async function voiceMicPayload(ctx) {
   const cfg = voiceSettings(ctx.prefs);
   if (!cfg.enabled) return null;
-  return micPayload(cfg, await engineMics());
+  return micPayload(cfg, await engineMics(), { openMicHeld: !!ctx.prefs.openMic?.saved });
 }
 
 /** Keeps the echo reference in step with the GoXLR's faders, mutes and routing (every 0,5 s). */

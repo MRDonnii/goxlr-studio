@@ -92,6 +92,8 @@ test('payloads: the mic part only on a microphone with the engine, the reference
   assert.deepEqual(micPayload(cfg, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true });
   assert.equal(micPayload(cfg, [{ ...mics[0], installed: false }]), null);
   assert.equal(micPayload({ ...cfg, enabled: false }, mics), null);
+  // "Fang alt" held: everything comes through untouched.
+  assert.equal(micPayload(cfg, mics, { openMicHeld: true }), null);
   const ref = referencePayload(cfg, mixer(), endpointOf);
   assert.equal(ref.enabled, true);
   assert.deepEqual(Object.keys(ref.sources[0]), ['device', 'gain']);

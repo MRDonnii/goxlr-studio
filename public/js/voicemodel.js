@@ -91,9 +91,10 @@ export function pickChatMic(mics = []) {
   return goxlr.find((d) => /chat\s*mic/i.test(d.name)) || null;
 }
 
-// For config.txt (apo.rs MicClean): on the microphone(s) the engine is on.
-export function micPayload(cfg, mics = []) {
-  if (!cfg?.enabled || !cfg.device) return null;
+// For config.txt (apo.rs MicClean): on the microphone(s) the engine is on. While "Fang alt" is held
+// (`openMicHeld`) the mic passes untouched, so everything comes through.
+export function micPayload(cfg, mics = [], { openMicHeld = false } = {}) {
+  if (!cfg?.enabled || !cfg.device || openMicHeld) return null;
   const on = mics.find((d) => d.installed && d.id.toLowerCase() === cfg.device.toLowerCase());
   if (!on) return null;
   return { devices: [on.id], echo: !!cfg.echo, noise: NOISE_VALUE[cfg.noise] ?? 0.5, high_pass: cfg.highPass !== false };

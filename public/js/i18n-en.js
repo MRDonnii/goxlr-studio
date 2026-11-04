@@ -1134,7 +1134,7 @@ export const EN = {
  "Megafon": "Megaphone",
  "Meget smalt løft (Q {0}) kan \"ringe\". Smalle bånd bruges mest til at skære én bestemt tone væk.": "A very narrow boost (Q {0}) can \"ring\". Narrow bands are mostly used to cut away one specific tone.",
  "Mellem": "Medium",
- "Mens du holder tasten, slås noise gaten fra, så mikrofonen også tager stille lyde med, der ikke er tale – grin, prut og andet sjov. Slip tasten, og mikrofonen er som før.": "While you hold the key, the noise gate is off, so the mic also picks up quiet sounds that are not speech – laughs, farts and other fun. Let go, and the mic is as before.",
+ "Mens du holder tasten, slås noise gaten og Ren mikrofon (støj- og ekkofjerner) fra, så mikrofonen også tager stille lyde med, der ikke er tale – grin, prut og andet sjov. Slip tasten, og mikrofonen er som før.": "While you hold the key, the noise gate and Clean mic (noise and echo removal) are switched off, so the mic also picks up quiet sounds that aren't speech – laughs, farts and other fun. Let go, and the mic is as before.",
  "Mere bas til musik og spil. Preamp er sænket, så intet klipper.": "More bass for music and games. The preamp is lowered so nothing clips.",
  "Mere fylde": "More body",
  "Mere klarhed": "More clarity",

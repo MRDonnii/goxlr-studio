@@ -38,6 +38,18 @@ test('held key repeats once; release puts the mic back; a leftover is restored a
   assert.deepEqual(sent.slice(4), [['SetGateActive', true]]);
 });
 
+test('Ren mikrofon steps aside while held, and comes back on release', () => {
+  const applied = [];
+  const ctx = { prefs: { openMic: { boost: 0 }, voiceClean: { enabled: true } }, savePrefs() {}, notify() {}, conn: { mixer: { mic_status: mic(true, 40) }, command() {} } };
+  ctx.applyOutputEq = () => applied.push(!!ctx.prefs.openMic.saved);
+  openMicDown(ctx);
+  openMicUp(ctx);
+  assert.deepEqual(applied, [true, false], 'config written with the mic untouched, then cleaned again');
+  ctx.prefs.voiceClean.enabled = false;
+  openMicDown(ctx); openMicUp(ctx);
+  assert.equal(applied.length, 2, 'nothing to do without Ren mikrofon');
+});
+
 test('foot pedals can hold "Fang alt"', () => {
   assert.ok(HOLD_ACTIONS.some(([id]) => id === 'hold:open-mic'));
 });
