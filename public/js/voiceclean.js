@@ -4,9 +4,9 @@
 // GoXLR Studio sends it what the speakers play (voiceref.rs), so the echo canceller knows what to
 // remove. The pure parts are in voicemodel.js.
 import { h, toast, confirmDialog, logActivity } from './ui.js';
-import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus } from './native.js';
+import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus, voiceCheck } from './native.js';
 import { channelEndpoint } from './extras.js';
-import { voiceSettings, NOISE_LEVELS, NOISE_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText } from './voicemodel.js';
+import { voiceSettings, NOISE_LEVELS, NOISE_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText, voiceDiagnosis, diagnosisText } from './voicemodel.js';
 
 let devCache = { at: 0, list: [] };
 async function audioDevices(force = false) {
@@ -60,9 +60,13 @@ export function voiceCleanCard(ctx) {
   const statusText = h('span', { 'data-testid': 'voice-status' });
   const detail = h('div', { class: 'hint', 'data-testid': 'voice-detail' });
   const body = h('div');
+  // Tjek: step by step what works and what does not, with a fix where there is one.
+  const checkList = h('div', { class: 'voice-check', 'data-testid': 'voice-check' });
+  const discordHint = h('div', { class: 'hint', 'data-testid': 'voice-discord-hint' });
+  const seen = { info: null, target: null, devs: [], check: null, checkedAt: 0, diag: null };
   const card = h('div', { class: 'card', 'data-testid': 'voice-clean' },
     h('h2', {}, 'Ren mikrofon'),
-    h('div', { class: 'voice-status row' }, statusDot, statusText), detail, body);
+    h('div', { class: 'voice-status row' }, statusDot, statusText), detail, checkList, body);
   let installed = false;
   let rendering = false;
 
@@ -79,6 +83,7 @@ export function voiceCleanCard(ctx) {
       if (chat && (!cfg.device || !mics.some((d) => d.id.toLowerCase() === cfg.device.toLowerCase()))) { cfg.device = chat.id; cfg.deviceName = chat.name; ctx.savePrefs(); }
       const target = mics.find((d) => cfg.device && d.id.toLowerCase() === cfg.device.toLowerCase()) || null;
       installed = !!target?.installed;
+      Object.assign(seen, { info, target, devs });
       const fmt = target ? await deviceFormat(target.id).catch(() => null) : null;
       const builtin = info?.kind === 'builtin';
 
@@ -168,7 +173,7 @@ export function voiceCleanCard(ctx) {
           h('div', { class: 'row' }, h('label', {}, 'Fjern rumlen (dybe lyde fra bord og fødder)'), h('div', { class: 'spacer' }), h('label', { class: 'switch' }, hp, h('span')))),
         update, ...notes, install,
         h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Det dine medspillere hører, renses: det, højttalerne spiller (spil, deres egne stemmer, musik), fjernes fra mikrofonen, og støj dæmpes. Det sker i GoXLR Studios EQ-motor på GoXLR’ens Chat Mic, som Discord og spil optager fra – ca. 10 ms forsinkelse (40 ms med Stemmeisolering). Streamen (Broadcast Mix) får mikrofonen som før.'),
-        h('div', { class: 'hint' }, 'I Discord: slå Støjreduktion (Krisp) og Ekko-annullering fra under Stemme og video, så lyden ikke renses to gange. Noise gaten (gerne Automatisk) kører stadig i GoXLR’en før Ren mikrofon.'),
+        discordHint,
         h('div', { class: 'hint' }, 'Prøv det: "Optag og lyt" i Mikrofon-assistenten optager fra Chat Mic. Sæt noget til at spille på højttalerne, og tal imens – spillyden skal være væk i optagelsen.'),
         remove ? h('div', { class: 'row', style: { marginTop: '6px' } }, remove) : '');
     } finally { rendering = false; }
@@ -193,6 +198,60 @@ export function voiceCleanCard(ctx) {
     if (cfg.enabled && cfg.echo && bad) bits.push(`Kan ikke lytte til en udgang: ${bad.error}`);
     const dkey = JSON.stringify(bits);
     if (detail.dataset.key !== dkey) { detail.dataset.key = dkey; detail.replaceChildren(...joined(bits)); }
+    // Who records from which mic: every 3 s.
+    if (Date.now() - seen.checkedAt > 3000) {
+      seen.checkedAt = Date.now();
+      seen.check = await voiceCheck().catch(() => null);
+    }
+    const nameOf = (id) => seen.devs.find((d) => d.id === id)?.name || id;
+    const diag = voiceDiagnosis({ cfg, mic: seen.target, outdated: !!seen.info?.voice_outdated, check: seen.check, status: st, nameOf });
+    seen.diag = diag;
+    renderCheck(diag);
+  };
+
+  const FIX_LABEL = { install: 'Sæt den på', update: 'Opdatér', apply: 'Skriv igen', mode: 'Prøv en anden måde' };
+  const runFix = async (fix, button) => {
+    button.disabled = true;
+    const mic = seen.target;
+    try {
+      if (fix === 'apply') {
+        await ctx.applyOutputEq?.();
+        toast('Indstillingerne er skrevet til EQ-motoren igen', 'info');
+      } else if (mic) {
+        const task = fix === 'mode'
+          ? { action: 'set-mics', devices: [mic.id], mode: mic.mode === 'lfx-gfx' ? 'sfx-mfx' : 'lfx-gfx' }
+          : { action: 'set-mics', devices: fix === 'update' ? (seen.info?.mics || []).filter((d) => d.installed).map((d) => d.id) : [mic.id] };
+        const r = await engineTask(task);
+        toast(r?.ok ? 'Færdig – tjekket opdateres om et øjeblik' : `Det lykkedes ikke: ${r?.error || '?'}`, r?.ok ? 'info' : 'error');
+        if (r?.ok && fix === 'install') { cfg.enabled = true; ctx.savePrefs(); }
+        logActivity(`Ren mikrofon: ${FIX_LABEL[fix]} (${r?.ok ? 'ok' : 'fejlede'})`);
+        await engineMics(true);
+        ctx.applyOutputEq?.();
+      }
+    } catch (err) { toast(String(err)); }
+    seen.checkedAt = 0;
+    render();
+  };
+
+  const renderCheck = (diag) => {
+    const key = JSON.stringify(diag);
+    if (checkList.dataset.key === key) return;
+    checkList.dataset.key = key;
+    const icon = (ok) => (ok === true ? '✓' : ok === false ? '✗' : '–');
+    checkList.replaceChildren(
+      ...diag.items.map((i) => h('div', { class: `voice-check-item ${i.ok === true ? 'ok' : i.ok === false ? 'bad' : 'wait'}`, 'data-check': i.id },
+        h('span', { class: 'voice-check-icon' }, icon(i.ok)), h('span', {}, i.text),
+        i.fix ? h('button', { class: 'btn sm primary', 'data-testid': `voice-fix-${i.fix}`, onclick: (e) => runFix(i.fix, e.target) }, FIX_LABEL[i.fix]) : '')),
+      cfg.enabled ? h('div', { class: 'row', style: { marginTop: '4px' } },
+        h('span', { class: 'hint' }, diag.allGood ? 'Alt ser rigtigt ud.' : 'Ret det, der har ✗, fra oven og ned.'),
+        h('div', { class: 'spacer' }),
+        h('button', { class: 'btn sm', 'data-testid': 'voice-copy-check', onclick: async () => {
+          try { await navigator.clipboard.writeText(['Ren mikrofon – tjek', diagnosisText(diag)].join('\n')); toast('Tjekket er kopieret', 'info'); } catch { toast('Kunne ikke kopiere'); }
+        } }, 'Kopiér tjek')) : '');
+    // Discord's own noise suppression: off only once ours is proven to work on Discord's sound.
+    discordHint.textContent = diag.allGood
+      ? 'Ren mikrofon renser Discords lyd. Slå Discords egen Støjreduktion (Krisp) og Ekko-annullering fra under Stemme og video, så lyden ikke renses to gange.'
+      : 'Lad Discords egen Støjreduktion være slået til, indtil tjekket herover er i orden – så er du dækket ind imens.';
   };
   const timer = setInterval(() => { if (!card.isConnected) { clearInterval(timer); return; } poll(); }, 1000);
   render();

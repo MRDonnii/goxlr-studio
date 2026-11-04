@@ -90,8 +90,8 @@ impl Reference for Shared {
         self.reader.read(&self.ring, out)
     }
 
-    fn report(&mut self, flags: u32, erle_db: f32, delay_ms: i32) {
+    fn report(&mut self, flags: u32, erle_db: f32, delay_ms: i32, in_db: f32, out_db: f32) {
         let now = unsafe { GetTickCount64() };
-        self.ring.report(now, flags, erle_db, delay_ms);
+        self.ring.report_levels(now, flags, erle_db, delay_ms, in_db, out_db);
     }
 }

@@ -117,3 +117,31 @@ test('status line tells what is happening', () => {
   assert.match(voiceStatusLine(cfg, { plugin: true, noise: true, isolate: 'loading' }, { installed: true }).text, /starter/);
   assert.match(voiceStatusLine(cfg, { plugin: true, noise: true, isolate: 'unavailable' }, { installed: true }).text, /Stærk/);
 });
+
+test('the check finds what stops Ren mikrofon from working', async () => {
+  const { voiceDiagnosis, diagnosisText } = await import('../public/js/voicemodel.js');
+  const mic = { id: '{0.0.1.00000000}.{aaaa}', name: 'Chat Mic (TC-Helicon GoXLR)', installed: true, mode: 'sfx-mfx' };
+  const cfg = { enabled: true, echo: true, noise: 'isolate' };
+  const config = { devices: ['{AAAA}'], plugin: true, isolate: true };
+  const discordOn = (device, active = true) => ({ device, pid: 1, exe: 'Discord.exe', active });
+  const ok = { plugin: true, reference: true, isolate: 'running', in_db: -30.4, out_db: -58.2 };
+  // Everything right.
+  let d = voiceDiagnosis({ cfg, mic, check: { recordings: [discordOn(mic.id)], config }, status: ok });
+  assert.equal(d.allGood, true, diagnosisText(d));
+  assert.match(diagnosisText(d), /✓ Discord optager fra Chat Mic/);
+  assert.match(diagnosisText(d), /ind -30 dB → ud -58 dB/);
+  // Discord on another mic: the most likely reason teammates hear everything.
+  d = voiceDiagnosis({ cfg, mic, check: { recordings: [discordOn('{0.0.1.00000000}.{webcam}')], config }, status: { plugin: false }, nameOf: () => 'Mikrofon (Webcam)' });
+  assert.equal(d.allGood, false);
+  assert.match(diagnosisText(d), /✗ Discord optager fra "Mikrofon \(Webcam\)"/);
+  // Discord on Chat Mic but the plugin never starts: the engine is not loaded on the mic.
+  d = voiceDiagnosis({ cfg, mic, check: { recordings: [discordOn(mic.id)], config }, status: { plugin: false } });
+  assert.equal(d.items.find((i) => i.id === 'running').fix, 'mode');
+  // Config without the mic part, and an old plugin.
+  d = voiceDiagnosis({ cfg, mic, outdated: true, check: { recordings: [], config: { devices: [], plugin: false, isolate: false } }, status: null });
+  assert.deepEqual(d.items.filter((i) => i.fix).map((i) => i.fix), ['update', 'apply']);
+  assert.equal(d.items.find((i) => i.id === 'discord').ok, null);
+  // Not installed / off.
+  assert.equal(voiceDiagnosis({ cfg, mic: { ...mic, installed: false } }).items[0].fix, 'install');
+  assert.equal(voiceDiagnosis({ cfg: { enabled: false }, mic }).allGood, false);
+});

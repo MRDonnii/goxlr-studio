@@ -69,7 +69,8 @@ pub(crate) trait Reference: Send {
     /// Reads what arrived since last time (at most `out.len()`), returns how many.
     fn read(&mut self, out: &mut [f32]) -> usize;
     /// Tells GoXLR Studio how it is going.
-    fn report(&mut self, flags: u32, erle_db: f32, delay_ms: i32);
+    /// `in_db`/`out_db`: the mic's level before and after cleaning (dBFS RMS).
+    fn report(&mut self, flags: u32, erle_db: f32, delay_ms: i32, in_db: f32, out_db: f32);
 }
 
 struct Plugin {
@@ -81,6 +82,10 @@ struct Plugin {
     mono: Vec<f32>,
     refbuf: Vec<f32>,
     blocks: u32,
+    // Energy in and out since the last report.
+    e_in: f64,
+    e_out: f64,
+    n_meas: u64,
 }
 
 fn plugin<'a>(e: *mut AEffect) -> Option<&'a mut Plugin> {
@@ -213,7 +218,10 @@ unsafe fn process_block(p: &mut Plugin, inputs: *const *const f32, outputs: *mut
         }
     }
     let mono = &mut p.mono[..n];
+    p.e_in += mono.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>();
     p.dsp.process(mono);
+    p.e_out += mono.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>();
+    p.n_meas += n as u64;
     let (ol, or) = (*outputs, *outputs.add(1));
     for (i, &v) in mono.iter().enumerate() {
         *ol.add(i) = v;
@@ -237,7 +245,11 @@ unsafe fn process_block(p: &mut Plugin, inputs: *const *const f32, outputs: *mut
                 crate::Isolation::Unavailable => crate::ring::FLAG_ISOLATE_UNAVAILABLE,
                 crate::Isolation::Off => 0,
             };
-            r.report(flags, st.erle_db.unwrap_or(f32::NAN), st.delay_ms.unwrap_or(-1));
+            let level = |e: f64| (10.0 * (e / p.n_meas.max(1) as f64).max(1e-10).log10()) as f32;
+            r.report(flags, st.erle_db.unwrap_or(f32::NAN), st.delay_ms.unwrap_or(-1), level(p.e_in), level(p.e_out));
+            p.e_in = 0.0;
+            p.e_out = 0.0;
+            p.n_meas = 0;
         }
     }
 }
@@ -255,6 +267,9 @@ fn new_effect(reference: Option<Box<dyn Reference>>) -> *mut AEffect {
         mono: vec![0.0; 4096],
         refbuf: vec![0.0; 9600],
         blocks: 0,
+        e_in: 0.0,
+        e_out: 0.0,
+        n_meas: 0,
     })) as *mut c_void;
     Box::into_raw(Box::new(AEffect {
         magic: MAGIC,
@@ -314,7 +329,7 @@ mod tests {
             d.drain(..n);
             n
         }
-        fn report(&mut self, flags: u32, _erle: f32, _delay: i32) {
+        fn report(&mut self, flags: u32, _erle: f32, _delay: i32, _in_db: f32, _out_db: f32) {
             self.reports.lock().unwrap().push(flags);
         }
     }

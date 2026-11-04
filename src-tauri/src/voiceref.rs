@@ -55,6 +55,9 @@ pub struct Status {
     pub bypassed: bool,
     /// Stemmeisolering: "running", "loading", "unavailable" (RNNoise instead) or None (off).
     pub isolate: Option<String>,
+    /// The mic's level before and after cleaning (dBFS, last half second; plugins from 0.14.1).
+    pub in_db: Option<f32>,
+    pub out_db: Option<f32>,
     /// How much echo is removed right now (WebRTC's ERLE).
     pub erle_db: Option<f32>,
     pub delay_ms: Option<i32>,
@@ -316,6 +319,9 @@ fn run(state: Arc<State>) {
             let mut st = Status { enabled: true, connected: shm.is_some(), playing: now_ms.saturating_sub(last_sound) < 500, ..Default::default() };
             if let Some(s) = shm.as_ref() {
                 plugin_status(&mut st, s.report(), now_ms);
+                if st.plugin {
+                    (st.in_db, st.out_db) = s.levels();
+                }
             }
             st.sources = loops.iter().map(|l| l.status(now_ms)).collect();
             *state.status.lock().unwrap() = st;
@@ -407,6 +413,10 @@ mod win {
 
         pub fn report(&self) -> (u64, u32, f32, i32) {
             self.ring.plugin_report()
+        }
+
+        pub fn levels(&self) -> (Option<f32>, Option<f32>) {
+            self.ring.plugin_levels()
         }
     }
 

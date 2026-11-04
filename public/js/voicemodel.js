@@ -149,3 +149,71 @@ export function noteText(n) {
     default: return n.code;
   }
 }
+
+// ---------- the check (what is wrong when teammates still hear everything) ----------
+const DISCORD = /^discord(ptb|canary|development)?\.exe$/i;
+// The GUID at the end of an endpoint id (what config.txt's Device: names); the whole id otherwise.
+const guidOf = (id) => (String(id || '').match(/\{[0-9a-f-]+\}$/i)?.[0] || String(id || '')).toLowerCase();
+
+/**
+ * Ren mikrofon's check, step by step: { items: [{ id, ok: true|false|null, text, fix? }], allGood }.
+ * ok null = cannot tell yet (e.g. Discord is not recording). Inputs: cfg (prefs.voiceClean),
+ * mic (the engine's entry for the chosen mic), outdated, check (voice_check: recordings, config),
+ * status (voice_status), nameOf(id) for device names.
+ */
+export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, status = null, nameOf = (id) => id }) {
+  const items = [];
+  const add = (id, ok, text, fix) => items.push({ id, ok, text, ...(fix ? { fix } : {}) });
+  if (!cfg?.enabled) return { items: [{ id: 'off', ok: null, text: 'Ren mikrofon er slået fra' }], allGood: false };
+  if (!mic?.installed) {
+    add('installed', false, 'EQ-motoren er ikke sat på Chat Mic', 'install');
+    return { items, allGood: false };
+  }
+  add('installed', true, `EQ-motoren sidder på ${mic.name}`);
+  if (outdated) add('version', false, 'Ren mikrofon-pluginnet er en ældre udgave', 'update');
+  const conf = check?.config;
+  if (conf) {
+    const here = conf.devices.some((d) => d.toLowerCase() === guidOf(mic.id));
+    if (conf.plugin && here) add('config', true, 'EQ-motoren har fået indstillingerne');
+    else add('config', false, 'Indstillingerne er ikke skrevet til EQ-motoren', 'apply');
+    if (cfg.noise === 'isolate' && conf.plugin && !conf.isolate) add('config-isolate', false, 'Stemmeisolering er ikke slået til i EQ-motoren', outdated ? 'update' : 'apply');
+  }
+  // Who records from which mic.
+  const recs = check?.recordings || [];
+  const discord = recs.filter((r) => DISCORD.test(r.exe));
+  const fromChat = (r) => guidOf(r.device) === guidOf(mic.id);
+  const onChat = discord.some(fromChat);
+  if (!discord.length) add('discord', null, 'Discord optager ikke lige nu – start et opkald (eller "Mikrofontest" i Discord) for at tjekke resten');
+  else if (onChat) add('discord', true, `Discord optager fra ${mic.name}`);
+  else {
+    const other = nameOf(discord.find((r) => r.active)?.device || discord[0].device);
+    add('discord', false, `Discord optager fra "${other}" – den bliver ikke renset. Vælg "${mic.name}" som inputenhed i Discord (Indstillinger → Stemme og video).`);
+  }
+  // Does the plugin actually get the sound?
+  const anyOnChat = recs.some(fromChat);
+  if (status?.plugin) add('running', true, 'Renseren kører på mikrofonens lyd');
+  else if (anyOnChat) add('running', false, 'Der optages fra Chat Mic, men renseren kører ikke på lyden – EQ-motoren bliver ikke indlæst på mikrofonen', 'mode');
+  else add('running', null, 'Renseren starter, når et program optager fra Chat Mic');
+  if (status?.plugin) {
+    if (status.bypassed) add('rate', false, 'Chat Mic kører ikke 48 kHz – lyden sendes urørt videre');
+    if (cfg.noise === 'isolate') {
+      if (status.isolate === 'running') add('isolate', true, 'Stemmeisolering kører');
+      else if (status.isolate === 'loading') add('isolate', null, 'Stemmeisolering starter …');
+      else add('isolate', false, 'Stemmeisolering kører ikke – Stærk bruges i stedet', outdated ? 'update' : 'apply');
+    }
+    if (cfg.echo) {
+      if (status.reference) add('echo', true, 'Ekkofjerneren får højttalernes lyd');
+      else add('echo', false, 'Ekkofjerneren får ingen lyd fra højttalerne – tjek "Højttalerne sidder på"');
+    }
+    if (Number.isFinite(status.in_db) && Number.isFinite(status.out_db)) {
+      add('levels', null, `Mikrofonen ind ${Math.round(status.in_db)} dB → ud ${Math.round(status.out_db)} dB`);
+    }
+  }
+  const allGood = items.every((i) => i.ok !== false) && onChat && !!status?.plugin;
+  return { items, allGood };
+}
+
+/** The check as plain text (for "Kopiér tjek"). */
+export function diagnosisText(d) {
+  return d.items.map((i) => `${i.ok === true ? '✓' : i.ok === false ? '✗' : '–'} ${i.text}`).join('\n');
+}

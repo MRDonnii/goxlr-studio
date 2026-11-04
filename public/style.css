@@ -500,3 +500,12 @@ input.num { width: 64px; }
 .voice-dot.idle { background: var(--info); }
 .disabled-block { opacity: .55; }
 .voice-note { margin-top: 6px; }
+.voice-check { border: 1px solid var(--line-soft); border-radius: 10px; padding: 6px 10px; margin: 6px 0 10px; }
+.voice-check-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0; }
+.voice-check-item .btn { margin-left: auto; }
+.voice-check-icon { width: 1.2em; font-weight: 700; text-align: center; flex: 0 0 auto; }
+.voice-check-item > span:nth-child(2) { flex: 1 1 220px; min-width: 0; }
+.voice-check-item.ok .voice-check-icon { color: var(--ok); }
+.voice-check-item.bad { color: var(--warn); }
+.voice-check-item.bad .voice-check-icon { color: var(--danger); }
+.voice-check-item.wait { color: var(--muted); }

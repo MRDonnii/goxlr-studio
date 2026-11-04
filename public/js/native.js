@@ -456,6 +456,22 @@ function demoVoiceIsolate() {
   try { return JSON.parse(localStorage.getItem('studio.prefs') || '{}').voiceClean?.noise === 'isolate' ? (demoOldVoice ? null : 'running') : null; } catch { return null; }
 }
 
+// Ren mikrofon's check (lib.rs voice_check): who records from which mic + the engine's mic part.
+// Demo ?discordwebcam: Discord records from the webcam's mic instead of Chat Mic.
+export async function voiceCheck() {
+  if (isNative()) return invoke('voice_check');
+  const webcam = typeof location !== 'undefined' && /[?&]discordwebcam\b/.test(location.search);
+  const on = [...demoEngine.mics];
+  let prefs = {};
+  try { prefs = JSON.parse(localStorage.getItem('studio.prefs') || '{}'); } catch { /* demo */ }
+  const vc = prefs.voiceClean || {};
+  return {
+    recordings: [{ device: webcam ? 'in-webcam' : 'in-goxlr-chat', pid: 4242, exe: 'Discord.exe', active: true }],
+    config: { devices: vc.enabled ? on : [], plugin: !!vc.enabled && on.length > 0, isolate: !!vc.enabled && vc.noise === 'isolate' && !demoOldVoice },
+    error: null,
+  };
+}
+
 // Ren mikrofon's echo reference (voiceref.rs). The demo pretends the plugin runs while it is on.
 let demoVoice = { enabled: false, sources: [] };
 export async function voiceConfigure(config) {
@@ -468,7 +484,7 @@ export async function voiceStatus() {
   const t = Date.now() / 1000;
   return {
     enabled: true, connected: demoEngine.mics.size > 0, plugin: demoEngine.mics.size > 0, echo: demoVoice.sources.length > 0, noise: true, reference: demoVoice.sources.length > 0, bypassed: false, isolate: demoVoiceIsolate(),
-    erle_db: 24 + 4 * Math.sin(t / 3), delay_ms: 38, playing: demoVoice.sources.length > 0,
+    erle_db: 24 + 4 * Math.sin(t / 3), delay_ms: 38, playing: demoVoice.sources.length > 0, in_db: -31 + 3 * Math.sin(t), out_db: -57 + 3 * Math.sin(t),
     sources: demoVoice.sources.map((s) => ({ device: s.device, ok: true, rate: 48000, playing: s.gain > 0, error: null })), error: null,
   };
 }

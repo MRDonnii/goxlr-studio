@@ -15,6 +15,17 @@ pub struct AppSession {
     pub muted: Option<bool>,
 }
 
+/// A program recording from a microphone (for Ren mikrofon's check).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Recording {
+    /// Capture endpoint id.
+    pub device: String,
+    pub pid: u32,
+    pub exe: String,
+    /// Recording right now (not just opened).
+    pub active: bool,
+}
+
 #[cfg(windows)]
 #[allow(non_snake_case)]
 mod imp {
@@ -149,6 +160,36 @@ mod imp {
         Ok(by_pid.into_values().collect())
     }
 
+    /// Which programs record from which microphone right now (Windows' capture sessions).
+    pub fn recordings() -> Result<Vec<super::Recording>, String> {
+        use windows::Win32::Media::Audio::AudioSessionStateActive;
+        init();
+        let mut out = Vec::new();
+        unsafe {
+            let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
+            let col = en.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE).map_err(|e| e.to_string())?;
+            for i in 0..col.GetCount().unwrap_or(0) {
+                let Ok(dev) = col.Item(i) else { continue };
+                let Ok(id) = dev.GetId() else { continue };
+                let device = id.to_string().unwrap_or_default();
+                let Ok(mgr) = dev.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { continue };
+                let Ok(sessions) = mgr.GetSessionEnumerator() else { continue };
+                for k in 0..sessions.GetCount().unwrap_or(0) {
+                    let Ok(ctl) = sessions.GetSession(k) else { continue };
+                    let Ok(ctl2) = ctl.cast::<IAudioSessionControl2>() else { continue };
+                    let Ok(pid) = ctl2.GetProcessId() else { continue };
+                    if pid == 0 {
+                        continue;
+                    }
+                    let active = ctl.GetState().map(|s| s == AudioSessionStateActive).unwrap_or(false);
+                    let exe = exe_path(pid).map(|p| p.rsplit('\\').next().unwrap_or(&p).to_string()).unwrap_or_default();
+                    out.push(super::Recording { device: device.clone(), pid, exe, active });
+                }
+            }
+        }
+        Ok(out)
+    }
+
     pub fn set(pid: u32, flow: &str, endpoint: Option<&str>) -> Result<(), String> {
         init();
         let f = factory()?;
@@ -208,12 +249,15 @@ mod imp {
     pub fn set(_pid: u32, _flow: &str, _endpoint: Option<&str>) -> Result<(), String> {
         Err("Kun på Windows".into())
     }
+    pub fn recordings() -> Result<Vec<super::Recording>, String> {
+        Ok(Vec::new())
+    }
     pub fn set_volume(_pid: u32, _volume: Option<f32>, _mute: Option<bool>) -> Result<usize, String> {
         Err("Kun på Windows".into())
     }
 }
 
-pub use imp::{sessions, set, set_volume};
+pub use imp::{recordings, sessions, set, set_volume};
 
 /// 0–1, anything else is clamped (NaN → 0).
 pub fn clamp_volume(v: f32) -> f32 {

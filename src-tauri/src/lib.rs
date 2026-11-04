@@ -616,6 +616,27 @@ fn voice_status() -> voiceref::Status {
     voiceref::status()
 }
 
+/// Ren mikrofon's check: who records from which mic, and what the engine's config says.
+#[derive(serde::Serialize)]
+struct VoiceCheck {
+    recordings: Vec<apps::Recording>,
+    config: apo::MicConfig,
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn voice_check() -> VoiceCheck {
+    tauri::async_runtime::spawn_blocking(|| {
+        let (recordings, error) = match apps::recordings() {
+            Ok(r) => (r, None),
+            Err(e) => (Vec::new(), Some(e)),
+        };
+        VoiceCheck { recordings, config: apo::current_mic_config(), error }
+    })
+    .await
+    .unwrap_or_else(|e| VoiceCheck { recordings: Vec::new(), config: apo::MicConfig::default(), error: Some(e.to_string()) })
+}
+
 /// Live spectrum of an output (None = Windows' default output) for the EQ graph.
 #[tauri::command]
 async fn spectrum_read(device: Option<String>) -> spectrum::Spectrum {
@@ -1125,6 +1146,7 @@ pub fn run() {
             spectrum_read,
             voice_configure,
             voice_status,
+            voice_check,
             obs_request,
             lan_ip,
             history_snapshot,

@@ -8,7 +8,8 @@
 //!   16 write u64 (samples written so far, the ring position is `write % CAPACITY`)
 //!   24 writer_beat u64 (writer's clock in ms, 0 = never)
 //!   32 plugin_beat u64 (reader's clock in ms) · 40 erle u32 (f32 bits, dB) · 44 flags u32
-//!   48 delay_ms i32 · 52.. reserved · 64 samples f32[CAPACITY]
+//!   48 delay_ms i32 · 52 in_db f32 bits · 56 out_db f32 bits (0 = not reported, plugins before
+//!   0.14.1) · 60 reserved · 64 samples f32[CAPACITY]
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 pub const MAGIC: u32 = u32::from_le_bytes(*b"GXVR");
@@ -96,10 +97,27 @@ impl Ring {
 
     // ---- what the plugin reports ----
     pub fn report(&self, now_ms: u64, flags: u32, erle_db: f32, delay_ms: i32) {
+        self.report_levels(now_ms, flags, erle_db, delay_ms, f32::NAN, f32::NAN);
+    }
+
+    /// The report with the mic's level before and after cleaning (dBFS, RMS over the last half second).
+    pub fn report_levels(&self, now_ms: u64, flags: u32, erle_db: f32, delay_ms: i32, in_db: f32, out_db: f32) {
+        self.u32_at(52).store(in_db.to_bits(), Ordering::Relaxed);
+        self.u32_at(56).store(out_db.to_bits(), Ordering::Relaxed);
         self.u32_at(40).store(erle_db.to_bits(), Ordering::Relaxed);
         self.u32_at(44).store(flags, Ordering::Relaxed);
         self.i32_at(48).store(delay_ms, Ordering::Relaxed);
         self.u64_at(32).store(now_ms.max(1), Ordering::Release);
+    }
+
+    /// The mic's level before and after cleaning (dBFS); None from a plugin that does not report it.
+    pub fn plugin_levels(&self) -> (Option<f32>, Option<f32>) {
+        let get = |off| {
+            let bits = self.u32_at(off).load(Ordering::Relaxed);
+            let v = f32::from_bits(bits);
+            (bits != 0 && v.is_finite()).then_some(v)
+        };
+        (get(52), get(56))
     }
 
     /// (plugin's clock in ms, flags, echo reduction in dB, echo delay in ms)
@@ -223,5 +241,8 @@ mod tests {
         assert_eq!(ring.writer_beat(), 7);
         ring.report(9, FLAG_RUNNING | FLAG_AEC_ON, 18.5, 42);
         assert_eq!(ring.plugin_report(), (9, FLAG_RUNNING | FLAG_AEC_ON, 18.5, 42));
+        assert_eq!(ring.plugin_levels(), (None, None), "not measured");
+        ring.report_levels(10, FLAG_RUNNING, 0.0, -1, -32.5, -61.0);
+        assert_eq!(ring.plugin_levels(), (Some(-32.5), Some(-61.0)));
     }
 }

@@ -81,6 +81,48 @@ fn yes() -> bool {
     true
 }
 
+/// What config.txt says about the microphone (Ren mikrofon's check).
+#[derive(Serialize, Debug, Default, PartialEq)]
+pub struct MicConfig {
+    /// The "Device:" selectors in the mic part.
+    pub devices: Vec<String>,
+    /// The plugin is in the mic part.
+    pub plugin: bool,
+    pub isolate: bool,
+}
+
+/// Pure: reads the mic part (`If: stage == "capture"` … `Else:`) of a config.txt.
+pub fn mic_config(text: &str) -> MicConfig {
+    let mut c = MicConfig::default();
+    let mut inside = false;
+    for line in text.lines() {
+        let l = line.trim();
+        if l.replace(' ', "") == "If:stage==\"capture\"" {
+            inside = true;
+            continue;
+        }
+        if inside && (l.starts_with("Else") || l == "EndIf:") {
+            break;
+        }
+        if !inside {
+            continue;
+        }
+        if let Some(d) = l.strip_prefix("Device:") {
+            c.devices.extend(d.split(';').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()));
+        }
+        if l.starts_with("VSTPlugin:") && l.contains(crate::engine::VOICE_DLL) {
+            c.plugin = true;
+            c.isolate = l.contains("Isolate 1");
+        }
+    }
+    c
+}
+
+/// The current config.txt's mic part.
+pub fn current_mic_config() -> MicConfig {
+    std::fs::read_to_string(engine::config_dir().join("config.txt")).map(|t| mic_config(&t)).unwrap_or_default()
+}
+
 /// The "VSTPlugin:" line for the Ren mikrofon plugin.
 pub fn voice_line(dll: &str, m: &MicClean) -> String {
     let flag = |b: bool| if b { 1.0 } else { 0.0 };
@@ -605,6 +647,17 @@ mod tests {
         let off = MicClean { echo: false, noise: 0.0, high_pass: false, ..m.clone() };
         assert!(!with_mic(&playback, Some(&off), "v.dll", &|_| None).contains("VSTPlugin"));
         assert!(!with_mic(&playback, Some(&mic(&[])), "v.dll", &|_| None).contains("VSTPlugin"));
+    }
+
+    #[test]
+    fn the_mic_part_is_read_back_for_the_check() {
+        let eq = OutputEq { enabled: true, preamp: 0.0, bands: vec![], target: None, extra: vec![], graphic: vec![], devices: None, channels: vec![], surround: None, denoise: false, dynamics: None, mic: None };
+        let m = MicClean { isolate: true, ..mic(&["{0.0.1.00000000}.{abcd}"]) };
+        let text = with_mic(&render(&eq, None), Some(&m), "C:\\E\\goxlr_studio_voice.dll", &|_| None);
+        assert_eq!(mic_config(&text), MicConfig { devices: vec!["{abcd}".into()], plugin: true, isolate: true });
+        // Engine on the mic, Ren mikrofon off: an empty mic part.
+        assert_eq!(mic_config(&with_mic(&render(&eq, None), None, "x", &|_| None)), MicConfig::default());
+        assert_eq!(mic_config(&["Device: all", "Preamp: 0 dB"].join("\n")), MicConfig::default());
     }
 
     #[test]
