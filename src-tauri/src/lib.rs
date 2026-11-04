@@ -1,4 +1,5 @@
 mod api;
+mod autostart;
 mod apo;
 mod fir;
 mod apps;
@@ -221,10 +222,24 @@ async fn set_app_device(pid: u32, flow: String, id: Option<String>) -> Result<()
 }
 
 
+/// "Start med Windows" on/off (own Run entry with a quoted path, see autostart.rs).
 #[tauri::command]
-fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let al = app.autolaunch();
-    if enabled { al.enable() } else { al.disable() }.map_err(|e| e.to_string())
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<autostart::Status, String> {
+    if !enabled {
+        // Also an entry the autostart plugin may have written for all users.
+        let _ = app.autolaunch().disable();
+    }
+    let s = autostart::set(enabled)?;
+    log::info!("{}", if s.enabled { "Start med Windows er slået til" } else { "Start med Windows er slået fra" });
+    Ok(s)
+}
+
+/// Whether Windows really starts GoXLR Studio at sign-in, and whether this run was such a start.
+#[tauri::command]
+fn autostart_status() -> Value {
+    let mut v = serde_json::to_value(autostart::status()).unwrap_or_default();
+    v["started_minimized"] = Value::Bool(std::env::args().any(|a| a == "--minimized"));
+    v
 }
 
 #[tauri::command]
@@ -941,6 +956,13 @@ pub fn run() {
             daemon_host::on_stopped(move |error| {
                 let _ = h.emit("engine-stopped", error);
             });
+            // "Start med Windows" is on: make sure Windows really starts this exe (the entry can be
+            // missing after "Flyt til ny pc", point to an old folder, or lack quotes around the path).
+            if prefs_flag(&handle, "autostart", false) {
+                if let Some(done) = autostart::repair() {
+                    log::warn!("{done}");
+                }
+            }
             // One app: GoXLR Studio runs its own GoXLR engine. An installed GoXLR Utility that is
             // running is switched off (and kept from autostarting) unless the user turned that off.
             {
@@ -1047,6 +1069,7 @@ pub fn run() {
             apo_takeover,
             apo_read_config,
             set_autostart,
+            autostart_status,
             set_close_to_tray,
             set_tray,
             apo_list_configs,
