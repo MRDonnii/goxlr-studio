@@ -6,7 +6,9 @@
 //!   game when you play on speakers;
 //! - noise suppression – WebRTC's noise suppression, and in "strong" mode also RNNoise (a small
 //!   neural network), which removes keyboard, fan and game sound between and under the words;
-//! - a high-pass filter against rumble.
+//! - a high-pass filter against rumble;
+//! - Stemmeisolering (feature "deepfilter", see `deepfilter`): DeepFilterNet 3 keeps only speech,
+//!   30 ms more delay.
 //!
 //! Everything runs on 10 ms frames (480 samples at 48 kHz) in mono, with a constant latency of one
 //! frame. Other sample rates pass through untouched. Nothing here may stop the sound: on any
@@ -15,6 +17,8 @@ use nnnoiseless::DenoiseState;
 use sonora::config::{EchoCanceller, HighPassFilter, NoiseSuppression, NoiseSuppressionLevel};
 use sonora::{AudioProcessing, Config, StreamConfig};
 
+#[cfg(feature = "deepfilter")]
+pub mod deepfilter;
 pub mod ring;
 #[cfg(windows)]
 mod shm;
@@ -30,6 +34,9 @@ pub enum Noise {
     Normal,
     /// WebRTC (high) + RNNoise (also keyboard, clicks, game sound).
     Strong,
+    /// Stemmeisolering: DeepFilterNet 3 keeps only speech (RNNoise while it loads, or if this
+    /// build has no network).
+    Isolate,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -39,16 +46,25 @@ pub struct Settings {
     pub high_pass: bool,
 }
 
-/// Parameter names as Equalizer APO sets them (`VSTPlugin: Library "…" Echo 1 Noise 1 HighPass 1`).
-pub const PARAMS: [&str; 3] = ["Echo", "Noise", "HighPass"];
-pub const DEFAULTS: [f32; 3] = [1.0, 0.5, 1.0];
+/// Parameter names as Equalizer APO sets them (`VSTPlugin: Library "…" Echo 1 Noise 1 HighPass 1 Isolate 0`).
+pub const PARAMS: [&str; 4] = ["Echo", "Noise", "HighPass", "Isolate"];
+pub const DEFAULTS: [f32; 4] = [1.0, 0.5, 1.0, 0.0];
 
 impl Settings {
-    /// From the normalized (0…1) VST parameters. Noise: < 0.25 off, < 0.75 normal, else strong.
-    pub fn from_normalized(p: &[f32; 3]) -> Settings {
+    /// From the normalized (0…1) VST parameters. Noise: < 0.25 off, < 0.75 normal, else strong;
+    /// Isolate ≥ 0.5 = Stemmeisolering whatever Noise says.
+    pub fn from_normalized(p: &[f32; 4]) -> Settings {
         Settings {
             echo: p[0] >= 0.5,
-            noise: if p[1] < 0.25 { Noise::Off } else if p[1] < 0.75 { Noise::Normal } else { Noise::Strong },
+            noise: if p[3] >= 0.5 {
+                Noise::Isolate
+            } else if p[1] < 0.25 {
+                Noise::Off
+            } else if p[1] < 0.75 {
+                Noise::Normal
+            } else {
+                Noise::Strong
+            },
             high_pass: p[2] >= 0.5,
         }
     }
@@ -67,6 +83,43 @@ pub struct Stats {
     pub delay_ms: Option<i32>,
     /// Reference (speaker sound) arrived recently.
     pub reference: bool,
+    pub isolate: Isolation,
+}
+
+/// Where Stemmeisolering is.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub enum Isolation {
+    #[default]
+    Off,
+    /// The network is being built (a second or two); RNNoise meanwhile.
+    Loading,
+    Running,
+    /// Not in this build, or the network failed: RNNoise instead.
+    Unavailable,
+}
+
+/// The delay Stemmeisolering adds (the network's STFT and look-ahead), whole 10 ms frames.
+#[cfg(feature = "deepfilter")]
+pub const ISOLATE_FRAMES: usize = deepfilter::LATENCY / FRAME;
+#[cfg(not(feature = "deepfilter"))]
+pub const ISOLATE_FRAMES: usize = 0;
+
+#[cfg(feature = "deepfilter")]
+type Network = Box<deepfilter::DeepFilter>;
+#[cfg(not(feature = "deepfilter"))]
+type Network = ();
+
+#[cfg(feature = "deepfilter")]
+type Built = deepfilter::Plans;
+#[cfg(not(feature = "deepfilter"))]
+type Built = ();
+
+#[cfg_attr(not(feature = "deepfilter"), allow(dead_code))]
+enum Iso {
+    Idle,
+    Loading(std::sync::mpsc::Receiver<Result<Built, String>>),
+    Ready(Network),
+    Failed,
 }
 
 pub struct Cleaner {
@@ -86,7 +139,28 @@ pub struct Cleaner {
     work2: [f32; FRAME],
     frames: u64,
     last_render_frame: u64,
+    iso: Iso,
+    /// Stemmeisolering's fallback is delayed like the network, so switching makes no jump; the
+    /// raw frames are kept to start the network where the fallback is.
+    iso_delay: std::collections::VecDeque<[f32; FRAME]>,
+    iso_raw: std::collections::VecDeque<[f32; FRAME]>,
     pub stats: Stats,
+}
+
+/// Builds the network on its own thread (it takes too long for the audio thread).
+fn start_network() -> Iso {
+    #[cfg(feature = "deepfilter")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new().name("goxlr-studio-voice-isolate".into()).spawn(move || {
+            let r = std::panic::catch_unwind(deepfilter::load_plans).unwrap_or_else(|_| Err("panic".into()));
+            let _ = tx.send(r);
+        });
+        if spawned.is_ok() {
+            return Iso::Loading(rx);
+        }
+    }
+    Iso::Failed
 }
 
 fn build_apm(s: &Settings) -> Option<AudioProcessing> {
@@ -100,6 +174,8 @@ fn build_apm(s: &Settings) -> Option<AudioProcessing> {
             Noise::Off => None,
             Noise::Normal => Some(NoiseSuppression { level: NoiseSuppressionLevel::Moderate, ..Default::default() }),
             Noise::Strong => Some(NoiseSuppression { level: NoiseSuppressionLevel::High, ..Default::default() }),
+            // The network does it all; WebRTC's suppressor in front would only blur what it hears.
+            Noise::Isolate => None,
         },
         ..Default::default()
     };
@@ -129,7 +205,43 @@ impl Cleaner {
             work2: [0.0; FRAME],
             frames: 0,
             last_render_frame: 0,
+            iso: if settings.noise == Noise::Isolate { start_network() } else { Iso::Idle },
+            iso_delay: std::collections::VecDeque::new(),
+            iso_raw: std::collections::VecDeque::new(),
             stats: Stats::default(),
+        }
+    }
+
+    /// Stemmeisolering's network is running.
+    pub fn isolating(&mut self) -> bool {
+        self.poll_network();
+        matches!(self.iso, Iso::Ready(_)) && self.settings.noise == Noise::Isolate
+    }
+
+    fn poll_network(&mut self) {
+        if let Iso::Loading(rx) = &self.iso {
+            self.iso = match rx.try_recv() {
+                #[cfg(feature = "deepfilter")]
+                Ok(Ok(plans)) => match deepfilter::DeepFilter::from_plans(plans) {
+                    Ok(net) => Iso::Ready(Box::new(net)),
+                    Err(_) => Iso::Failed,
+                },
+                #[cfg(not(feature = "deepfilter"))]
+                Ok(Ok(net)) => Iso::Ready(net),
+                Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => Iso::Failed,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            };
+            #[cfg(feature = "deepfilter")]
+            if let Iso::Ready(net) = &mut self.iso {
+                // Start where the fallback is: feed it the raw frames still in the delay.
+                let mut sink = [0f32; FRAME];
+                for f in &self.iso_raw {
+                    if net.process(f, &mut sink).is_err() {
+                        self.iso = Iso::Failed;
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -140,6 +252,9 @@ impl Cleaner {
     /// New settings; the processing starts over when they change.
     pub fn set(&mut self, settings: Settings) {
         if settings != self.settings {
+            if settings.noise == Noise::Isolate && matches!(self.iso, Iso::Idle) {
+                self.iso = start_network();
+            }
             self.settings = settings;
             self.apm = build_apm(&settings);
             self.rnn = DenoiseState::new();
@@ -155,11 +270,27 @@ impl Cleaner {
         self.out_pos = 0;
         self.rnd_len = 0;
         self.stats = Stats::default();
+        self.reset_isolation();
     }
 
-    /// The constant delay through the cleaner, in samples.
+    fn reset_isolation(&mut self) {
+        self.iso_delay.clear();
+        self.iso_raw.clear();
+        #[cfg(feature = "deepfilter")]
+        if let Iso::Ready(net) = &mut self.iso {
+            if net.reset().is_err() {
+                self.iso = Iso::Failed;
+            }
+        }
+    }
+
+    /// The constant delay through the cleaner, in samples (Stemmeisolering adds 30 ms).
     pub fn latency(&self) -> usize {
-        FRAME
+        if self.settings.noise == Noise::Isolate {
+            FRAME * (1 + ISOLATE_FRAMES)
+        } else {
+            FRAME
+        }
     }
 
     /// What the speakers play (mono, 48 kHz, −1…1), in any amounts; fed to the echo canceller in
@@ -209,15 +340,10 @@ impl Cleaner {
                 self.work = self.inp;
             }
         }
-        if self.settings.noise == Noise::Strong {
-            for (o, &x) in self.work2.iter_mut().zip(self.work.iter()) {
-                *o = x * 32768.0;
-            }
-            let mut den = [0f32; FRAME];
-            self.rnn.process_frame(&mut den, &self.work2);
-            for (o, &x) in self.work.iter_mut().zip(den.iter()) {
-                *o = x / 32768.0;
-            }
+        match self.settings.noise {
+            Noise::Strong => self.rnnoise(),
+            Noise::Isolate => self.isolate(),
+            _ => {}
         }
         // Never pass on anything broken: on a bad value the frame goes through as it came in.
         if self.work.iter().all(|v| v.is_finite()) {
@@ -234,6 +360,48 @@ impl Cleaner {
             }
         }
         self.stats.reference = self.settings.echo && self.frames.saturating_sub(self.last_render_frame) < 50;
+        if self.settings.noise != Noise::Isolate {
+            self.stats.isolate = Isolation::Off;
+        }
+    }
+
+    fn rnnoise(&mut self) {
+        for (o, &x) in self.work2.iter_mut().zip(self.work.iter()) {
+            *o = x * 32768.0;
+        }
+        let mut den = [0f32; FRAME];
+        self.rnn.process_frame(&mut den, &self.work2);
+        for (o, &x) in self.work.iter_mut().zip(den.iter()) {
+            *o = x / 32768.0;
+        }
+    }
+
+    /// Stemmeisolering on `work` (in place, ISOLATE_FRAMES frames later).
+    fn isolate(&mut self) {
+        self.poll_network();
+        #[cfg(feature = "deepfilter")]
+        if let Iso::Ready(net) = &mut self.iso {
+            let mut out = [0f32; FRAME];
+            if net.process(&self.work, &mut out).is_ok() {
+                self.work = out;
+                self.stats.isolate = Isolation::Running;
+                return;
+            }
+            self.iso = Iso::Failed;
+        }
+        // Meanwhile (or without the network): RNNoise, delayed as much as the network.
+        self.stats.isolate = if matches!(self.iso, Iso::Loading(_)) { Isolation::Loading } else { Isolation::Unavailable };
+        self.iso_raw.push_back(self.work);
+        while self.iso_raw.len() > ISOLATE_FRAMES {
+            self.iso_raw.pop_front();
+        }
+        self.rnnoise();
+        self.iso_delay.push_back(self.work);
+        if self.iso_delay.len() > ISOLATE_FRAMES {
+            self.work = self.iso_delay.pop_front().unwrap_or([0.0; FRAME]);
+        } else {
+            self.work = [0.0; FRAME];
+        }
     }
 
     fn reset_keep_framing(&mut self) {
@@ -244,3 +412,5 @@ impl Cleaner {
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "deepfilter"))]
+mod tests_df;

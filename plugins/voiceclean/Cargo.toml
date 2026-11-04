@@ -2,7 +2,7 @@
 name = "goxlr-studio-voice"
 version = "1.0.0"
 edition = "2021"
-description = "GoXLR Studio's clean microphone: echo cancellation (WebRTC AEC3) and noise suppression (WebRTC NS + RNNoise) as a VST2 plugin for the EQ engine on the mic"
+description = "GoXLR Studio's clean microphone: echo cancellation (WebRTC AEC3), noise suppression (WebRTC NS + RNNoise) and voice isolation (DeepFilterNet 3) as a VST2 plugin for the EQ engine on the mic"
 license = "MIT"
 publish = false
 
@@ -15,6 +15,15 @@ crate-type = ["cdylib", "rlib"]
 # and Xiph's RNNoise.
 sonora = "0.2"
 nnnoiseless = { version = "0.5", default-features = false }
+# Stemmeisolering (feature "deepfilter"): DeepFilterNet 3's networks run with tract (MIT/Apache-2.0),
+# the same 0.19 series DeepFilterNet's own libDF v0.5.6 uses. The model files come from
+# DF_MODEL_DIR at build time (build.rs).
+tract-onnx = { version = "=0.19.16", optional = true }
+tract-pulse = { version = "=0.19.16", optional = true }
+realfft = { version = "3.3", optional = true }
+
+[features]
+deepfilter = ["dep:tract-onnx", "dep:tract-pulse", "dep:realfft"]
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemInformation"] }

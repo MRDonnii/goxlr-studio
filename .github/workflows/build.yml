@@ -74,14 +74,39 @@ jobs:
 
       # Ren mikrofon: echo cancellation + noise suppression on the GoXLR's Chat Mic (plugins/voiceclean).
       # Its tests run in release (they include a speed test for the audio engine).
+      # Stemmeisolering: DeepFilterNet 3's model (MIT/Apache-2.0) from DeepFilterNet's v0.5.6 tag,
+      # SHA-256 checked, built into the plugin; its speech/noise test recordings (freesound.org)
+      # are only used by the tests and not shipped.
       - name: Build Ren mikrofon plugin
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $base = 'https://raw.githubusercontent.com/Rikorose/DeepFilterNet/v0.5.6'
+          $files = @{
+            'models/DeepFilterNet3_onnx.tar.gz' = 'c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616'
+            'assets/clean_freesound_33711.wav' = '2d885e9f45c0f9381aee09a397ecd160aff1875ffb75ebe2217d21c3511b0d5d'
+            'assets/noise_freesound_2530.wav' = 'cc774d58170fc5b8f143345ef8ff31583feef71f23f447336fdd56c8478d8a8a'
+            'assets/noise_freesound_573577.wav' = 'cb367b36e4e9d72d112377dd57bf354e13f0b30f8402c9e841ac47639e773497'
+          }
+          $dl = Join-Path $env:RUNNER_TEMP 'deepfilternet'
+          New-Item -ItemType Directory -Force "$dl/assets", "$dl/model" | Out-Null
+          foreach ($f in $files.Keys) {
+            $out = if ($f -like 'assets/*') { "$dl/$f" } else { "$dl/model.tar.gz" }
+            Invoke-WebRequest -Uri "$base/$f" -OutFile $out
+            $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $out).Hash.ToLower()
+            if ($sha -ne $files[$f]) { throw "SHA-256 mismatch for $f ($sha)" }
+          }
+          tar -xzf "$dl/model.tar.gz" -C "$dl/model"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not unpack the model' }
+          $env:DF_MODEL_DIR = (Get-ChildItem -Recurse -Filter enc.onnx "$dl/model" | Select-Object -First 1).DirectoryName
+          $env:DF_TEST_ASSETS = "$dl/assets"
+          $env:DF_REQUIRE_ASSETS = '1'
           Push-Location plugins/voiceclean
           cargo test --release
           if ($LASTEXITCODE -ne 0) { throw 'Ren mikrofon tests failed' }
-          cargo build --release
+          cargo test --release --features deepfilter
+          if ($LASTEXITCODE -ne 0) { throw 'Stemmeisolering tests failed' }
+          cargo build --release --features deepfilter
           if ($LASTEXITCODE -ne 0) { throw 'Ren mikrofon build failed' }
           Pop-Location
           Copy-Item plugins/voiceclean/target/release/goxlr_studio_voice.dll $env:ENGINE_DIR

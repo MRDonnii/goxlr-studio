@@ -28,6 +28,10 @@ pub const FLAG_AEC_ON: u32 = 2;
 pub const FLAG_REFERENCE: u32 = 4;
 pub const FLAG_NS_ON: u32 = 8;
 pub const FLAG_BYPASSED: u32 = 16;
+/// Stemmeisolering: the network runs / is loading / is not available (RNNoise instead).
+pub const FLAG_ISOLATE: u32 = 32;
+pub const FLAG_ISOLATE_LOADING: u32 = 64;
+pub const FLAG_ISOLATE_UNAVAILABLE: u32 = 128;
 
 /// A ring placed over shared memory (or any 8-byte aligned buffer of `SIZE` bytes).
 pub struct Ring {

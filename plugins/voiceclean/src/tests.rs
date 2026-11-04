@@ -169,8 +169,11 @@ fn broken_input_never_comes_out_broken() {
 #[test]
 fn settings_from_the_engine_parameters() {
     assert_eq!(Settings::from_normalized(&DEFAULTS), Settings { echo: true, noise: Noise::Normal, high_pass: true });
-    assert_eq!(Settings::from_normalized(&[0.0, 0.0, 0.0]), Settings { echo: false, noise: Noise::Off, high_pass: false });
-    assert_eq!(Settings::from_normalized(&[1.0, 1.0, 0.0]).noise, Noise::Strong);
+    assert_eq!(Settings::from_normalized(&[0.0, 0.0, 0.0, 0.0]), Settings { echo: false, noise: Noise::Off, high_pass: false });
+    assert_eq!(Settings::from_normalized(&[1.0, 1.0, 0.0, 0.0]).noise, Noise::Strong);
+    // Isolate wins over Noise (old configs without it keep their noise setting).
+    assert_eq!(Settings::from_normalized(&[1.0, 0.0, 1.0, 1.0]).noise, Noise::Isolate);
+    assert_eq!(Settings::from_normalized(&[1.0, 0.5, 1.0, 0.4]).noise, Noise::Normal);
 }
 
 /// The audio engine gives ~10 ms blocks: one second of audio must take far less than a second.

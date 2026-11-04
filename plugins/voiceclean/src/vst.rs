@@ -73,7 +73,7 @@ pub(crate) trait Reference: Send {
 }
 
 struct Plugin {
-    params: [f32; 3],
+    params: [f32; 4],
     dsp: Cleaner,
     rate: f32,
     broken: bool,
@@ -102,6 +102,7 @@ fn put(ptr: *mut c_void, s: &str, max: usize) {
 fn display(index: usize, v: f32) -> &'static str {
     match index {
         1 => if v < 0.25 { "Off" } else if v < 0.75 { "Normal" } else { "Strong" },
+        3 => if v >= 0.5 { "Isolate" } else { "Off" },
         _ => if v >= 0.5 { "On" } else { "Off" },
     }
 }
@@ -230,6 +231,12 @@ unsafe fn process_block(p: &mut Plugin, inputs: *const *const f32, outputs: *mut
             if s.echo { flags |= crate::ring::FLAG_AEC_ON; }
             if st.reference { flags |= crate::ring::FLAG_REFERENCE; }
             if s.noise != crate::Noise::Off { flags |= crate::ring::FLAG_NS_ON; }
+            flags |= match st.isolate {
+                crate::Isolation::Running => crate::ring::FLAG_ISOLATE,
+                crate::Isolation::Loading => crate::ring::FLAG_ISOLATE_LOADING,
+                crate::Isolation::Unavailable => crate::ring::FLAG_ISOLATE_UNAVAILABLE,
+                crate::Isolation::Off => 0,
+            };
             r.report(flags, st.erle_db.unwrap_or(f32::NAN), st.delay_ms.unwrap_or(-1));
         }
     }
@@ -329,13 +336,16 @@ mod tests {
         let e = new_effect(Some(Box::new(TestRef { data: data.clone(), reports: reports.clone() })));
         let eff = unsafe { &mut *e };
         assert_eq!(eff.magic, MAGIC);
-        assert_eq!(eff.num_params, 3);
+        assert_eq!(eff.num_params, 4);
         let mut name = [0u8; 16];
         (eff.dispatcher)(e, EFF_GET_PARAM_NAME, 1, 0, name.as_mut_ptr() as *mut c_void, 0.0);
         assert_eq!(std::ffi::CStr::from_bytes_until_nul(&name).unwrap().to_str().unwrap(), "Noise");
+        let mut name = [0u8; 16];
+        (eff.dispatcher)(e, EFF_GET_PARAM_NAME, 3, 0, name.as_mut_ptr() as *mut c_void, 0.0);
+        assert_eq!(std::ffi::CStr::from_bytes_until_nul(&name).unwrap().to_str().unwrap(), "Isolate");
         (eff.dispatcher)(e, EFF_SET_SAMPLE_RATE, 0, 0, std::ptr::null_mut(), 48000.0);
         // All off: a mono mic (silent right channel) comes out on the left, one frame later, at full level.
-        for i in 0..3 { (eff.set_parameter)(e, i, 0.0); }
+        for i in 0..4 { (eff.set_parameter)(e, i, 0.0); }
         let l: Vec<f32> = (0..2048).map(|i| ((i as f32) * 0.05).sin() * 0.5).collect();
         let r = vec![0f32; 2048];
         let (ol, or) = run(e, &l, &r);
@@ -348,6 +358,15 @@ mod tests {
         let rep = reports.lock().unwrap();
         assert!(rep.iter().any(|f| f & crate::ring::FLAG_RUNNING != 0 && f & crate::ring::FLAG_AEC_ON != 0));
         drop(rep);
+        // Stemmeisolering: reported as running, loading or (without the network) unavailable.
+        (eff.set_parameter)(e, 3, 1.0);
+        for _ in 0..60 { let _ = run(e, &l[..480], &r[..480]); }
+        let last = *reports.lock().unwrap().last().unwrap();
+        let iso = crate::ring::FLAG_ISOLATE | crate::ring::FLAG_ISOLATE_LOADING | crate::ring::FLAG_ISOLATE_UNAVAILABLE;
+        assert!(last & iso != 0, "{last}");
+        if !cfg!(feature = "deepfilter") {
+            assert!(last & crate::ring::FLAG_ISOLATE_UNAVAILABLE != 0);
+        }
         (eff.dispatcher)(e, EFF_CLOSE, 0, 0, std::ptr::null_mut(), 0.0);
     }
 

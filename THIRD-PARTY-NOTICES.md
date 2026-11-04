@@ -41,6 +41,11 @@ GoXLR Studio er MIT-licenseret. Windows-udgaven indeholder desuden disse kompone
   - **nnnoiseless** 0.5 – en Rust-udgave af RNNoise. Licens: BSD-3-Clause – Copyright (c) 2020 Joe Neeman, 2017 Mozilla, 2007-2017 Jean-Marc Valin,
     2005-2017 Xiph.Org Foundation, 2003-2004 Mark Borgerding. Fuld tekst: [`licenses/nnnoiseless-RNNoise-BSD-3-Clause.txt`](licenses/nnnoiseless-RNNoise-BSD-3-Clause.txt).
     Kilde: https://github.com/jneem/nnnoiseless
+  - **DeepFilterNet 3** (Stemmeisolering) – modellen (`DeepFilterNet3_onnx.tar.gz` fra v0.5.6, hentet og SHA-256-tjekket i bygget) og GoXLR Studios egen
+    udgave af dens inferens (efter libDF). Licens: MIT eller Apache-2.0 (valgt: MIT) – Copyright (c) 2021 Hendrik Schröter.
+    Fuld tekst: [`licenses/DeepFilterNet-MIT.txt`](licenses/DeepFilterNet-MIT.txt). Kilde: https://github.com/Rikorose/DeepFilterNet
+  - **tract** 0.19 – kører netværket. Licens: MIT eller Apache-2.0 (valgt: MIT) – Sonos og bidragydere.
+    Fuld tekst: [`licenses/tract-MIT.txt`](licenses/tract-MIT.txt). Kilde: https://github.com/sonos/tract
 - Lægges i `C:\Program Files\GoXLR Studio Engine\` og indlæses af EQ-motoren på GoXLR'ens "Chat Mic", når du slår "Ren mikrofon" til.
 
 ## Hardware-driver (følger ikke med)
