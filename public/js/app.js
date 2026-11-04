@@ -9,6 +9,7 @@ import { diagView } from './views-diag.js';
 import { troubleshoot, bannerFinding } from './troubleshoot.js';
 import { restoreOpenMic } from './openmic.js';
 import { autoGateTick } from './autogate.js';
+import { startVoiceClean, voiceMicPayload } from './voiceclean.js';
 import { soundcheckView } from './views-soundcheck.js';
 import { deckView } from './views-deck.js';
 import { pedalsView } from './views-pedals.js';
@@ -185,7 +186,11 @@ async function applyOutputEq() {
     if (r && r !== target) { st.target = target = r; storeSet('output-eq', st); }
     if (r && !st.target_name) { st.target_name = deviceName(devs, r); storeSet('output-eq', st); }
   }
-  return setOutputEqEngine(engineConfig(st, { devices: devs, profile: conn.mixer?.profile_name || null, target }));
+  const payload = engineConfig(st, { devices: devs, profile: conn.mixer?.profile_name || null, target });
+  // Ren mikrofon: the mic's part of the same config (voiceclean.js).
+  const mic = await voiceMicPayload(ctx).catch(() => null);
+  if (mic) payload.mic = mic;
+  return setOutputEqEngine(payload);
 }
 
 // What the engine plays: the active slot with Loudness/Crossfeed and the preamp offset from the
@@ -1024,6 +1029,7 @@ async function boot() {
   setTimeout(() => showWhatsNew(), 4000);
   setTimeout(() => checkDriver(), 2500);
   startMutedReminder();
+  startVoiceClean(ctx);
   runLaunchAction();
   setTimeout(() => checkUpdate(), 15000);
   setInterval(() => checkUpdate(), 6 * 3600 * 1000);

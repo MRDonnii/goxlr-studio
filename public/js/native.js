@@ -81,6 +81,7 @@ const brokenDemo = typeof location !== 'undefined' && /[?&]brokenengine\b/.test(
 const demoEngine = brokenDemo
   ? { kind: 'builtin', mode: 'sfx-efx', uses_our_config: true, unregistered: true, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) }
   : { kind: 'external', mode: 'lfx-gfx', uses_our_config: false, installed: new Set(['out-goxlr-system', 'out-goxlr-game', 'out-goxlr-chat', 'out-goxlr-music']) };
+demoEngine.mics = new Set();
 
 export async function engineInfo() {
   if (isNative()) return invoke('engine_info');
@@ -105,6 +106,12 @@ export async function engineInfo() {
     denoise_installed: demoEngine.kind === 'builtin',
     dynamics_bundled: true,
     dynamics_installed: demoEngine.kind === 'builtin',
+    voice_bundled: true,
+    voice_installed: demoEngine.kind === 'builtin',
+    mics: demoDevices.filter((d) => d.flow === 'capture').map((d) => {
+      const installed = demoEngine.kind === 'builtin' && demoEngine.mics.has(d.id);
+      return { id: d.id, guid: d.id, name: d.name, installed, mode: installed ? 'sfx-mfx' : null };
+    }),
   };
 }
 
@@ -142,6 +149,7 @@ export const ADMIN_TASKS = {
   uninstall: 'Fjerner EQ-motoren fra alle udgange, afregistrerer den og sletter motorfilerne. Windows’ lydtjeneste genstartes.',
   'use-external': 'Peger Equalizer APO’s config-mappe (ConfigPath) på GoXLR Studios EQ og genstarter Windows’ lydtjeneste.',
   'restore-external': 'Giver Equalizer APO sin egen config-mappe tilbage og genstarter Windows’ lydtjeneste.',
+  'set-mics': 'Sætter EQ-motoren på mikrofonen (Ren mikrofon: FxProperties i registreringsdatabasen), genstarter Windows’ lydtjeneste og tester at den bliver indlæst.',
   'disable-autostart': 'Slår GoXLR-softwares autostart fra: deaktiverer planlagte opgaver (schtasks /DISABLE) og flytter genveje fra Startup-mappen til backup-mappen. Intet slettes.',
 };
 function adminEvent(phase, task, extra = {}) {
@@ -174,6 +182,12 @@ async function engineTaskRaw(task) {
     demoEngine.installed = new Set(task.devices);
     if (task.mode) demoEngine.mode = task.mode;
     tests = demoTest(log, !task.mode);
+  } else if (task.action === 'set-mics') {
+    if (demoEngine.kind !== 'builtin') return { ok: false, error: 'GoXLR Studios EQ-motor er ikke installeret', log, reboot: false, tests: [], sound: [] };
+    demoEngine.mics = new Set(task.devices);
+    for (const d of task.devices) log.push(`EQ-motor sat på mikrofonen: ${demoDevices.find((x) => x.id === d)?.name || d} (sfx-mfx)`);
+    tests = task.devices.map((id) => ({ guid: id, name: demoDevices.find((x) => x.id === id)?.name || id, mode: 'sfx-mfx', pre_mix: true, post_mix: false, capture: true, ok: true, error: null }));
+    for (const t of tests) log.push(`✓ ${t.name}: Ren mikrofon kører (SFX/MFX)`);
   } else if (task.action === 'disable-autostart') {
     for (const a of demoAutostarts) {
       if ((a.kind === 'task' && task.tasks?.includes(a.id)) || (a.kind === 'link' && task.links?.includes(a.id))) {
@@ -190,7 +204,7 @@ async function engineTaskRaw(task) {
     }
     tests = demoTest(log);
   } else if (task.action === 'uninstall') {
-    demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); log.push('EQ-motoren er fjernet');
+    demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); demoEngine.mics = new Set(); log.push('EQ-motoren er fjernet');
   } else if (task.action === 'use-external') { demoEngine.uses_our_config = true; log.push('Equalizer APO læser nu GoXLR Studios EQ'); }
   else if (task.action === 'restore-external') { demoEngine.uses_our_config = false; log.push('Equalizer APO bruger igen sin egen config-mappe'); }
   return { ok: true, error: null, log, reboot: tests.some((t) => !t.ok && !t.error), tests, sound: tests.length ? demoSound : [] };
@@ -431,6 +445,23 @@ export async function clipsSave(seconds) {
   return `C:\\Users\\demo\\Music\\GoXLR Studio\\Klip ${new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '.')}.wav`;
 }
 export async function clipsOpenDir() { if (isNative()) return invoke('clips_open_dir'); }
+
+// Ren mikrofon's echo reference (voiceref.rs). The demo pretends the plugin runs while it is on.
+let demoVoice = { enabled: false, sources: [] };
+export async function voiceConfigure(config) {
+  if (isNative()) return invoke('voice_configure', { config });
+  demoVoice = config;
+}
+export async function voiceStatus() {
+  if (isNative()) return invoke('voice_status');
+  if (!demoVoice.enabled) return { enabled: false, connected: false, plugin: false, echo: false, noise: false, reference: false, bypassed: false, erle_db: null, delay_ms: null, playing: false, sources: [], error: null };
+  const t = Date.now() / 1000;
+  return {
+    enabled: true, connected: demoEngine.mics.size > 0, plugin: demoEngine.mics.size > 0, echo: demoVoice.sources.length > 0, noise: true, reference: demoVoice.sources.length > 0, bypassed: false,
+    erle_db: 24 + 4 * Math.sin(t / 3), delay_ms: 38, playing: demoVoice.sources.length > 0,
+    sources: demoVoice.sources.map((s) => ({ device: s.device, ok: true, rate: 48000, playing: s.gain > 0, error: null })), error: null,
+  };
+}
 
 /** An output's format ({ rate, bits } or null). The demo's Chat output runs 48 kHz. */
 export async function deviceFormat(id) {
