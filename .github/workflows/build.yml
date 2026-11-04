@@ -72,6 +72,20 @@ jobs:
           Pop-Location
           Copy-Item plugins/dynamics/target/release/goxlr_studio_dynamics.dll $env:ENGINE_DIR
 
+      # Ren mikrofon: echo cancellation + noise suppression on the GoXLR's Chat Mic (plugins/voiceclean).
+      # Its tests run in release (they include a speed test for the audio engine).
+      - name: Build Ren mikrofon plugin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location plugins/voiceclean
+          cargo test --release
+          if ($LASTEXITCODE -ne 0) { throw 'Ren mikrofon tests failed' }
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw 'Ren mikrofon build failed' }
+          Pop-Location
+          Copy-Item plugins/voiceclean/target/release/goxlr_studio_voice.dll $env:ENGINE_DIR
+
       # Signed updates: with the repository secret UPDATE_SIGNING_KEY (base64 of 32 random bytes,
       # an ed25519 private key) the matching public key is built into the app, and latest.json is
       # signed below. Without the secret everything works as before (unsigned).

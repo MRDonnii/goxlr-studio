@@ -19,8 +19,9 @@ fn main() {
         if files.iter().all(|f| dir.join(f).is_file()) {
             let mut code = String::from("pub static ENGINE_FILES: &[(&str, &[u8])] = &[\n");
             // Optional: the noise-suppression VST plugin for the chat (only when CI fetched it).
-            // … and GoXLR Studio's own limiter/compressor plugin (plugins/dynamics).
-            let optional = ["rnnoise_stereo.dll", "goxlr_studio_dynamics.dll"];
+            // … GoXLR Studio's own limiter/compressor plugin (plugins/dynamics) and the clean-mic
+            // plugin (plugins/voiceclean).
+            let optional = ["rnnoise_stereo.dll", "goxlr_studio_dynamics.dll", "goxlr_studio_voice.dll"];
             for f in files.iter().chain(optional.iter().filter(|f| dir.join(f).is_file())) {
                 let p = dir.join(f);
                 println!("cargo:rerun-if-changed={}", p.display());

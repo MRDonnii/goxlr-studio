@@ -56,6 +56,63 @@ pub struct OutputEq {
     /// Dynamik: GoXLR Studio's own limiter/compressor plugin (plugins/dynamics), last on every output.
     #[serde(default)]
     pub dynamics: Option<Dynamics>,
+    /// Ren mikrofon: echo and noise removal on the microphone(s) (plugins/voiceclean).
+    #[serde(default)]
+    pub mic: Option<MicClean>,
+}
+
+/// "Ren mikrofon" on the microphones the engine is on (normally the GoXLR's "Chat Mic").
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct MicClean {
+    /// Capture endpoint ids ({0.0.1.00000000}.{guid}).
+    pub devices: Vec<String>,
+    pub echo: bool,
+    /// 0 = off, 0.5 = normal, 1 = strong (the plugin's normalized "Noise" parameter).
+    pub noise: f64,
+    #[serde(default = "yes")]
+    pub high_pass: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The "VSTPlugin:" line for the Ren mikrofon plugin.
+pub fn voice_line(dll: &str, m: &MicClean) -> String {
+    let flag = |b: bool| if b { 1.0 } else { 0.0 };
+    let noise = if m.noise.is_finite() { m.noise.clamp(0.0, 1.0) } else { 0.5 };
+    let mut line = String::from("VSTPlugin: Library");
+    line.push_str(" \"");
+    line.push_str(dll);
+    line.push('"');
+    line.push_str(&format!(" Echo {:.4} Noise {:.4} HighPass {:.4}\n", flag(m.echo), noise, flag(m.high_pass)));
+    line
+}
+
+/// When the engine is on a microphone, Equalizer APO reads this config for the mic too (its
+/// "capture" stage), so the playback EQ is kept to the outputs and the mic gets its own part:
+/// `If: stage == "capture"` · mic section · `Else:` · playback · `EndIf:`. Without a microphone the
+/// config stays exactly as before.
+pub fn with_mic(playback: &str, mic: Option<&MicClean>, dll: &str, name_of: &dyn Fn(&str) -> Option<String>) -> String {
+    let header_end = playback.find('\n').map(|i| i + 1).unwrap_or(0);
+    let (header, rest) = playback.split_at(header_end);
+    let mut out = String::from(header);
+    out.push_str("If: stage == ");
+    out.push('"');
+    out.push_str("capture");
+    out.push('"');
+    out.push('\n');
+    if let Some(m) = mic {
+        let sel: Vec<String> = m.devices.iter().filter_map(|id| selector(id, name_of)).collect();
+        if !sel.is_empty() && (m.echo || m.noise > 0.0 || m.high_pass) {
+            out.push_str(&format!("Device: {}\n", sel.join("; ")));
+            out.push_str(&voice_line(dll, m));
+        }
+    }
+    out.push_str("Else:\n");
+    out.push_str(rest);
+    out.push_str("EndIf:\n");
+    out
 }
 
 /// The plugin's 8 parameters, normalised 0–1 in its order (Thresh, Ratio, Attack, Release, Makeup,
@@ -284,8 +341,15 @@ pub fn apply(eq: &OutputEq) -> Result<(), String> {
     if !crate::engine::dynamics_path().exists() {
         eq.dynamics = None;
     }
+    if !crate::engine::voice_path().exists() {
+        eq.mic = None;
+    }
     let eq = &eq;
-    let text = render_with(eq, name.as_deref(), &|id| crate::audio::name_of(id));
+    let mut text = render_with(eq, name.as_deref(), &|id| crate::audio::name_of(id));
+    // Ren mikrofon: split by stage when the engine is on a microphone (or the mic part is wanted).
+    if eq.mic.is_some() || !crate::engine::installed_mic_guids().is_empty() {
+        text = with_mic(&text, eq.mic.as_ref(), &crate::engine::voice_path().display().to_string(), &|id| crate::audio::name_of(id));
+    }
     // Virtuelle højttalere: the impulse files must be there before the config names them.
     let wanted: Vec<crate::surround::Surround> = if eq.enabled { eq.surround.into_iter().chain(eq.channels.iter().filter(|c| c.enabled).filter_map(|c| c.surround)).collect() } else { Vec::new() };
     crate::surround::ensure_files(&dir, &wanted)?;
@@ -484,6 +548,65 @@ pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
 mod tests {
     use super::*;
 
+    fn mic(devices: &[&str]) -> MicClean {
+        MicClean { devices: devices.iter().map(|d| d.to_string()).collect(), echo: true, noise: 0.5, high_pass: true }
+    }
+
+    #[test]
+    fn voice_line_names_the_parameters() {
+        let l = voice_line("C:\\E\\goxlr_studio_voice.dll", &MicClean { noise: 7.0, echo: false, ..mic(&[]) });
+        assert_eq!(l, "VSTPlugin: Library \"C:\\E\\goxlr_studio_voice.dll\" Echo 0.0000 Noise 1.0000 HighPass 1.0000\n");
+        let l = voice_line("x.dll", &MicClean { noise: f64::NAN, ..mic(&[]) });
+        assert!(l.ends_with(" Echo 1.0000 Noise 0.5000 HighPass 1.0000\n"), "{l}");
+    }
+
+    #[test]
+    fn the_mic_gets_its_own_part_and_playback_stays_on_the_outputs() {
+        let eq = OutputEq { enabled: true, preamp: -3.0, bands: vec![], target: None, extra: vec![], graphic: vec![], devices: None, channels: vec![], surround: None, denoise: false, dynamics: None, mic: None };
+        let playback = render(&eq, None);
+        assert!(playback.contains("Device: all\n"));
+        let m = mic(&["{0.0.1.00000000}.{aaaa-1111}"]);
+        let text = with_mic(&playback, Some(&m), "v.dll", &|_| None);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].starts_with('#'), "header first");
+        assert_eq!(lines[1], "If: stage == \"capture\"");
+        assert_eq!(lines[2], "Device: {aaaa-1111}");
+        assert!(lines[3].starts_with("VSTPlugin: Library \"v.dll\" Echo 1.0000"));
+        assert_eq!(lines[4], "Else:");
+        assert_eq!(lines[5], "Device: all");
+        assert_eq!(lines[6], "Preamp: -3.0 dB");
+        assert_eq!(*lines.last().unwrap(), "EndIf:");
+        assert_eq!(text.matches("If:").count() - text.matches("EndIf:").count(), text.matches("EndIf:").count(), "balanced");
+        // The engine on a mic, Ren mikrofon off: the mic gets nothing, playback is unchanged.
+        let text = with_mic(&playback, None, "v.dll", &|_| None);
+        assert!(!text.contains("VSTPlugin"));
+        assert!(text.contains("If: stage == \"capture\"\nElse:\nDevice: all\n"));
+        // Everything off or no devices: no mic section either.
+        let off = MicClean { echo: false, noise: 0.0, high_pass: false, ..m.clone() };
+        assert!(!with_mic(&playback, Some(&off), "v.dll", &|_| None).contains("VSTPlugin"));
+        assert!(!with_mic(&playback, Some(&mic(&[])), "v.dll", &|_| None).contains("VSTPlugin"));
+    }
+
+    #[test]
+    fn nested_ifs_in_playback_stay_balanced() {
+        let mut eq = OutputEq { enabled: true, preamp: 0.0, bands: vec![], target: Some("{0.0.0.00000000}.{bbbb}".into()), extra: vec![], graphic: vec![], devices: None, channels: vec![], surround: None, denoise: true, dynamics: None, mic: None };
+        eq.extra = vec!["If: sampleRate == 48000".into(), "Convolution: fir-a.wav".into(), "EndIf:".into()];
+        let text = with_mic(&render(&eq, None), Some(&mic(&["{0.0.1.00000000}.{cccc}"])), "v.dll", &|_| None);
+        let mut depth = 0i32;
+        for l in text.lines() {
+            if l.starts_with("If:") {
+                depth += 1;
+            }
+            if l == "EndIf:" {
+                depth -= 1;
+            }
+            assert!(depth >= 0);
+        }
+        assert_eq!(depth, 0);
+        assert!(text.contains("Device: {cccc}\n"));
+        assert!(text.contains("Device: {bbbb}\n"));
+    }
+
     #[test]
     fn dynamics_line_names_every_parameter() {
         let l = dynamics_line("C:\\Program Files\\GoXLR Studio Engine\\goxlr_studio_dynamics.dll", &Dynamics { params: [0.75, 0.0, 0.5, 0.5, 0.0, 1.0, 2.0, -1.0] });
@@ -531,6 +654,7 @@ mod tests {
             denoise: false,
             graphic: vec![],
             dynamics: None,
+            mic: None,
         };
         let text = render(&eq, None);
         assert!(text.is_ascii(), "{text}");
@@ -553,6 +677,7 @@ mod tests {
             denoise: false,
             graphic: vec![],
             dynamics: None,
+            mic: None,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().skip(2).collect();
@@ -588,6 +713,7 @@ mod tests {
             denoise: false,
             graphic: vec![(100.0, 3.0), (1000.0, -2.0)],
             dynamics: None,
+            mic: None,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().skip(2).take(3).collect();
@@ -608,6 +734,7 @@ mod tests {
             denoise: false,
             graphic: vec![],
             dynamics: None,
+            mic: None,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().collect();
@@ -629,6 +756,7 @@ mod tests {
             surround: Some(crate::surround::Surround { angle: 30.0, room: 1 }),
             denoise: false,
             dynamics: Some(Dynamics { params: [0.5, 0.0, 0.5, 0.5, 0.0, 1.0, 0.9167, 0.5] }),
+            mic: None,
         };
         let text = render(&eq, None);
         let lines: Vec<&str> = text.lines().collect();

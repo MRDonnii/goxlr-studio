@@ -33,5 +33,15 @@ GoXLR Studio er MIT-licenseret. Windows-udgaven indeholder desuden disse kompone
 - Lægges i `C:\Program Files\GoXLR Studio Engine\` sammen med EQ-motoren og indlæses af den (VSTPlugin-filteret) på Chat-udgangen,
   når du slår "Fjern støj fra vennernes stemmer" til. GoXLR Studio linker ikke mod det.
 
+## Ren mikrofon – GoXLR Studios eget plugin (`goxlr_studio_voice.dll`)
+- GoXLR Studios eget VST-plugin (MIT, [`plugins/voiceclean/`](plugins/voiceclean/)) bygget i GitHub Actions. Det indeholder:
+  - **sonora** 0.2 – en Rust-udgave af WebRTC's lydbehandling (ekkofjerner AEC3, støjfjerner, high-pass). Licens: BSD-3-Clause –
+    Copyright (c) 2011 The WebRTC Project Authors, 2016 Arun Raghavan og bidragydere, 2026 dignifiedquire. Fuld tekst: [`licenses/sonora-BSD-3-Clause.txt`](licenses/sonora-BSD-3-Clause.txt).
+    Kilde: https://github.com/dignifiedquire/sonora
+  - **nnnoiseless** 0.5 – en Rust-udgave af RNNoise. Licens: BSD-3-Clause – Copyright (c) 2020 Joe Neeman, 2017 Mozilla, 2007-2017 Jean-Marc Valin,
+    2005-2017 Xiph.Org Foundation, 2003-2004 Mark Borgerding. Fuld tekst: [`licenses/nnnoiseless-RNNoise-BSD-3-Clause.txt`](licenses/nnnoiseless-RNNoise-BSD-3-Clause.txt).
+    Kilde: https://github.com/jneem/nnnoiseless
+- Lægges i `C:\Program Files\GoXLR Studio Engine\` og indlæses af EQ-motoren på GoXLR'ens "Chat Mic", når du slår "Ren mikrofon" til.
+
 ## Hardware-driver (følger ikke med)
 TC-Helicons USB-driver til GoXLR skal være installeret i Windows. Den hentes fra TC-Helicon og er ikke en del af GoXLR Studio.

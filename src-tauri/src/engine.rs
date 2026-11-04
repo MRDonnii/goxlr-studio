@@ -18,6 +18,7 @@ pub const POST_MIX: &str = "{EC1CC9CE-FAED-4822-828A-82A81A6F018F}";
 const APP_KEY: &str = r"SOFTWARE\EqualizerAPO";
 const CHILD_KEY: &str = r"SOFTWARE\EqualizerAPO\Child APOs";
 const RENDER_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render";
+const CAPTURE_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture";
 const AUDIO_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Audio";
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\EqualizerAPO";
 const PREV_CONFIG_VALUE: &str = "GoXLRStudioPreviousConfigPath";
@@ -77,6 +78,15 @@ pub fn dynamics_bundled() -> bool {
     ENGINE_FILES.iter().any(|(n, _)| *n == DYNAMICS_DLL)
 }
 
+/// "Ren mikrofon": GoXLR Studio's echo/noise plugin for the mic (plugins/voiceclean, built in CI).
+pub const VOICE_DLL: &str = "goxlr_studio_voice.dll";
+pub fn voice_path() -> PathBuf {
+    install_dir().join(VOICE_DLL)
+}
+pub fn voice_bundled() -> bool {
+    ENGINE_FILES.iter().any(|(n, _)| *n == VOICE_DLL)
+}
+
 /// Files this build carries that an older install doesn't have yet (e.g. the noise-suppression
 /// plugin added in 0.8.0) are added; nothing is overwritten or re-registered.
 fn add_missing_files(log: &mut Vec<String>) {
@@ -113,6 +123,27 @@ fn is_ours(guid: &str) -> bool {
 
 pub fn endpoint_id(guid: &str) -> String {
     format!("{{0.0.0.00000000}}.{}", guid.to_lowercase())
+}
+
+/// A microphone's (capture endpoint's) id.
+pub fn capture_endpoint_id(guid: &str) -> String {
+    format!("{{0.0.1.00000000}}.{}", guid.to_lowercase())
+}
+
+/// The endpoint's registry key: outputs under Render, microphones under Capture (as
+/// Equalizer APO's DeviceAPOInfo: a GUID that is not an output is an input).
+fn endpoint_key(guid: &str) -> String {
+    let render = format!(r"{RENDER_KEY}\{guid}");
+    if reg::exists(&render) {
+        render
+    } else {
+        format!(r"{CAPTURE_KEY}\{guid}")
+    }
+}
+
+/// A microphone (capture endpoint): the engine only runs before the mix there (pre-mix).
+fn is_capture(guid: &str) -> bool {
+    !reg::exists(&format!(r"{RENDER_KEY}\{guid}")) && reg::exists(&format!(r"{CAPTURE_KEY}\{guid}"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -423,10 +454,17 @@ pub struct EngineInfo {
     pub denoise_installed: bool,
     pub dynamics_bundled: bool,
     pub dynamics_installed: bool,
+    /// "Ren mikrofon": the plugin in this build / next to the engine, and the microphones.
+    #[serde(default)]
+    pub voice_bundled: bool,
+    #[serde(default)]
+    pub voice_installed: bool,
+    #[serde(default)]
+    pub mics: Vec<EngineDevice>,
 }
 
 fn fx_key(guid: &str) -> String {
-    format!(r"{RENDER_KEY}\{guid}\FxProperties")
+    format!(r"{}\FxProperties", endpoint_key(guid))
 }
 
 fn device_installed(guid: &str) -> bool {
@@ -454,6 +492,25 @@ pub fn devices() -> Vec<EngineDevice> {
     }
     // GoXLR outputs first, then the rest alphabetically.
     out.sort_by_key(|d| (!d.name.to_lowercase().contains("goxlr"), d.name.to_lowercase()));
+    out
+}
+
+/// The microphones (capture endpoints), GoXLR's first – for "Ren mikrofon".
+pub fn mic_devices() -> Vec<EngineDevice> {
+    let mut out = Vec::new();
+    for guid in reg::subkeys(CAPTURE_KEY) {
+        let key = format!(r"{CAPTURE_KEY}\{guid}");
+        let state = reg::read_dword(&key, "DeviceState").unwrap_or(0);
+        if state & DEVICE_STATE_NOTPRESENT != 0 {
+            continue;
+        }
+        let props = format!(r"{key}\Properties");
+        let name = output_label(&reg::read_str(&props, DEVICE_VALUE).unwrap_or_default(), &reg::read_str(&props, CONNECTION_VALUE).unwrap_or_default(), &guid);
+        let installed = device_installed(&guid);
+        let mode = if installed { load_device(&guid).ok().map(|d| d.mode.as_str().to_string()) } else { None };
+        out.push(EngineDevice { id: capture_endpoint_id(&guid), installed, mode, guid, name });
+    }
+    out.sort_by_key(|d| (!d.name.to_lowercase().contains("goxlr"), !d.name.to_lowercase().contains("chat mic"), d.name.to_lowercase()));
     out
 }
 
@@ -501,6 +558,9 @@ pub fn info() -> EngineInfo {
         denoise_installed: denoise_path().exists(),
         dynamics_bundled: dynamics_bundled(),
         dynamics_installed: dynamics_path().exists(),
+        voice_bundled: voice_bundled(),
+        voice_installed: voice_path().exists(),
+        mics: if kind == "builtin" { mic_devices() } else { mic_devices().into_iter().map(|d| EngineDevice { installed: false, ..d }).collect() },
     }
 }
 
@@ -672,7 +732,7 @@ struct DeviceState {
 }
 
 fn load_device(guid: &str) -> Result<DeviceState, String> {
-    let key = format!(r"{RENDER_KEY}\{guid}");
+    let key = endpoint_key(guid);
     let fx = fx_key(guid);
     let mut originals: [String; 5] = Default::default();
     let mut mode = Mode::LfxGfx;
@@ -766,7 +826,9 @@ fn original_post_mix(d: &DeviceState) -> String {
 }
 
 fn install_device(d: &DeviceState) -> Result<(), String> {
-    let key = format!(r"{RENDER_KEY}\{}", d.guid);
+    let key = endpoint_key(&d.guid);
+    // A microphone only gets the pre-mix part (as Equalizer APO: no post-mix on inputs).
+    let capture = is_capture(&d.guid);
     let fx = fx_key(&d.guid);
     let child = format!(r"{CHILD_KEY}\{}", d.guid);
     reg::create(CHILD_KEY)?;
@@ -789,14 +851,16 @@ fn install_device(d: &DeviceState) -> Result<(), String> {
         }
     }
     reg::write_str(&child, "PreMixChild", &original_pre_mix(d))?;
-    reg::write_str(&child, "PostMixChild", &original_post_mix(d))?;
+    reg::write_str(&child, "PostMixChild", &if capture { String::new() } else { original_post_mix(d) })?;
     reg::write_str(&child, "AllowSilentBufferModification", "false")?;
     reg::delete_value(&child, "DisableAutomaticAdjustment")?;
     reg::write_str(&child, "Version", INSTALL_VERSION)?;
     match d.mode {
         Mode::LfxGfx => {
             reg::write_str(&fx, LFX, PRE_MIX)?;
-            reg::write_str(&fx, GFX, POST_MIX)?;
+            if !capture {
+                reg::write_str(&fx, GFX, POST_MIX)?;
+            }
             for n in [SFX, MFX, EFX] {
                 reg::delete_value(&fx, n)?;
             }
@@ -808,9 +872,11 @@ fn install_device(d: &DeviceState) -> Result<(), String> {
             if !reg::value_exists(&fx, SFX_MODES) {
                 reg::write_multi(&fx, SFX_MODES, DEFAULT_MODE)?;
             }
-            reg::write_str(&fx, MFX, POST_MIX)?;
-            if !reg::value_exists(&fx, MFX_MODES) {
-                reg::write_multi(&fx, MFX_MODES, DEFAULT_MODE)?;
+            if !capture {
+                reg::write_str(&fx, MFX, POST_MIX)?;
+                if !reg::value_exists(&fx, MFX_MODES) {
+                    reg::write_multi(&fx, MFX_MODES, DEFAULT_MODE)?;
+                }
             }
         }
         Mode::SfxEfx => {
@@ -820,9 +886,11 @@ fn install_device(d: &DeviceState) -> Result<(), String> {
             if !reg::value_exists(&fx, SFX_MODES) {
                 reg::write_multi(&fx, SFX_MODES, DEFAULT_MODE)?;
             }
-            reg::write_str(&fx, EFX, POST_MIX)?;
-            if !reg::value_exists(&fx, EFX_MODES) {
-                reg::write_multi(&fx, EFX_MODES, DEFAULT_MODE)?;
+            if !capture {
+                reg::write_str(&fx, EFX, POST_MIX)?;
+                if !reg::value_exists(&fx, EFX_MODES) {
+                    reg::write_multi(&fx, EFX_MODES, DEFAULT_MODE)?;
+                }
             }
         }
     }
@@ -904,6 +972,43 @@ fn apply_devices(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -
     Ok(())
 }
 
+/// "Ren mikrofon": the engine on exactly `wanted` microphones (endpoint ids or GUIDs) and off all
+/// other microphones. On an input SFX/EFX and SFX/MFX are the same (only the pre-mix part).
+fn apply_mics(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -> Result<(), String> {
+    let want = |guid: &str| wanted.iter().any(|w| w.to_lowercase().ends_with(&guid.to_lowercase()));
+    let forced = mode.and_then(Mode::parse).map(|m| if m == Mode::SfxEfx { Mode::SfxMfx } else { m });
+    for dev in mic_devices() {
+        let mut d = load_device(&dev.guid)?;
+        if want(&dev.guid) && d.installed && forced.is_some_and(|m| m != d.mode) {
+            uninstall_device(&d)?;
+            d = load_device(&dev.guid)?;
+        }
+        if want(&dev.guid) && !d.installed {
+            if let Some(m) = forced {
+                d.mode = m;
+            }
+            install_device(&d)?;
+            log.push(format!("EQ-motor sat på mikrofonen: {} ({})", dev.name, d.mode.as_str()));
+        } else if !want(&dev.guid) && d.installed {
+            uninstall_device(&d)?;
+            log.push(format!("EQ-motor fjernet fra mikrofonen: {}", dev.name));
+        } else if d.installed {
+            reg::delete_value(&fx_key(&dev.guid), DISABLE_ENHANCEMENTS)?;
+        }
+    }
+    for dev in mic_devices() {
+        if want(&dev.guid) && !dev.installed {
+            log.push(format!("✗ {}: fik ikke EQ-motoren", dev.name));
+        }
+    }
+    Ok(())
+}
+
+/// The microphones the engine is on.
+pub fn installed_mic_guids() -> Vec<String> {
+    mic_devices().into_iter().filter(|d| d.installed).map(|d| d.guid).collect()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Device test (port of Equalizer APO 1.4's DeviceTestThread): with the test pipe registered, the
 // engine reports in from Windows' audio service when it is loaded on an output ("Initialize" of
@@ -928,6 +1033,9 @@ pub struct DeviceTest {
     /// Highest peak measured on the output before the test (0..1).
     #[serde(default)]
     pub peak: Option<f32>,
+    /// A microphone: only the pre-mix part runs there.
+    #[serde(default)]
+    pub capture: bool,
 }
 
 const TEST_PIPE_VALUE: &str = "DeviceTestPipeName";
@@ -956,7 +1064,7 @@ fn apply_test_messages(messages: &[String], results: &mut [DeviceTest]) {
                 "PostMix" => r.post_mix = true,
                 _ => {}
             }
-            r.ok = r.pre_mix && r.post_mix;
+            r.ok = r.pre_mix && (r.post_mix || r.capture);
         }
     }
 }
@@ -1104,11 +1212,11 @@ fn open_output(guid: &str) -> Result<(), String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.message())?;
-        let id = reg::wide(&endpoint_id(guid));
+        let id = reg::wide(&if is_capture(guid) { capture_endpoint_id(guid) } else { endpoint_id(guid) });
         let dev = en.GetDevice(PCWSTR(id.as_ptr())).map_err(|e| e.message())?;
         let state = dev.GetState().map_err(|e| e.message())?;
         if state != DEVICE_STATE_ACTIVE {
-            return Err("udgangen er ikke tilsluttet".into());
+            return Err("enheden er ikke tilsluttet".into());
         }
         let client: IAudioClient = dev.Activate(CLSCTX_ALL, None).map_err(|e| e.message())?;
         let format = client.GetMixFormat().map_err(|e| e.message())?;
@@ -1175,12 +1283,13 @@ fn test_round(results: &mut [DeviceTest], which: &[usize], log: &mut Vec<String>
 /// Tests the engine on these outputs and, with `auto_adjust`, hooks it in another way where it did
 /// not load (SFX/EFX → SFX/MFX → LFX/GFX), keeping the best way found.
 fn test_outputs(guids: &[String], auto_adjust: bool, log: &mut Vec<String>) -> Vec<DeviceTest> {
-    let names: std::collections::HashMap<String, String> = devices().into_iter().map(|d| (d.guid.to_lowercase(), d.name)).collect();
+    let names: std::collections::HashMap<String, String> = devices().into_iter().chain(mic_devices()).map(|d| (d.guid.to_lowercase(), d.name)).collect();
     let mut results: Vec<DeviceTest> = guids
         .iter()
-        .map(|g| DeviceTest { guid: g.clone(), name: names.get(&g.to_lowercase()).cloned().unwrap_or_else(|| g.clone()), ..Default::default() })
+        .map(|g| DeviceTest { guid: g.clone(), name: names.get(&g.to_lowercase()).cloned().unwrap_or_else(|| g.clone()), capture: is_capture(g), ..Default::default() })
         .collect();
-    let mut remaining: Vec<Vec<Mode>> = vec![TEST_MODES.to_vec(); results.len()];
+    // On a microphone SFX/EFX and SFX/MFX are the same way (pre-mix only).
+    let mut remaining: Vec<Vec<Mode>> = results.iter().map(|r| TEST_MODES.iter().copied().filter(|m| !(r.capture && *m == Mode::SfxEfx)).collect()).collect();
     let mut best: Vec<Option<(u8, Mode)>> = vec![None; results.len()];
     let mut pending: Vec<usize> = (0..results.len()).collect();
     log.push("Tester at EQ-motoren bliver indlæst på udgangene…".into());
@@ -1200,7 +1309,7 @@ fn test_outputs(guids: &[String], auto_adjust: bool, log: &mut Vec<String>) -> V
         let mut changed = false;
         for i in failing {
             let Some(cur) = Mode::parse(&results[i].mode) else { continue };
-            let score = results[i].pre_mix as u8 + results[i].post_mix as u8;
+            let score = results[i].pre_mix as u8 + (results[i].post_mix || results[i].capture) as u8;
             if best[i].map_or(true, |(s, _)| score > s) {
                 best[i] = Some((score, cur));
             }
@@ -1271,6 +1380,26 @@ fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &m
     !failed.is_empty()
 }
 
+/// Tests the engine on the microphones it is on ("Ren mikrofon"). Returns true when Windows should
+/// be restarted (it did not load).
+fn verify_mics(auto_adjust: bool, log: &mut Vec<String>, tests: &mut Vec<DeviceTest>) -> bool {
+    let guids = installed_mic_guids();
+    if guids.is_empty() {
+        return !restart_audio(log);
+    }
+    let found = test_outputs(&guids, auto_adjust, log);
+    for t in &found {
+        log.push(match (&t.error, t.ok) {
+            (_, true) => format!("✓ {}: Ren mikrofon kører ({})", t.name, mode_label(&t.mode)),
+            (Some(e), _) => format!("– {}: kunne ikke testes ({e})", t.name),
+            (None, false) => format!("✗ {}: ikke indlæst", t.name),
+        });
+    }
+    let failed = found.iter().any(|t| !t.ok && t.error.is_none());
+    tests.extend(found);
+    failed
+}
+
 // ---------------------------------------------------------------------------------------------
 // Where the EQ applies compared with where sound plays (fejl 2): an EQ for "System" is "running"
 // but does nothing for Spotify on "Music".
@@ -1289,8 +1418,28 @@ pub fn parse_coverage(config: &str) -> Coverage {
     // EQ pr. kanal writes several "Device:" sections; the EQ applies to the union of them.
     let mut all: Vec<Vec<String>> = Vec::new();
     let mut found = false;
+    // Ren mikrofon: the mic's part (`If: stage == "capture"` … `Else:`) is not about the outputs.
+    let mut depth = 0usize;
+    let mut capture_at: Option<usize> = None;
     for line in config.lines() {
         let l = line.trim().trim_start_matches('\u{feff}');
+        if l.starts_with("If:") {
+            depth += 1;
+            if capture_at.is_none() && l.replace(' ', "") == "If:stage==\"capture\"" {
+                capture_at = Some(depth);
+            }
+            continue;
+        }
+        if (l.starts_with("Else") || l == "EndIf:") && capture_at == Some(depth) {
+            capture_at = None;
+        }
+        if l == "EndIf:" {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        if capture_at.is_some() {
+            continue;
+        }
         let Some(rest) = l.strip_prefix("Device:") else { continue };
         found = true;
         let alts: Vec<Vec<String>> = rest
@@ -1458,6 +1607,12 @@ pub enum Task {
     UseExternal,
     /// Give a separate Equalizer APO its own config folder back.
     RestoreExternal,
+    /// "Ren mikrofon": the engine on these microphones (and off all others), then tested.
+    SetMics {
+        devices: Vec<String>,
+        #[serde(default)]
+        mode: Option<String>,
+    },
     /// Stop other GoXLR Studio processes started as administrator or as another account
     /// (only goxlr-studio.exe is ever stopped).
     StopInstances { pids: Vec<u32> },
@@ -1667,6 +1822,8 @@ fn disable_autostarts(tasks: &[String], links: &[String], user_startup: Option<&
 
 fn uninstall_engine(log: &mut Vec<String>) -> Result<bool, String> {
     apply_devices(&[], None, log)?;
+    // Also off every microphone ("Ren mikrofon"), before the engine's DLL is unregistered.
+    apply_mics(&[], None, log)?;
     let dir = install_dir();
     let dll = dir.join("EqualizerAPO.dll");
     if dll.exists() {
@@ -1729,17 +1886,29 @@ pub fn run_task(task: &Task) -> TaskResult {
         Task::Test => ensure_engine_registered(&mut log).and_then(|_| {
             add_missing_files(&mut log);
             let guids = installed_guids();
-            if guids.is_empty() {
+            let mics = installed_mic_guids();
+            if guids.is_empty() && mics.is_empty() {
                 log.push("EQ-motoren er ikke sat på nogen udgang endnu".into());
-                Ok(false)
-            } else {
-                Ok(verify(&guids, true, &mut log, &mut tests, &mut sound))
+                return Ok(false);
             }
+            let mut reboot = false;
+            if !guids.is_empty() {
+                reboot |= verify(&guids, true, &mut log, &mut tests, &mut sound);
+            }
+            // "Ren mikrofon" on the mic is tested too.
+            if !mics.is_empty() {
+                reboot |= verify_mics(true, &mut log, &mut tests);
+            }
+            Ok(reboot)
         }),
         Task::DisableAutostart { tasks, links, user_startup } => disable_autostarts(tasks, links, user_startup.as_deref(), &mut log),
         Task::Uninstall => uninstall_engine(&mut log),
         Task::UseExternal => use_external(true, &mut log),
         Task::RestoreExternal => use_external(false, &mut log),
+        Task::SetMics { devices, mode } => ensure_engine_registered(&mut log)
+            .map(|r| { add_missing_files(&mut log); r })
+            .and_then(|_| apply_mics(devices, mode.as_deref(), &mut log))
+            .map(|_| verify_mics(mode.is_none(), &mut log, &mut tests)),
         Task::StopInstances { pids } => {
             let left = crate::daemon_host::stop_other_instances(pids);
             if left.is_empty() {
@@ -2016,6 +2185,10 @@ mod tests {
         assert_eq!(parse_coverage("Preamp: 0 dB\n"), Coverage::All);
         let cov = parse_coverage("\u{feff}Device: GoXLR Music; Speakers\n");
         assert!(cov.covers(music) && !cov.covers(system) && cov.covers("Realtek Speakers {x}"));
+        // Ren mikrofon: the mic's part does not count, the playback part (and nested Ifs) does.
+        let cov = parse_coverage("# x\nIf: stage == \"capture\"\nDevice: {mic}\nVSTPlugin: Library \"v.dll\"\nElse:\nDevice: {58a6a695-a61b-4549-8340-5b88409d9be5}\nIf: sampleRate == 48000\nEndIf:\nEndIf:\n");
+        assert_eq!(cov, Coverage::Patterns(vec![vec!["{58a6a695-a61b-4549-8340-5b88409d9be5}".to_string()]]));
+        assert_eq!(parse_coverage("If: stage == \"capture\"\nDevice: {mic}\nElse:\nDevice: all\nEndIf:\n"), Coverage::All);
     }
 
     #[test]
