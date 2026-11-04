@@ -74,6 +74,10 @@ Mikrofon-EQ'en kører i GoXLR'ens egen chip, så den bruger hverken CPU eller gi
 
 **Stemme-forbedrer:** mere fylde, mere klarhed, mindre næset eller mudret med ét klik.
 
+**Ren mikrofon – spil med højttalere uden at genere de andre:** en ekkofjerner fjerner det, højttalerne spiller (spillet, musik og dine medspilleres egne stemmer), fra din mikrofon, og en støjfjerner tager blæser, brum, tastatur og klik. Det kører i GoXLR Studios EQ-motor på GoXLR'ens Chat Mic, så det virker i Discord, spil og alle andre programmer – uden Discords egen støjfjerner. GoXLR Studio holder selv øje med, hvilke kanaler der spiller på højttalerne, og hvor højt.
+
+**Automatisk noise gate:** tærsklen følger rummets støj, så gaten hverken klipper stille tale eller lukker spillyd igennem.
+
 **Limiter (beskyt mod råb):** ét klik gør GoXLR'ens kompressor til en limiter, så råb og grin ikke klipper på stream, i Discord eller i optagelser. Dine egne kompressor-indstillinger kommer tilbage, når den slås fra.
 
 ### Lyd pr. app
