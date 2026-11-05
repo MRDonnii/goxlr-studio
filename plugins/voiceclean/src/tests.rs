@@ -304,3 +304,43 @@ fn follows_when_the_echo_path_changes() {
     let red = db(energy(&mic[r.clone()]) / energy(&out[r]));
     assert!(red >= 25.0, "after the change: {red:.1} dB");
 }
+
+/// The own rumble filter (used without the echo canceller): rumble goes, everything from the
+/// voice up to 20 kHz stays, and the waveform is kept (WebRTC's processing cuts above 16 kHz).
+#[test]
+fn own_high_pass_keeps_the_full_band() {
+    let s = Settings { echo: false, noise: Noise::Off, high_pass: true };
+    assert!(!needs_apm(&s));
+    let gain = |f: f32| -> f64 {
+        let x: Vec<f32> = (0..48000).map(|i| 0.3 * (2.0 * std::f32::consts::PI * f * i as f32 / 48000.0).sin()).collect();
+        let y = run(s, &x, None, 480);
+        db(energy(&y[24000..]) / energy(&x[24000 - FRAME..48000 - FRAME]))
+    };
+    let (g20, g40, g200, g1k, g10k, g18k) = (gain(20.0), gain(40.0), gain(200.0), gain(1000.0), gain(10000.0), gain(18000.0));
+    eprintln!("high-pass: 20 Hz {g20:.1} · 40 Hz {g40:.1} · 200 Hz {g200:.2} · 1 kHz {g1k:.2} · 10 kHz {g10k:.2} · 18 kHz {g18k:.2} dB");
+    assert!(g20 < -40.0 && g40 < -20.0);
+    for g in [g200, g1k, g10k, g18k] {
+        assert!(g.abs() < 0.3, "{g}");
+    }
+    // Speech through it keeps its level (a high-pass turns the phase of the lowest tones a little).
+    let v = voice(48000 * 2, 140.0, 5);
+    let y = run(s, &v, None, 480);
+    let kept = db(energy(&y[FRAME..]) / energy(&v[..v.len() - FRAME]));
+    assert!(kept.abs() < 0.5, "{kept}");
+    // With the echo canceller WebRTC's own high-pass is used.
+    assert!(needs_apm(&Settings { echo: true, noise: Noise::Off, high_pass: true }));
+    assert!(needs_apm(&Settings { echo: false, noise: Noise::Normal, high_pass: false }));
+    assert!(!needs_apm(&Settings { echo: false, noise: Noise::Isolate, high_pass: true }));
+}
+
+#[test]
+fn amount_sets_how_much_background_is_left() {
+    assert_eq!(residual(1.0), 0.0);
+    assert_eq!(residual(f32::NAN), 0.0);
+    let db_of = |m: f32| 20.0 * m.log10();
+    assert!((db_of(residual(0.0)) + 10.0).abs() < 0.01);
+    assert!((db_of(residual(0.5)) + 20.0).abs() < 0.01);
+    assert!((db_of(residual(0.99)) + 29.8).abs() < 0.01);
+    assert_eq!(Settings::from_normalized(&[1.0, 0.5, 1.0, 1.0]).noise, Noise::Isolate);
+    assert_eq!(PARAMS.len(), DEFAULTS.len());
+}

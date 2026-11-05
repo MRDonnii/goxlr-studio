@@ -353,3 +353,37 @@ fn a_second_instance_reuses_the_network() {
     eprintln!("second instance ready after {:?}", t.elapsed());
     assert!(t.elapsed().as_millis() < 500);
 }
+
+/// Styrke: with Amount below full, the background is kept at the chosen level, the voice the same.
+#[test]
+fn amount_keeps_some_background() {
+    let Some(a) = load() else { return };
+    let kb: Vec<f32> = keyboard(48000 * 6, 3).iter().map(|v| v * 0.3).collect();
+    let run = |amount: f32, x: &[f32]| -> Vec<f32> {
+        let mut c = Cleaner::new(Settings { echo: false, noise: Noise::Isolate, high_pass: false });
+        while !c.isolating() {
+            let mut b = [0.0f32; FRAME];
+            c.process(&mut b);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        c.reset();
+        c.set_amount(amount);
+        let mut y = x.to_vec();
+        for ch in y.chunks_mut(480) {
+            c.process(ch);
+        }
+        y
+    };
+    let cut = |amount: f32| db(energy(&kb[48000..]) / energy(&run(amount, &kb)[48000..]).max(1e-30));
+    let (full, medium, light) = (cut(1.0), cut(0.5), cut(0.0));
+    eprintln!("typing alone: full {full:.1} dB, medium {medium:.1} dB, light {light:.1} dB quieter");
+    assert!(full > 50.0);
+    assert!((medium - 20.0).abs() < 3.0, "{medium}");
+    assert!((light - 10.0).abs() < 2.0, "{light}");
+    // The voice keeps its level and shape at medium.
+    let y = run(0.5, &a.clean);
+    let d = 1920;
+    let sdr = si_sdr(&y[d..], &a.clean[..a.clean.len() - d]);
+    eprintln!("speech at medium: SI-SDR {sdr:.1} dB");
+    assert!(sdr > 25.0, "{sdr}");
+}

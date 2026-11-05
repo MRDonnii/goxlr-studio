@@ -47,25 +47,38 @@ pub struct Settings {
 }
 
 /// Parameter names as Equalizer APO sets them (`VSTPlugin: Library "…" Echo 1 Noise 1 HighPass 1 Isolate 0`).
-pub const PARAMS: [&str; 4] = ["Echo", "Noise", "HighPass", "Isolate"];
-pub const DEFAULTS: [f32; 4] = [1.0, 0.5, 1.0, 0.0];
+/// Amount (0.15.0): how much Stemmeisolering removes, see `residual`.
+pub const PARAMS: [&str; 5] = ["Echo", "Noise", "HighPass", "Isolate", "Amount"];
+pub const DEFAULTS: [f32; 5] = [1.0, 0.5, 1.0, 0.0, 1.0];
+
+/// How much of the uncleaned mic Stemmeisolering lets through, from the Amount parameter (0…1):
+/// 1 = nothing (full isolation), below that the background is kept 10 dB (0) to 30 dB (≈1) down,
+/// as libDF's attenuation limit – for those who find full isolation too hard.
+pub fn residual(amount: f32) -> f32 {
+    if !amount.is_finite() || amount >= 0.995 {
+        return 0.0;
+    }
+    let limit_db = 10.0 + 20.0 * amount.clamp(0.0, 1.0);
+    10f32.powf(-limit_db / 20.0)
+}
 
 impl Settings {
     /// From the normalized (0…1) VST parameters. Noise: < 0.25 off, < 0.75 normal, else strong;
     /// Isolate ≥ 0.5 = Stemmeisolering whatever Noise says.
-    pub fn from_normalized(p: &[f32; 4]) -> Settings {
+    pub fn from_normalized(p: &[f32]) -> Settings {
+        let p = |i: usize| p.get(i).copied().unwrap_or(DEFAULTS[i]);
         Settings {
-            echo: p[0] >= 0.5,
-            noise: if p[3] >= 0.5 {
+            echo: p(0) >= 0.5,
+            noise: if p(3) >= 0.5 {
                 Noise::Isolate
-            } else if p[1] < 0.25 {
+            } else if p(1) < 0.25 {
                 Noise::Off
-            } else if p[1] < 0.75 {
+            } else if p(1) < 0.75 {
                 Noise::Normal
             } else {
                 Noise::Strong
             },
-            high_pass: p[2] >= 0.5,
+            high_pass: p(2) >= 0.5,
         }
     }
 
@@ -142,11 +155,16 @@ pub struct Cleaner {
     work2: [f32; FRAME],
     frames: u64,
     last_render_frame: u64,
+    /// Our own rumble filter, when WebRTC's processing is not used (see `needs_apm`).
+    hp: HighPass,
     iso: Iso,
     /// Stemmeisolering's fallback is delayed like the network, so switching makes no jump; the
     /// raw frames are kept to start the network where the fallback is.
     iso_delay: std::collections::VecDeque<[f32; FRAME]>,
     iso_raw: std::collections::VecDeque<[f32; FRAME]>,
+    /// What goes into the network, delayed like its output, for `residual` (Styrke).
+    iso_dry: std::collections::VecDeque<[f32; FRAME]>,
+    residual: f32,
     pub stats: Stats,
 }
 
@@ -171,8 +189,59 @@ fn start_network() -> Iso {
     Iso::Failed
 }
 
+/// WebRTC's processing is only needed for the echo canceller and its noise suppression. It splits
+/// 48 kHz into bands (at 32 kHz internally), which cuts everything above 16 kHz and turns the phase;
+/// measured on clean speech: 2,0 dB spectral distance with only its high-pass on, 0,7 dB without.
+/// So without those, the high-pass is our own (0.15.0).
+fn needs_apm(s: &Settings) -> bool {
+    s.echo || matches!(s.noise, Noise::Normal | Noise::Strong)
+}
+
+/// Rumble filter: 4th-order Butterworth high-pass at 80 Hz (two biquads, RBJ), full band.
+#[derive(Clone)]
+struct HighPass {
+    coef: [[f32; 5]; 2],
+    state: [[f32; 2]; 2],
+}
+
+impl HighPass {
+    fn new(fc: f32) -> HighPass {
+        let mut coef = [[0.0; 5]; 2];
+        // Q of the two sections of a 4th-order Butterworth.
+        for (c, q) in coef.iter_mut().zip([0.541_196_1_f32, 1.306_563]) {
+            let w = 2.0 * std::f32::consts::PI * fc / RATE as f32;
+            let (sn, cs) = w.sin_cos();
+            let alpha = sn / (2.0 * q);
+            let a0 = 1.0 + alpha;
+            *c = [(1.0 + cs) / 2.0 / a0, -(1.0 + cs) / a0, (1.0 + cs) / 2.0 / a0, -2.0 * cs / a0, (1.0 - alpha) / a0];
+        }
+        HighPass { coef, state: [[0.0; 2]; 2] }
+    }
+
+    fn reset(&mut self) {
+        self.state = [[0.0; 2]; 2];
+    }
+
+    /// Transposed direct form II.
+    fn process(&mut self, x: &mut [f32]) {
+        for v in x.iter_mut() {
+            let mut y = *v;
+            for (c, z) in self.coef.iter().zip(self.state.iter_mut()) {
+                let out = c[0] * y + z[0];
+                z[0] = c[1] * y - c[3] * out + z[1];
+                z[1] = c[2] * y - c[4] * out;
+                y = out;
+            }
+            *v = y;
+        }
+        if self.state.iter().flatten().any(|z| !z.is_finite()) {
+            self.reset();
+        }
+    }
+}
+
 fn build_apm(s: &Settings) -> Option<AudioProcessing> {
-    if !(s.echo || s.noise != Noise::Off || s.high_pass) {
+    if !needs_apm(s) {
         return None;
     }
     let config = Config {
@@ -213,9 +282,12 @@ impl Cleaner {
             work2: [0.0; FRAME],
             frames: 0,
             last_render_frame: 0,
+            hp: HighPass::new(80.0),
             iso: if settings.noise == Noise::Isolate { start_network() } else { Iso::Idle },
             iso_delay: std::collections::VecDeque::new(),
             iso_raw: std::collections::VecDeque::new(),
+            iso_dry: std::collections::VecDeque::new(),
+            residual: 0.0,
             stats: Stats::default(),
         }
     }
@@ -246,6 +318,7 @@ impl Cleaner {
             #[cfg(feature = "deepfilter")]
             if let Iso::Ready(net) = &mut self.iso {
                 // Start where the fallback is: feed it the raw frames still in the delay.
+                self.iso_dry = self.iso_raw.clone();
                 let mut sink = [0f32; FRAME];
                 for f in &self.iso_raw {
                     if net.process(f, &mut sink).is_err() {
@@ -261,6 +334,11 @@ impl Cleaner {
         self.settings
     }
 
+    /// Styrke for Stemmeisolering (the Amount parameter); changes nothing else.
+    pub fn set_amount(&mut self, amount: f32) {
+        self.residual = residual(amount);
+    }
+
     /// New settings; the processing starts over when they change.
     pub fn set(&mut self, settings: Settings) {
         if settings != self.settings {
@@ -269,6 +347,7 @@ impl Cleaner {
             }
             self.settings = settings;
             self.apm = build_apm(&settings);
+            self.hp.reset();
             self.rnn = DenoiseState::new();
             self.rnd_len = 0;
         }
@@ -276,6 +355,7 @@ impl Cleaner {
 
     pub fn reset(&mut self) {
         self.apm = build_apm(&self.settings);
+        self.hp.reset();
         self.rnn = DenoiseState::new();
         self.inp_len = 0;
         self.out = [0.0; FRAME];
@@ -288,6 +368,7 @@ impl Cleaner {
     fn reset_isolation(&mut self) {
         self.iso_delay.clear();
         self.iso_raw.clear();
+        self.iso_dry.clear();
         #[cfg(feature = "deepfilter")]
         if let Iso::Ready(net) = &mut self.iso {
             if net.reset().is_err() {
@@ -342,7 +423,7 @@ impl Cleaner {
 
     fn process_frame(&mut self) {
         self.frames += 1;
-        if !self.settings.active() || self.apm.is_none() {
+        if !self.settings.active() {
             self.out = self.inp;
             return;
         }
@@ -351,6 +432,8 @@ impl Cleaner {
             if apm.process_capture_f32(&[&self.inp[..]], &mut [&mut self.work[..]]).is_err() {
                 self.work = self.inp;
             }
+        } else if self.settings.high_pass {
+            self.hp.process(&mut self.work);
         }
         match self.settings.noise {
             Noise::Strong => self.rnnoise(),
@@ -395,6 +478,18 @@ impl Cleaner {
         if let Iso::Ready(net) = &mut self.iso {
             let mut out = [0f32; FRAME];
             if net.process(&self.work, &mut out).is_ok() {
+                // Styrke: some of the mic as it came in, aligned with the network's output.
+                self.iso_dry.push_back(self.work);
+                if self.iso_dry.len() > ISOLATE_FRAMES {
+                    if let Some(dry) = self.iso_dry.pop_front() {
+                        let m = self.residual;
+                        if m > 0.0 {
+                            for (o, d) in out.iter_mut().zip(dry.iter()) {
+                                *o = (1.0 - m) * *o + m * d;
+                            }
+                        }
+                    }
+                }
                 self.work = out;
                 self.stats.isolate = Isolation::Running;
                 return;
@@ -418,6 +513,7 @@ impl Cleaner {
 
     fn reset_keep_framing(&mut self) {
         self.apm = build_apm(&self.settings);
+        self.hp.reset();
         self.rnn = DenoiseState::new();
     }
 }
