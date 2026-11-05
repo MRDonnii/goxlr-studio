@@ -1861,12 +1861,20 @@ pub fn parse_coverage(config: &str) -> Coverage {
     // Ren mikrofon: the mic's part (`If: stage == "capture"` … `Else:`) is not about the outputs.
     let mut depth = 0usize;
     let mut capture_at: Option<usize> = None;
-    for line in config.lines() {
+    let mut split = false;
+    let lines: Vec<&str> = config.lines().collect();
+    for (n, line) in lines.iter().enumerate() {
         let l = line.trim().trim_start_matches('\u{feff}');
+        // apo::with_mic closes with "Device: all" + "EndIf:" (so Equalizer APO sees the EndIf:);
+        // that line says nothing about where the EQ applies.
+        if split && depth == 1 && l.replace(' ', "") == "Device:all" && lines.get(n + 1).is_some_and(|x| x.trim() == "EndIf:") {
+            continue;
+        }
         if l.starts_with("If:") {
             depth += 1;
             if capture_at.is_none() && l.replace(' ', "") == "If:stage==\"capture\"" {
                 capture_at = Some(depth);
+                split = depth == 1;
             }
             continue;
         }
