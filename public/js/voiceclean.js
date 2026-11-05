@@ -324,6 +324,7 @@ export function voiceCleanCard(ctx) {
     const live = h('div', { class: 'hint', 'data-testid': 'voice-test-live' });
     testBox.replaceChildren(say, live);
     const samples = { typing: [], speech: [] };
+    let passing = null;
     if (lastTest?.url) URL.revokeObjectURL(lastTest.url);
     const mic = await openChatMic();
     try {
@@ -336,6 +337,8 @@ export function voiceCleanCard(ctx) {
           say.replaceChildren(h('span', {}, step.text), ` (${Math.ceil((end - Date.now()) / 1000)} s)`);
           const st = await voiceStatus().catch(() => null);
           if (st?.plugin) {
+            if (st.broken) passing = 'broken';
+            else if (st.bypassed && !passing) passing = 'rate';
             samples[step.id].push({ in_db: st.in_db, out_db: st.out_db });
             if (Number.isFinite(st.in_db) && Number.isFinite(st.out_db)) live.textContent = `ind ${Math.round(st.in_db)} dB → ud ${Math.round(st.out_db)} dB`;
           }
@@ -346,7 +349,7 @@ export function voiceCleanCard(ctx) {
       setDemoVoicePhase(null);
     }
     const url = mic ? await mic.stop() : null;
-    const v = micTestVerdict(samples);
+    const v = micTestVerdict({ ...samples, noise: cfg.noise, amount: cfg.amount || 'full', passing });
     if (!mic && v.code === 'not-running') v.lines.push('Appen kunne ikke åbne Chat Mic – tillad mikrofonen, eller start "Mikrofontest" i Discord under testen.');
     lastTest = { ...v, url, at: Date.now() };
     logActivity(`Ren mikrofon – test: ${v.lines.slice(0, 2).join(' · ')}`);

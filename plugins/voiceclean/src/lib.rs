@@ -348,6 +348,7 @@ impl Cleaner {
             self.settings = settings;
             self.apm = build_apm(&settings);
             self.hp.reset();
+            self.iso_dry.clear();
             self.rnn = DenoiseState::new();
             self.rnd_len = 0;
         }

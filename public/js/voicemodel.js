@@ -134,6 +134,7 @@ export function voiceStatusLine(cfg, st, { installed = false } = {}) {
   if (!cfg?.enabled) return line('off', ['Slået fra']);
   if (!installed) return line('warn', ['EQ-motoren er ikke sat på Chat Mic endnu']);
   if (!st?.plugin) return line('idle', ['Klar – starter, når en app (fx Discord) bruger mikrofonen']);
+  if (st.broken) return line('warn', ['Mikrofonen sendes urørt videre – renseren stødte på en fejl']);
   if (st.bypassed) return line('warn', ['Mikrofonen sendes urørt videre – Chat Mic skal køre 48 kHz']);
   const parts = [];
   if (st.isolate === 'running') parts.push('stemmeisolering kører');
@@ -219,7 +220,10 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
   // Every recording from the mic should have its own cleaner: fewer means a program gets the mic
   // around it (plugins from 0.14.2 count themselves).
   const active = recs.filter((r) => fromChat(r) && r.active);
-  const counted = status?.plugin && Number.isFinite(status.instances);
+  // Passing the mic through untouched (not 48 kHz, or after an error): the plugin reports only
+  // that, so nothing else about it can be judged.
+  const passing = !!(status?.plugin && (status.bypassed || status.broken));
+  const counted = status?.plugin && !passing && Number.isFinite(status.instances);
   if (counted && active.length) {
     const discordActive = active.some((r) => DISCORD.test(r.exe));
     if (status.instances >= active.length) {
@@ -240,6 +244,8 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
   if (status?.plugin) {
     if (status.broken) add('rate', false, 'Renseren stødte på en fejl og sender mikrofonen urørt videre – en test starter den igen', 'test');
     else if (status.bypassed) add('rate', false, 'Chat Mic kører ikke 48 kHz – lyden sendes urørt videre. Skift det i Windows: Lyd → Optagelse → Chat Mic → Egenskaber → Avanceret → 48000 Hz.');
+  }
+  if (status?.plugin && !passing) {
     if (cfg.noise === 'isolate') {
       if (status.isolate === 'running') add('isolate', true, 'Stemmeisolering kører');
       else if (status.isolate === 'loading') add('isolate', null, 'Stemmeisolering starter …');
@@ -253,7 +259,7 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
       add('levels', null, `Mikrofonen ind ${Math.round(status.in_db)} dB → ud ${Math.round(status.out_db)} dB`);
     }
   }
-  const allGood = items.every((i) => i.ok !== false) && onChat && !!status?.plugin && (!counted || items.some((i) => i.id === 'cleaned' && i.ok));
+  const allGood = items.every((i) => i.ok !== false) && onChat && !!status?.plugin && !passing && (!counted || items.some((i) => i.id === 'cleaned' && i.ok));
   return { items, allGood };
 }
 
@@ -295,7 +301,11 @@ const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.lengt
  * no-typing (nothing heard while typing – the GoXLR's gate already takes it) · no-speech ·
  * not-running (the cleaner got no sound).
  */
-export function micTestVerdict({ typing = [], speech = [] }) {
+export function micTestVerdict({ typing = [], speech = [], noise = 'isolate', amount = 'full', passing = null }) {
+  // The plugin passed the mic through (not 48 kHz, or an error): that is the answer.
+  if (passing) {
+    return { code: 'passing', typingCut: null, voiceLoss: null, lines: [passing === 'broken' ? 'Renseren stødte på en fejl og sendte mikrofonen urørt videre – tryk "Test" i tjekket ovenfor.' : 'Renseren sendte mikrofonen urørt videre, fordi Chat Mic ikke kører 48 kHz – skift det i Windows (Lyd → Optagelse → Chat Mic → Egenskaber → Avanceret).'] };
+  }
   const ok = (s) => Number.isFinite(s?.in_db) && Number.isFinite(s?.out_db);
   const t = typing.filter(ok);
   const v = speech.filter(ok);
@@ -315,9 +325,16 @@ export function micTestVerdict({ typing = [], speech = [] }) {
   if (voiceLoss === null) code = 'no-speech';
   else if (voiceLoss > 6) code = 'voice-cut';
   else if (typingCut === null) code = 'no-typing';
-  else if (typingCut < 15) code = 'weak';
+  // What Styrke lets through on purpose (−20 dB medium, −10 dB light) is not too little.
+  const isolating = noise === 'isolate';
+  const expected = isolating ? { full: 15, medium: 12, light: 6 }[amount] ?? 15 : 15;
+  if (code === 'good' && typingCut !== null && typingCut < expected) code = 'weak';
   if (code === 'good' || code === 'no-typing') lines.push('Ren mikrofon virker: det er sådan, Discord får din mikrofon.');
-  if (code === 'weak') lines.push('Tasterne er ikke væk. Vælg Støjfjerner "Stemmeisolering", hvis den ikke er valgt.');
+  if (code === 'weak') {
+    if (!isolating) lines.push('Tasterne er ikke væk. Vælg Støjfjerner "Stemmeisolering".');
+    else if (amount !== 'full') lines.push('Tasterne er ikke væk. Sæt Styrke på "Fuld".');
+    else lines.push('Tasterne er ikke væk, selv om Stemmeisolering er valgt – tryk "Kopiér tjek", og send teksten.');
+  }
   if (code === 'voice-cut') lines.push('Stemmen dæmpes for meget. Skru gain op på GoXLR’en (Mikrofon-assistenten hjælper), eller sæt Styrke ned.');
   return { code, typingCut, voiceLoss, lines };
 }

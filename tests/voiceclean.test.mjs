@@ -230,4 +230,34 @@ test('the mic test tells typing from the voice', async () => {
   // No speech, no sound at all.
   assert.equal(micTestVerdict({ typing: [s(-40, -80)], speech: [s(-80, -100)] }).code, 'no-speech');
   assert.equal(micTestVerdict({ typing: [{ in_db: null }], speech: [] }).code, 'not-running');
+  // Styrke "Let" keeps the background 10 dB down on purpose: that is not weak.
+  const light = { typing: [s(-40, -50), s(-38, -48)], speech: [s(-25, -25)] };
+  assert.equal(micTestVerdict({ ...light, amount: 'light' }).code, 'good');
+  assert.equal(micTestVerdict({ ...light, amount: 'full' }).code, 'weak');
+  assert.match(micTestVerdict({ typing: [s(-40, -47)], speech: [s(-25, -25)], amount: 'medium' }).lines.join(' '), /Styrke på "Fuld"/);
+  assert.match(micTestVerdict({ typing: [s(-40, -47)], speech: [s(-25, -25)], noise: 'strong' }).lines.join(' '), /Vælg Støjfjerner "Stemmeisolering"/);
+  // Passed through untouched: the cause, not "choose Stemmeisolering".
+  const through = { typing: [s(-40, -40)], speech: [s(-25, -25)] };
+  assert.equal(micTestVerdict({ ...through, passing: 'rate' }).code, 'passing');
+  assert.match(micTestVerdict({ ...through, passing: 'rate' }).lines[0], /48 kHz/);
+  assert.match(micTestVerdict({ ...through, passing: 'broken' }).lines[0], /fejl/);
+});
+
+test('passing the mic through: only the cause is shown', async () => {
+  const { voiceDiagnosis, voiceStatusLine } = await import('../public/js/voicemodel.js');
+  const mic = { id: '{0.0.1.00000000}.{aaaa}', name: 'Chat Mic (TC-Helicon GoXLR)', installed: true, mode: 'sfx-mfx', voice_programs: true };
+  const cfg = { enabled: true, echo: true, noise: 'isolate' };
+  const config = { devices: ['{AAAA}'], plugin: true, isolate: true };
+  const recordings = [{ device: mic.id, pid: 1, exe: 'Discord.exe', active: true }];
+  for (const [flag, re] of [['bypassed', /48 kHz/], ['broken', /fejl/]]) {
+    const status = { plugin: true, [flag]: true, instances: 1, in_db: -30, out_db: -30 };
+    const d = voiceDiagnosis({ cfg, mic, check: { recordings, config }, status });
+    const bad = d.items.filter((i) => i.ok === false);
+    assert.equal(bad.length, 1, JSON.stringify(bad));
+    assert.match(bad[0].text, re);
+    assert.equal(d.items.find((i) => i.id === 'cleaned'), undefined);
+    assert.equal(d.items.find((i) => i.id === 'isolate'), undefined);
+    assert.equal(d.allGood, false);
+    assert.match(voiceStatusLine(cfg, status, { installed: true }).text, re);
+  }
 });
