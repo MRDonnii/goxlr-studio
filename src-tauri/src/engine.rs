@@ -892,9 +892,37 @@ fn original_post_mix(d: &DeviceState) -> String {
     if g == NOKEY || g == NOVALUE { String::new() } else { g.clone() }
 }
 
-/// Pure: the processing modes a microphone's SFX lists – the original ones, DEFAULT, and with `all`
-/// also COMMUNICATIONS and RAW, so voice programs' streams are cleaned too.
-pub fn mic_modes(original: &[String], all: bool) -> Vec<String> {
+/// Which processing modes Ren mikrofon lists on a microphone's SFX: also voice programs'
+/// (Discord: COMMUNICATIONS) and raw recordings, without raw (when Windows refused raw ones), or
+/// only DEFAULT (when Windows refused communications recordings with it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeSet {
+    All,
+    Comm,
+    Default,
+}
+
+impl ModeSet {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ModeSet::All => "all",
+            ModeSet::Comm => "comm",
+            ModeSet::Default => "default",
+        }
+    }
+
+    pub fn parse(s: &str) -> ModeSet {
+        match s {
+            "default" => ModeSet::Default,
+            "comm" => ModeSet::Comm,
+            _ => ModeSet::All,
+        }
+    }
+}
+
+/// Pure: the processing modes a microphone's SFX lists – the original ones, DEFAULT, and (per
+/// `set`) COMMUNICATIONS and RAW, so voice programs' streams are cleaned too.
+pub fn mic_modes(original: &[String], set: ModeSet) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut add = |m: &str| {
         if !out.iter().any(|o| o.eq_ignore_ascii_case(m)) {
@@ -905,8 +933,10 @@ pub fn mic_modes(original: &[String], all: bool) -> Vec<String> {
     for m in original {
         add(m);
     }
-    if all {
+    if set != ModeSet::Default {
         add(COMM_MODE);
+    }
+    if set == ModeSet::All {
         add(RAW_MODE);
     }
     out
@@ -929,29 +959,29 @@ pub fn covers_communications(modes: &[String]) -> bool {
     modes.iter().any(|m| m.eq_ignore_ascii_case(COMM_MODE))
 }
 
-/// Ren mikrofon: the microphone's SFX modes (`all` = also voice programs' streams), backing up the
-/// original value the first time (also for mics installed by 0.14.1, which wrote DEFAULT only).
-fn write_mic_modes(guid: &str, all: bool) -> Result<(), String> {
+/// Ren mikrofon: the microphone's SFX modes, backing up the original value the first time (also
+/// for mics installed by 0.14.1, which wrote DEFAULT only).
+fn write_mic_modes(guid: &str, set: ModeSet) -> Result<(), String> {
     let fx = fx_key(guid);
     let child = format!(r"{CHILD_KEY}\{guid}");
     if !reg::value_exists(&child, ORIG_MODES) {
         reg::write_str(&child, ORIG_MODES, &encode_modes(reg::read_multi(&fx, SFX_MODES).as_deref()))?;
     }
     let original = reg::read_str(&child, ORIG_MODES).and_then(|v| decode_modes(&v)).unwrap_or_default();
-    reg::write_multi_list(&fx, SFX_MODES, &mic_modes(&original, all))?;
-    reg::write_str(&child, MIC_MODES, if all { "all" } else { "default" })
+    reg::write_multi_list(&fx, SFX_MODES, &mic_modes(&original, set))?;
+    reg::write_str(&child, MIC_MODES, set.as_str())
 }
 
-/// The modes chosen on an installed microphone (`true` = all, the default).
-fn mic_modes_all(guid: &str) -> bool {
-    reg::read_str(&format!(r"{CHILD_KEY}\{guid}"), MIC_MODES).map_or(true, |v| v != "default")
+/// The modes chosen on an installed microphone (All unless the self-test rolled back).
+fn mic_mode_set(guid: &str) -> ModeSet {
+    reg::read_str(&format!(r"{CHILD_KEY}\{guid}"), MIC_MODES).map_or(ModeSet::All, |v| ModeSet::parse(&v))
 }
 
-/// Whether the installed microphone's SFX already lists what `all` wants.
-fn mic_modes_ok(guid: &str, all: bool) -> bool {
+/// Whether the installed microphone's SFX already lists what `set` wants.
+fn mic_modes_ok(guid: &str, set: ModeSet) -> bool {
     let child = format!(r"{CHILD_KEY}\{guid}");
     let modes = reg::read_multi(&fx_key(guid), SFX_MODES).unwrap_or_default();
-    reg::value_exists(&child, ORIG_MODES) && (!all || covers_communications(&modes))
+    reg::value_exists(&child, ORIG_MODES) && (set == ModeSet::Default || covers_communications(&modes))
 }
 
 fn install_device(d: &DeviceState) -> Result<(), String> {
@@ -999,7 +1029,7 @@ fn install_device(d: &DeviceState) -> Result<(), String> {
             reg::delete_value(&fx, GFX)?;
             reg::write_str(&fx, SFX, PRE_MIX)?;
             if capture {
-                write_mic_modes(&d.guid, true)?;
+                write_mic_modes(&d.guid, ModeSet::All)?;
             } else if !reg::value_exists(&fx, SFX_MODES) {
                 reg::write_multi(&fx, SFX_MODES, DEFAULT_MODE)?;
             }
@@ -1015,7 +1045,7 @@ fn install_device(d: &DeviceState) -> Result<(), String> {
             reg::delete_value(&fx, GFX)?;
             reg::write_str(&fx, SFX, PRE_MIX)?;
             if capture {
-                write_mic_modes(&d.guid, true)?;
+                write_mic_modes(&d.guid, ModeSet::All)?;
             } else if !reg::value_exists(&fx, SFX_MODES) {
                 reg::write_multi(&fx, SFX_MODES, DEFAULT_MODE)?;
             }
@@ -1116,6 +1146,11 @@ fn apply_devices(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -
 /// other microphones. On an input SFX/EFX and SFX/MFX are the same (only the pre-mix part).
 fn apply_mics(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -> Result<(), String> {
     let want = |guid: &str| wanted.iter().any(|w| w.to_lowercase().ends_with(&guid.to_lowercase()));
+    if !wanted.is_empty() {
+        if let Err(e) = crate::apo::ensure_stage_split() {
+            log.push(format!("Kunne ikke dele config.txt op i mikrofon og afspilning: {e}"));
+        }
+    }
     let forced = mode.and_then(Mode::parse).map(|m| if m == Mode::SfxEfx { Mode::SfxMfx } else { m });
     for dev in mic_devices() {
         let mut d = load_device(&dev.guid)?;
@@ -1147,9 +1182,9 @@ fn apply_mics(wanted: &[String], mode: Option<&str>, log: &mut Vec<String>) -> R
 
 /// Installed by 0.14.1 (DEFAULT only): voice programs' streams were not cleaned.
 fn ensure_mic_modes(d: &DeviceState, name: &str, log: &mut Vec<String>) -> Result<(), String> {
-    let all = mic_modes_all(&d.guid);
-    if d.installed && d.mode != Mode::LfxGfx && !mic_modes_ok(&d.guid, all) {
-        write_mic_modes(&d.guid, all)?;
+    let set = mic_mode_set(&d.guid);
+    if d.installed && d.mode != Mode::LfxGfx && !mic_modes_ok(&d.guid, set) {
+        write_mic_modes(&d.guid, set)?;
         log.push(format!("{name}: renser nu også lyden til Discord og andre stemmeprogrammer"));
     }
     Ok(())
@@ -1209,6 +1244,9 @@ pub struct StreamTest {
     pub raw: Option<bool>,
     /// The microphone's SFX lists the voice programs' modes (false = rolled back to DEFAULT only).
     pub all_modes: bool,
+    /// The modes listed: "all", "comm" (without raw) or "default".
+    #[serde(default)]
+    pub modes: String,
     #[serde(default)]
     pub errors: Vec<String>,
 }
@@ -1222,10 +1260,21 @@ pub fn pre_mix_count(messages: &[String], guid: &str) -> usize {
         .count()
 }
 
-/// Pure: should the voice programs' modes be rolled back? Only when Windows refused to open a
-/// communications/raw recording with them listed while a normal one worked.
-pub fn modes_refused(t: &StreamTest) -> bool {
-    t.all_modes && t.default == Some(true) && !t.errors.is_empty() && (t.communications.is_none() || t.raw.is_none())
+/// Pure: what to roll back to after a test round, if Windows refused to open a recording kind
+/// while a normal one worked: a refused communications recording → DEFAULT only (and test again);
+/// a refused raw one (many drivers have no raw mode) → only RAW dropped, Discord's mode kept.
+pub fn rollback(t: &StreamTest, set: ModeSet) -> Option<ModeSet> {
+    if t.default != Some(true) || t.errors.is_empty() {
+        return None;
+    }
+    let refused = |kind: &str| t.errors.iter().any(|e| e.starts_with(kind));
+    if set != ModeSet::Default && t.communications.is_none() && refused("Communications") {
+        Some(ModeSet::Default)
+    } else if set == ModeSet::All && t.raw.is_none() && refused("Raw") {
+        Some(ModeSet::Comm)
+    } else {
+        None
+    }
 }
 
 const TEST_PIPE_VALUE: &str = "DeviceTestPipeName";
@@ -1604,7 +1653,13 @@ fn verify(wanted: &[String], auto_adjust: bool, log: &mut Vec<String>, tests: &m
 /// restarted, a normal, a communications and a raw recording is opened on each microphone, and
 /// for each it is checked whether the engine reported in for it.
 fn stream_round(guids: &[String], log: &mut Vec<String>) -> Vec<StreamTest> {
-    let mut out: Vec<StreamTest> = guids.iter().map(|g| StreamTest { all_modes: mic_modes_all(g), ..Default::default() }).collect();
+    let mut out: Vec<StreamTest> = guids
+        .iter()
+        .map(|g| {
+            let set = mic_mode_set(g);
+            StreamTest { all_modes: set != ModeSet::Default, modes: set.as_str().into(), ..Default::default() }
+        })
+        .collect();
     #[cfg(windows)]
     {
         let Some(rx) = pipe::Receiver::start(TEST_PIPE_NAME) else {
@@ -1617,6 +1672,17 @@ fn stream_round(guids: &[String], log: &mut Vec<String>) -> Vec<StreamTest> {
         std::thread::sleep(std::time::Duration::from_millis(1500));
         for (g, t) in guids.iter().zip(out.iter_mut()) {
             for kind in [StreamKind::Default, StreamKind::Communications, StreamKind::Raw] {
+                // Wait for quiet (no other program's recording reporting in for 0,7 s, at most
+                // 4 s), so a Discord reconnecting is not taken for our recording.
+                let wait_until = std::time::Instant::now() + std::time::Duration::from_secs(4);
+                let mut last = (pre_mix_count(&rx.messages(), g), std::time::Instant::now());
+                while std::time::Instant::now() < wait_until && last.1.elapsed() < std::time::Duration::from_millis(700) {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    let n = pre_mix_count(&rx.messages(), g);
+                    if n != last.0 {
+                        last = (n, std::time::Instant::now());
+                    }
+                }
                 let before = pre_mix_count(&rx.messages(), g);
                 let res = match open_stream(g, kind) {
                     Err(e) => {
@@ -1676,24 +1742,33 @@ fn verify_streams(found: &mut [DeviceTest], auto_adjust: bool, log: &mut Vec<Str
     let mut res = stream_round(&guids, log);
     if auto_adjust {
         let mut retest = Vec::new();
-        for (k, t) in res.iter().enumerate() {
+        for (k, t) in res.iter_mut().enumerate() {
             let i = which[k];
-            if modes_refused(t) && write_mic_modes(&found[i].guid, false).is_ok() {
-                log.push(format!("{}: Windows afviste optagelser med Discords tilstand ({}) – prøver uden", found[i].name, t.errors.join("; ")));
-                retest.push(k);
+            let set = mic_mode_set(&found[i].guid);
+            match rollback(t, set) {
+                Some(ModeSet::Comm) if write_mic_modes(&found[i].guid, ModeSet::Comm).is_ok() => {
+                    // Discord's mode worked; only raw recordings are not cleaned (takes effect at
+                    // the next start of the audio service).
+                    log.push(format!("{}: rå optagelser kan ikke åbnes på mikrofonen – den tilstand er slået fra", found[i].name));
+                    t.modes = ModeSet::Comm.as_str().into();
+                }
+                Some(ModeSet::Default) if write_mic_modes(&found[i].guid, ModeSet::Default).is_ok() => {
+                    log.push(format!("{}: Windows afviste optagelser med Discords tilstand ({}) – prøver uden", found[i].name, t.errors.join("; ")));
+                    retest.push((k, set));
+                }
+                _ => {}
             }
         }
         if !retest.is_empty() {
-            let g: Vec<String> = retest.iter().map(|&k| guids[k].clone()).collect();
+            let g: Vec<String> = retest.iter().map(|&(k, _)| guids[k].clone()).collect();
             let again = stream_round(&g, log);
             let mut restore = false;
-            for (n, &k) in retest.iter().enumerate() {
-                let opened = again[n].communications.is_some() && again[n].raw.is_some();
-                if opened {
+            for (n, &(k, before)) in retest.iter().enumerate() {
+                if again[n].communications.is_some() {
                     res[k] = again[n].clone();
                 } else {
                     // Refused without them as well: not caused by us, keep voice programs cleaned.
-                    let _ = write_mic_modes(&guids[k], true);
+                    let _ = write_mic_modes(&guids[k], before);
                     restore = true;
                 }
             }
@@ -1725,16 +1800,24 @@ fn verify_mics(auto_adjust: bool, log: &mut Vec<String>, tests: &mut Vec<DeviceT
     let mut found = test_outputs(&guids, false, log);
     // The voice programs' modes listed on the SFX could keep Windows from loading it at all: try
     // without them before hooking in another way.
-    let failing: Vec<String> = found.iter().filter(|t| !t.ok && t.error.is_none() && t.mode != "lfx-gfx" && mic_modes_all(&t.guid)).map(|t| t.guid.clone()).collect();
+    let failing: Vec<(String, ModeSet)> = found
+        .iter()
+        .filter(|t| !t.ok && t.error.is_none() && t.mode != "lfx-gfx")
+        .map(|t| (t.guid.clone(), mic_mode_set(&t.guid)))
+        .filter(|(_, set)| *set != ModeSet::Default)
+        .collect();
     if auto_adjust && !failing.is_empty() {
-        for g in &failing {
-            let _ = write_mic_modes(g, false);
+        for (g, _) in &failing {
+            let _ = write_mic_modes(g, ModeSet::Default);
         }
         log.push("Prøver Ren mikrofon uden Discords tilstand…".into());
-        let again = test_outputs(&failing, false, log);
+        let guids_failing: Vec<String> = failing.iter().map(|(g, _)| g.clone()).collect();
+        let again = test_outputs(&guids_failing, false, log);
         for t in again {
             if !t.ok {
-                let _ = write_mic_modes(&t.guid, true);
+                if let Some((_, before)) = failing.iter().find(|(g, _)| *g == t.guid) {
+                    let _ = write_mic_modes(&t.guid, *before);
+                }
             }
             if let Some(f) = found.iter_mut().find(|f| f.guid == t.guid) {
                 *f = t;
@@ -2254,6 +2337,9 @@ pub fn run_task(task: &Task) -> TaskResult {
             }
             // "Ren mikrofon" on the mic is tested too.
             if !mics.is_empty() {
+                if let Err(e) = crate::apo::ensure_stage_split() {
+                    log.push(format!("Kunne ikke dele config.txt op i mikrofon og afspilning: {e}"));
+                }
                 upgrade_mic_modes(&mut log)?;
                 reboot |= verify_mics(true, &mut log, &mut tests);
             }
@@ -2430,19 +2516,21 @@ mod tests {
     #[test]
     fn mic_modes_add_voice_programs_and_keep_originals() {
         let none: Vec<String> = vec![];
-        assert_eq!(mic_modes(&none, false), vec![DEFAULT_MODE.to_string()]);
-        let all = mic_modes(&none, true);
+        assert_eq!(mic_modes(&none, ModeSet::Default), vec![DEFAULT_MODE.to_string()]);
+        assert_eq!(mic_modes(&none, ModeSet::Comm), vec![DEFAULT_MODE.to_string(), COMM_MODE.to_string()]);
+        let all = mic_modes(&none, ModeSet::All);
         assert_eq!(all, vec![DEFAULT_MODE.to_string(), COMM_MODE.to_string(), RAW_MODE.to_string()]);
         assert!(covers_communications(&all));
-        assert!(!covers_communications(&mic_modes(&none, false)));
+        assert!(!covers_communications(&mic_modes(&none, ModeSet::Default)));
+        assert!(covers_communications(&mic_modes(&none, ModeSet::Comm)));
         // A driver's own modes stay, without duplicates (case-insensitive).
         let orig = vec!["{c18e2f7e-933d-4965-b7d1-1eef228d2af3}".to_string(), "{11111111-2222-3333-4444-555555555555}".to_string(), COMM_MODE.to_lowercase()];
-        let m = mic_modes(&orig, true);
+        let m = mic_modes(&orig, ModeSet::All);
         assert_eq!(m.len(), 4);
         assert_eq!(m[0], DEFAULT_MODE);
         assert!(m.contains(&"{11111111-2222-3333-4444-555555555555}".to_string()));
         // Rolled back: the driver's modes are kept, ours are not added.
-        assert_eq!(mic_modes(&orig, false).len(), 3);
+        assert_eq!(mic_modes(&orig, ModeSet::Default).len(), 3);
     }
 
     #[test]
@@ -2471,21 +2559,29 @@ mod tests {
     }
 
     #[test]
-    fn modes_are_rolled_back_only_when_windows_refuses() {
-        let ok = StreamTest { default: Some(true), communications: Some(true), raw: Some(true), all_modes: true, errors: vec![] };
-        assert!(!modes_refused(&ok));
+    fn modes_are_rolled_back_step_by_step_only_when_windows_refuses() {
+        let ok = StreamTest { default: Some(true), communications: Some(true), raw: Some(true), all_modes: true, modes: "all".into(), errors: vec![] };
+        assert_eq!(rollback(&ok, ModeSet::All), None);
         // Not cleaned is not refused: Discord's advice, no rollback.
-        assert!(!modes_refused(&StreamTest { communications: Some(false), ..ok.clone() }));
-        let refused = StreamTest { communications: None, errors: vec!["Communications: x".into()], ..ok.clone() };
-        assert!(modes_refused(&refused));
-        // Already rolled back, or a normal recording did not work either: nothing to roll back.
-        assert!(!modes_refused(&StreamTest { all_modes: false, ..refused.clone() }));
-        assert!(!modes_refused(&StreamTest { default: None, ..refused.clone() }));
+        assert_eq!(rollback(&StreamTest { communications: Some(false), ..ok.clone() }, ModeSet::All), None);
+        // Only raw refused (driver without raw): keep Discord's mode, drop raw.
+        let raw = StreamTest { raw: None, errors: vec!["Raw: AUDCLNT_E_RAW_MODE_UNSUPPORTED".into()], ..ok.clone() };
+        assert_eq!(rollback(&raw, ModeSet::All), Some(ModeSet::Comm));
+        assert_eq!(rollback(&raw, ModeSet::Comm), None);
+        // Communications refused: back to DEFAULT only.
+        let comm = StreamTest { communications: None, errors: vec!["Communications: x".into()], ..ok.clone() };
+        assert_eq!(rollback(&comm, ModeSet::All), Some(ModeSet::Default));
+        assert_eq!(rollback(&comm, ModeSet::Comm), Some(ModeSet::Default));
+        assert_eq!(rollback(&comm, ModeSet::Default), None);
+        // A normal recording did not work either: nothing to judge.
+        assert_eq!(rollback(&StreamTest { default: None, ..comm.clone() }, ModeSet::All), None);
+        assert_eq!(ModeSet::parse("comm"), ModeSet::Comm);
+        assert_eq!(ModeSet::parse(""), ModeSet::All);
     }
 
     #[test]
     fn stream_line_says_what_is_cleaned() {
-        let t = StreamTest { default: Some(true), communications: Some(false), raw: None, all_modes: true, errors: vec![] };
+        let t = StreamTest { default: Some(true), communications: Some(false), raw: None, all_modes: true, modes: "all".into(), errors: vec![] };
         let l = stream_line("Chat Mic", &t);
         assert!(l.starts_with("✗ Chat Mic"));
         assert!(l.contains("Discord/stemmeprogrammer renses IKKE"));
