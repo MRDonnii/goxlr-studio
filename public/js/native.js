@@ -495,13 +495,18 @@ export async function voiceConfigure(config) {
   if (isNative()) return invoke('voice_configure', { config });
   demoVoice = config;
 }
+// The browser demo of "Test din mikrofon": typing is removed, the voice comes through.
+let demoVoicePhase = null;
+export function setDemoVoicePhase(phase) { demoVoicePhase = phase; }
 export async function voiceStatus() {
   if (isNative()) return invoke('voice_status');
   if (!demoVoice.enabled) return { enabled: false, connected: false, plugin: false, echo: false, noise: false, reference: false, bypassed: false, erle_db: null, delay_ms: null, playing: false, sources: [], error: null };
   const t = Date.now() / 1000;
   return {
     enabled: true, connected: demoEngine.mics.size > 0, plugin: demoEngine.mics.size > 0, echo: demoVoice.sources.length > 0, noise: true, reference: demoVoice.sources.length > 0, bypassed: false, isolate: demoVoiceIsolate(),
-    erle_db: 24 + 4 * Math.sin(t / 3), delay_ms: 38, playing: demoVoice.sources.length > 0, in_db: -31 + 3 * Math.sin(t), out_db: -57 + 3 * Math.sin(t),
+    erle_db: 24 + 4 * Math.sin(t / 3), delay_ms: 38, playing: demoVoice.sources.length > 0,
+    in_db: (demoVoicePhase === 'speech' ? -24 : -31) + 3 * Math.sin(t),
+    out_db: (demoVoicePhase === 'speech' ? -25 : demoVoicePhase === 'typing' ? -78 : -57) + 3 * Math.sin(t),
     instances: demoOldVoice ? null : demoBypass && !demoVoicePrograms ? 1 : demoBypass ? 2 : 1,
     sources: demoVoice.sources.map((s) => ({ device: s.device, ok: true, rate: 48000, playing: s.gain > 0, error: null })), error: null,
   };

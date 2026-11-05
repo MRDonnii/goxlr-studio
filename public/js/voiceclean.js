@@ -4,9 +4,9 @@
 // GoXLR Studio sends it what the speakers play (voiceref.rs), so the echo canceller knows what to
 // remove. The pure parts are in voicemodel.js.
 import { h, toast, confirmDialog, logActivity } from './ui.js';
-import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus, voiceCheck, storeGet, storeSet } from './native.js';
+import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus, voiceCheck, storeGet, storeSet, setDemoVoicePhase } from './native.js';
 import { channelEndpoint } from './extras.js';
-import { voiceSettings, NOISE_LEVELS, NOISE_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText, voiceDiagnosis, diagnosisText, latestMicTest, smoothInstances } from './voicemodel.js';
+import { voiceSettings, NOISE_LEVELS, NOISE_HINT, AMOUNT_LEVELS, AMOUNT_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText, voiceDiagnosis, diagnosisText, latestMicTest, smoothInstances, MIC_TEST_STEPS, micTestVerdict } from './voicemodel.js';
 
 let devCache = { at: 0, list: [] };
 async function audioDevices(force = false) {
@@ -60,6 +60,44 @@ const joined = (parts) => parts.flatMap((p, i) => (i ? [' · ', h('span', {}, p)
 const ROUTE_NAME = { Music: 'Musik', Game: 'Spil', System: 'System', Chat: 'Chat', Samples: 'Samples' };
 const UNROUTE = { Music: 'Send ikke musikken til chatten', Game: 'Send ikke spillyden til chatten', System: 'Send ikke systemlyde til chatten', Chat: 'Send ikke chatten tilbage til chatten', Samples: 'Send ikke samples til chatten' };
 
+// Opens a recording from the GoXLR's "Chat Mic" (as Discord does, so the cleaner runs on it) and
+// records it, so the test can be listened to afterwards. Null if the mic cannot be opened.
+async function openChatMic() {
+  if (!navigator.mediaDevices?.getUserMedia) return null;
+  const raw = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  try {
+    let stream = await navigator.mediaDevices.getUserMedia({ audio: raw });
+    const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+    const chat = inputs.find((d) => /chat mic/i.test(d.label) && /goxlr|tc-helicon/i.test(d.label));
+    if (chat && stream.getAudioTracks()[0]?.getSettings().deviceId !== chat.deviceId) {
+      stream.getTracks().forEach((t) => t.stop());
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { ...raw, deviceId: { exact: chat.deviceId } } });
+    }
+    const chunks = [];
+    let rec = null;
+    try {
+      rec = new MediaRecorder(stream);
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.start();
+    } catch { rec = null; }
+    return {
+      async stop() {
+        let url = null;
+        if (rec && rec.state !== 'inactive') {
+          const stopped = new Promise((r) => { rec.onstop = r; });
+          rec.stop();
+          await stopped;
+          if (chunks.length) url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }));
+        }
+        stream.getTracks().forEach((t) => t.stop());
+        return url;
+      },
+    };
+  } catch { return null; }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export function voiceCleanCard(ctx) {
   const cfg = voiceSettings(ctx.prefs);
   const statusDot = h('span', { class: 'voice-dot' });
@@ -69,10 +107,13 @@ export function voiceCleanCard(ctx) {
   // Tjek: step by step what works and what does not, with a fix where there is one.
   const checkList = h('div', { class: 'voice-check', 'data-testid': 'voice-check' });
   const discordHint = h('div', { class: 'hint', 'data-testid': 'voice-discord-hint' });
+  const testBox = h('div', { class: 'voice-test', 'data-testid': 'voice-test' });
+  let testing = false;
+  let lastTest = null;
   const seen = { info: null, target: null, devs: [], check: null, checkedAt: 0, diag: null, test: null, inst: [] };
   const card = h('div', { class: 'card', 'data-testid': 'voice-clean' },
     h('h2', {}, 'Ren mikrofon'),
-    h('div', { class: 'voice-status row' }, statusDot, statusText), detail, checkList, body);
+    h('div', { class: 'voice-status row' }, statusDot, statusText), detail, checkList, testBox, body);
   let installed = false;
   let rendering = false;
 
@@ -103,6 +144,13 @@ export function voiceCleanCard(ctx) {
       const sw = h('input', { type: 'checkbox', 'data-testid': 'voice-on', checked: !!cfg.enabled, onchange: () => { cfg.enabled = sw.checked; logActivity(cfg.enabled ? 'Ren mikrofon slået til' : 'Ren mikrofon slået fra'); changed(); } });
       const noise = h('div', { class: 'seg', 'data-testid': 'voice-noise' }, ...NOISE_LEVELS.map(([v, label]) =>
         h('button', { class: cfg.noise === v ? 'on' : '', 'data-value': v, onclick: () => { cfg.noise = v; changed(); } }, label)));
+      const amount = h('div', { class: 'seg', 'data-testid': 'voice-amount' }, ...AMOUNT_LEVELS.map(([v, label]) =>
+        h('button', { class: (cfg.amount || 'full') === v ? 'on' : '', 'data-value': v, onclick: () => { cfg.amount = v; changed(); } }, label)));
+      // Stærk/Normal leave most of the typing (measured: Stærk about 7 dB, Stemmeisolering 70–80 dB).
+      const suggest = (cfg.noise === 'strong' || cfg.noise === 'normal')
+        ? h('div', { class: 'row hint warn-text', 'data-testid': 'voice-suggest-isolate' }, h('span', {}, 'Kan de stadig høre dine taster? Stemmeisolering fjerner dem næsten helt (Stærk dæmper dem kun lidt).'),
+          h('button', { class: 'btn sm primary', onclick: () => { cfg.noise = 'isolate'; logActivity('Ren mikrofon: skiftet til Stemmeisolering'); changed(); } }, 'Brug Stemmeisolering'))
+        : '';
       const echo = h('input', { type: 'checkbox', 'data-testid': 'voice-echo', checked: !!cfg.echo, onchange: () => { cfg.echo = echo.checked; changed(); } });
       const hp = h('input', { type: 'checkbox', 'data-testid': 'voice-highpass', checked: cfg.highPass !== false, onchange: () => { cfg.highPass = hp.checked; changed(); } });
       const others = devs.filter((d) => d.flow === 'render' && !/goxlr|tc-helicon/i.test(d.name));
@@ -181,6 +229,9 @@ export function voiceCleanCard(ctx) {
         h('div', { class: cfg.enabled ? '' : 'disabled-block' },
           h('div', { class: 'row' }, h('label', {}, 'Støjfjerner'), noise),
           h('div', { class: 'hint', 'data-testid': 'voice-noise-hint' }, NOISE_HINT[cfg.noise] || NOISE_HINT.normal),
+          suggest,
+          cfg.noise === 'isolate' ? h('div', { class: 'row' }, h('label', {}, 'Styrke'), amount) : '',
+          cfg.noise === 'isolate' ? h('div', { class: 'hint', 'data-testid': 'voice-amount-hint' }, AMOUNT_HINT[cfg.amount || 'full']) : '',
           h('div', { class: 'row' }, h('label', {}, 'Ekkofjerner (spiller du med højttalere)'), h('div', { class: 'spacer' }), h('label', { class: 'switch' }, echo, h('span'))),
           cfg.echo ? h('div', { class: 'row' }, h('label', {}, 'Højttalerne sidder på'), speakers) : '',
           h('div', { class: 'row' }, h('label', {}, 'Fjern rumlen (dybe lyde fra bord og fødder)'), h('div', { class: 'spacer' }), h('label', { class: 'switch' }, hp, h('span')))),
@@ -190,6 +241,7 @@ export function voiceCleanCard(ctx) {
         h('div', { class: 'hint' }, 'Prøv det: "Optag og lyt" i Mikrofon-assistenten optager fra Chat Mic. Sæt noget til at spille på højttalerne, og tal imens – spillyden skal være væk i optagelsen.'),
         remove ? h('div', { class: 'row', style: { marginTop: '6px' } }, remove) : '');
     } finally { rendering = false; }
+    renderTest();
     poll();
   };
 
@@ -252,6 +304,56 @@ export function voiceCleanCard(ctx) {
     render();
   };
 
+  // "Test din mikrofon": 2 × 6 s, measured in the plugin (in → out), recorded to listen to.
+  const renderTest = () => {
+    if (testing) return;
+    const show = installed && cfg.enabled;
+    const btn = h('button', { class: 'btn sm', 'data-testid': 'voice-test-start', onclick: () => runTest() }, lastTest ? 'Test igen' : 'Test din mikrofon');
+    const parts = [h('div', { class: 'row' }, h('label', {}, 'Virker det? Test din mikrofon (12 sekunder)'), h('div', { class: 'spacer' }), btn)];
+    if (lastTest) {
+      parts.push(h('div', { class: `voice-test-result ${lastTest.code}`, 'data-testid': 'voice-test-result', 'data-code': lastTest.code }, ...lastTest.lines.map((l) => h('div', {}, l))));
+      if (lastTest.url) parts.push(h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Sådan lød din mikrofon efter renseren:'), h('audio', { controls: true, src: lastTest.url, 'data-testid': 'voice-test-audio' })));
+    }
+    testBox.replaceChildren(...(show ? parts : []));
+  };
+
+  const runTest = async () => {
+    if (testing) return;
+    testing = true;
+    const say = h('div', { class: 'voice-test-step', 'data-testid': 'voice-test-step' });
+    const live = h('div', { class: 'hint', 'data-testid': 'voice-test-live' });
+    testBox.replaceChildren(say, live);
+    const samples = { typing: [], speech: [] };
+    if (lastTest?.url) URL.revokeObjectURL(lastTest.url);
+    const mic = await openChatMic();
+    try {
+      say.textContent = 'Gør klar …';
+      await sleep(1500);
+      for (const step of MIC_TEST_STEPS) {
+        setDemoVoicePhase(step.id);
+        const end = Date.now() + step.seconds * 1000;
+        while (Date.now() < end) {
+          say.replaceChildren(h('span', {}, step.text), ` (${Math.ceil((end - Date.now()) / 1000)} s)`);
+          const st = await voiceStatus().catch(() => null);
+          if (st?.plugin) {
+            samples[step.id].push({ in_db: st.in_db, out_db: st.out_db });
+            if (Number.isFinite(st.in_db) && Number.isFinite(st.out_db)) live.textContent = `ind ${Math.round(st.in_db)} dB → ud ${Math.round(st.out_db)} dB`;
+          }
+          await sleep(250);
+        }
+      }
+    } finally {
+      setDemoVoicePhase(null);
+    }
+    const url = mic ? await mic.stop() : null;
+    const v = micTestVerdict(samples);
+    if (!mic && v.code === 'not-running') v.lines.push('Appen kunne ikke åbne Chat Mic – tillad mikrofonen, eller start "Mikrofontest" i Discord under testen.');
+    lastTest = { ...v, url, at: Date.now() };
+    logActivity(`Ren mikrofon – test: ${v.lines.slice(0, 2).join(' · ')}`);
+    testing = false;
+    renderTest();
+  };
+
   const renderCheck = (diag) => {
     const key = JSON.stringify(diag);
     if (checkList.dataset.key === key) return;
@@ -265,7 +367,8 @@ export function voiceCleanCard(ctx) {
         h('span', { class: 'hint' }, diag.allGood ? 'Alt ser rigtigt ud.' : 'Ret det, der har ✗, fra oven og ned.'),
         h('div', { class: 'spacer' }),
         h('button', { class: 'btn sm', 'data-testid': 'voice-copy-check', onclick: async () => {
-          try { await navigator.clipboard.writeText(['Ren mikrofon – tjek', diagnosisText(diag)].join('\n')); toast('Tjekket er kopieret', 'info'); } catch { toast('Kunne ikke kopiere'); }
+          const test = lastTest ? ['', 'Test af mikrofonen:', ...lastTest.lines] : [];
+          try { await navigator.clipboard.writeText(['Ren mikrofon – tjek', diagnosisText(diag), ...test].join('\n')); toast('Tjekket er kopieret', 'info'); } catch { toast('Kunne ikke kopiere'); }
         } }, 'Kopiér tjek')) : '');
     // Discord's own noise suppression: off only once ours is proven to work on Discord's sound.
     discordHint.textContent = diag.allGood

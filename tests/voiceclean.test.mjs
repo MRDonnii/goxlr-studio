@@ -90,9 +90,12 @@ test('payloads: the mic part only on a microphone with the engine, the reference
   assert.equal(pickChatMic(mics).id, mics[0].id);
   assert.equal(pickChatMic([{ id: 'w', name: 'Mikrofon (Webcam)' }]), null);
   Object.assign(cfg, { enabled: true, device: '{0.0.1.00000000}.{aaa}', noise: 'strong' });
-  assert.deepEqual(micPayload(cfg, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: false });
+  assert.deepEqual(micPayload(cfg, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: false, amount: 1 });
   // Stemmeisolering: the Isolate parameter, with strong noise suppression for an older plugin.
-  assert.deepEqual(micPayload({ ...cfg, noise: 'isolate' }, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: true });
+  assert.deepEqual(micPayload({ ...cfg, noise: 'isolate' }, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: true, amount: 1 });
+  assert.equal(micPayload({ ...cfg, noise: 'isolate', amount: 'medium' }, mics).amount, 0.5);
+  assert.equal(micPayload({ ...cfg, noise: 'isolate', amount: 'light' }, mics).amount, 0);
+  assert.equal(micPayload({ ...cfg, noise: 'strong', amount: 'light' }, mics).amount, 1);
   assert.equal(micPayload(cfg, [{ ...mics[0], installed: false }]), null);
   assert.equal(micPayload({ ...cfg, enabled: false }, mics), null);
   // "Fang alt" held: everything comes through untouched.
@@ -205,4 +208,26 @@ test('the newest mic test is used, and the count is smoothed', async () => {
   assert.equal(smoothInstances(hist, 1, 5500), 1);
   assert.equal(smoothInstances(hist, null, 9000), 1);
   assert.equal(smoothInstances(hist, null, 10000), null);
+});
+
+test('the mic test tells typing from the voice', async () => {
+  const { micTestVerdict } = await import('../public/js/voicemodel.js');
+  const s = (inDb, outDb) => ({ in_db: inDb, out_db: outDb });
+  // Keys removed 40 dB, the voice untouched.
+  let r = micTestVerdict({ typing: [s(-40, -80), s(-35, -75), s(-70, -90)], speech: [s(-25, -26), s(-30, -31), s(-28, -28), s(-60, -80)] });
+  assert.equal(r.code, 'good');
+  assert.equal(Math.round(r.typingCut), 40);
+  assert.ok(r.voiceLoss <= 1);
+  assert.match(r.lines.join(' '), /Tasterne dæmpes 40 dB.*uændret/);
+  // Keys only dampened 7 dB (Stærk): weak.
+  r = micTestVerdict({ typing: [s(-40, -47), s(-38, -45)], speech: [s(-25, -26)] });
+  assert.equal(r.code, 'weak');
+  assert.match(r.lines.join(' '), /Stemmeisolering/);
+  // The voice cut by 15 dB.
+  assert.equal(micTestVerdict({ typing: [s(-40, -80)], speech: [s(-45, -60), s(-44, -59)] }).code, 'voice-cut');
+  // Nothing heard while typing (the GoXLR's gate), voice fine.
+  assert.equal(micTestVerdict({ typing: [s(-90, -120)], speech: [s(-25, -25)] }).code, 'no-typing');
+  // No speech, no sound at all.
+  assert.equal(micTestVerdict({ typing: [s(-40, -80)], speech: [s(-80, -100)] }).code, 'no-speech');
+  assert.equal(micTestVerdict({ typing: [{ in_db: null }], speech: [] }).code, 'not-running');
 });

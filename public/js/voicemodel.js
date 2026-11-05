@@ -13,7 +13,17 @@ export const NOISE_HINT = {
   isolate: 'Stemmeisolering: kun din stemme kommer igennem – tastatur, mus, blæser, spillyd, hund og alt andet fjernes, også under ordene, og der er stille mellem ordene. Samme slags neurale netværk som Discords støjreduktion (DeepFilterNet 3). Giver 30 ms ekstra forsinkelse og bruger lidt mere CPU.',
 };
 
-export const DEFAULT_VOICE = { enabled: false, echo: true, noise: 'isolate', highPass: true, device: null, deviceName: null, speakers: 'Headphones' };
+export const DEFAULT_VOICE = { enabled: false, echo: true, noise: 'isolate', highPass: true, amount: 'full', device: null, deviceName: null, speakers: 'Headphones' };
+
+// Styrke for Stemmeisolering (the plugin's Amount parameter, see residual() in plugins/voiceclean):
+// how much of the background is left – full = nothing, medium −20 dB, light −10 dB.
+export const AMOUNT_LEVELS = [['full', 'Fuld'], ['medium', 'Mellem'], ['light', 'Let']];
+const AMOUNT_VALUE = { full: 1, medium: 0.5, light: 0 };
+export const AMOUNT_HINT = {
+  full: 'Kun din stemme – alt andet fjernes.',
+  medium: 'Baggrunden dæmpes 20 dB i stedet for at forsvinde helt – lyder mere naturligt.',
+  light: 'Baggrunden dæmpes 10 dB – rummet kan høres svagt.',
+};
 
 // The settings object itself (filled with defaults in place, so every part shares it).
 export function voiceSettings(prefs) {
@@ -104,7 +114,9 @@ export function micPayload(cfg, mics = [], { openMicHeld = false } = {}) {
   if (!cfg?.enabled || !cfg.device || openMicHeld) return null;
   const on = mics.find((d) => d.installed && d.id.toLowerCase() === cfg.device.toLowerCase());
   if (!on) return null;
-  return { devices: [on.id], echo: !!cfg.echo, noise: NOISE_VALUE[cfg.noise] ?? 0.5, high_pass: cfg.highPass !== false, isolate: cfg.noise === 'isolate' };
+  const isolate = cfg.noise === 'isolate';
+  const amount = isolate ? AMOUNT_VALUE[cfg.amount] ?? 1 : 1;
+  return { devices: [on.id], echo: !!cfg.echo, noise: NOISE_VALUE[cfg.noise] ?? 0.5, high_pass: cfg.highPass !== false, isolate, amount };
 }
 
 // For the echo reference writer (voiceref.rs). It also reads the plugin's status, so it runs
@@ -180,7 +192,9 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
     add('programs', false, 'EQ-motoren på mikrofonen er kun sat op til almindelige optagelser – Discord og andre stemmeprogrammer får mikrofonen urenset', 'update');
   }
   const conf = check?.config;
-  if (conf) {
+  const nothingOn = !cfg.echo && cfg.noise === 'off' && cfg.highPass === false;
+  if (conf && nothingOn) add('config', null, 'Ekkofjerner, støjfjerner og rumlefilter er alle slået fra – der er intet at rense med');
+  else if (conf) {
     const here = conf.devices.some((d) => d.toLowerCase() === guidOf(mic.id));
     if (conf.plugin && here) add('config', true, 'EQ-motoren har fået indstillingerne');
     else add('config', false, 'Indstillingerne er ikke skrevet til EQ-motoren', 'apply');
@@ -224,7 +238,8 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
     add('streams', null, 'Test om optagelser som Discords bliver renset', 'test');
   }
   if (status?.plugin) {
-    if (status.bypassed) add('rate', false, 'Chat Mic kører ikke 48 kHz – lyden sendes urørt videre');
+    if (status.broken) add('rate', false, 'Renseren stødte på en fejl og sender mikrofonen urørt videre – en test starter den igen', 'test');
+    else if (status.bypassed) add('rate', false, 'Chat Mic kører ikke 48 kHz – lyden sendes urørt videre. Skift det i Windows: Lyd → Optagelse → Chat Mic → Egenskaber → Avanceret → 48000 Hz.');
     if (cfg.noise === 'isolate') {
       if (status.isolate === 'running') add('isolate', true, 'Stemmeisolering kører');
       else if (status.isolate === 'loading') add('isolate', null, 'Stemmeisolering starter …');
@@ -264,4 +279,45 @@ export function smoothInstances(hist, n, now, ms = 4000) {
 /** The check as plain text (for "Kopiér tjek"). */
 export function diagnosisText(d) {
   return d.items.map((i) => `${i.ok === true ? '✓' : i.ok === false ? '✗' : '–'} ${i.text}`).join('\n');
+}
+
+// ---------- "Test din mikrofon": typing without talking, then talking, measured in the plugin ----------
+export const MIC_TEST_STEPS = [
+  { id: 'typing', seconds: 6, text: 'Vær helt stille, og tast løs på tastaturet' },
+  { id: 'speech', seconds: 6, text: 'Tal nu normalt – fx tæl langsomt til tyve' },
+];
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
+
+/**
+ * The verdict of the test from the plugin's levels (voice_status in_db/out_db, every ~¼ s) in each
+ * step: { typing: [{in_db, out_db}], speech: [...] } → { code, typingCut, voiceLoss, lines }.
+ * Codes: good · weak (typing not removed enough) · voice-cut (the voice is dampened) ·
+ * no-typing (nothing heard while typing – the GoXLR's gate already takes it) · no-speech ·
+ * not-running (the cleaner got no sound).
+ */
+export function micTestVerdict({ typing = [], speech = [] }) {
+  const ok = (s) => Number.isFinite(s?.in_db) && Number.isFinite(s?.out_db);
+  const t = typing.filter(ok);
+  const v = speech.filter(ok);
+  if (!t.length && !v.length) return { code: 'not-running', typingCut: null, voiceLoss: null, lines: ['Renseren fik ingen lyd under testen – kører Ren mikrofon på Chat Mic?'] };
+  const heardKeys = t.filter((s) => s.in_db > -65);
+  const typingCut = heardKeys.length ? median(heardKeys.map((s) => s.in_db - s.out_db)) : null;
+  // The voice: the louder half of the samples with speech in them.
+  const talk = v.filter((s) => s.in_db > -55).sort((a, b) => b.in_db - a.in_db);
+  const loud = talk.slice(0, Math.max(1, Math.ceil(talk.length / 2)));
+  const voiceLoss = talk.length ? median(loud.map((s) => s.in_db - s.out_db)) : null;
+  const lines = [];
+  if (typingCut === null) lines.push('Tasterne nåede ikke renseren (GoXLR’ens noise gate tog dem allerede) – fint.');
+  else lines.push(`Tasterne dæmpes ${Math.round(typingCut)} dB`);
+  if (voiceLoss === null) lines.push('Vi hørte ingen tale i anden del – er mikrofonen muted, eller er gain skruet helt ned?');
+  else lines.push(voiceLoss <= 3 ? 'Din stemme kommer igennem uændret' : `Din stemme dæmpes ${Math.round(voiceLoss)} dB`);
+  let code = 'good';
+  if (voiceLoss === null) code = 'no-speech';
+  else if (voiceLoss > 6) code = 'voice-cut';
+  else if (typingCut === null) code = 'no-typing';
+  else if (typingCut < 15) code = 'weak';
+  if (code === 'good' || code === 'no-typing') lines.push('Ren mikrofon virker: det er sådan, Discord får din mikrofon.');
+  if (code === 'weak') lines.push('Tasterne er ikke væk. Vælg Støjfjerner "Stemmeisolering", hvis den ikke er valgt.');
+  if (code === 'voice-cut') lines.push('Stemmen dæmpes for meget. Skru gain op på GoXLR’en (Mikrofon-assistenten hjælper), eller sæt Styrke ned.');
+  return { code, typingCut, voiceLoss, lines };
 }
