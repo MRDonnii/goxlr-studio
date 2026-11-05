@@ -4,9 +4,9 @@
 // GoXLR Studio sends it what the speakers play (voiceref.rs), so the echo canceller knows what to
 // remove. The pure parts are in voicemodel.js.
 import { h, toast, confirmDialog, logActivity } from './ui.js';
-import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus, voiceCheck } from './native.js';
+import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus, voiceCheck, storeGet, storeSet } from './native.js';
 import { channelEndpoint } from './extras.js';
-import { voiceSettings, NOISE_LEVELS, NOISE_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText, voiceDiagnosis, diagnosisText } from './voicemodel.js';
+import { voiceSettings, NOISE_LEVELS, NOISE_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText, voiceDiagnosis, diagnosisText, latestMicTest, smoothInstances } from './voicemodel.js';
 
 let devCache = { at: 0, list: [] };
 async function audioDevices(force = false) {
@@ -24,6 +24,12 @@ export async function voiceMicPayload(ctx) {
   const cfg = voiceSettings(ctx.prefs);
   if (!cfg.enabled) return null;
   return micPayload(cfg, await engineMics(), { openMicHeld: !!ctx.prefs.openMic?.saved });
+}
+
+/** Saves the microphone tests of an engine task (set-mics/test), so the check can show them. */
+export function saveVoiceTest(r) {
+  const tests = (r?.tests || []).filter((t) => t.capture);
+  if (tests.length) storeSet('voice-test', { at: Date.now(), tests }).catch(() => {});
 }
 
 /** Keeps the echo reference in step with the GoXLR's faders, mutes and routing (every 0,5 s). */
@@ -63,27 +69,34 @@ export function voiceCleanCard(ctx) {
   // Tjek: step by step what works and what does not, with a fix where there is one.
   const checkList = h('div', { class: 'voice-check', 'data-testid': 'voice-check' });
   const discordHint = h('div', { class: 'hint', 'data-testid': 'voice-discord-hint' });
-  const seen = { info: null, target: null, devs: [], check: null, checkedAt: 0, diag: null };
+  const seen = { info: null, target: null, devs: [], check: null, checkedAt: 0, diag: null, test: null, inst: [] };
   const card = h('div', { class: 'card', 'data-testid': 'voice-clean' },
     h('h2', {}, 'Ren mikrofon'),
     h('div', { class: 'voice-status row' }, statusDot, statusText), detail, checkList, body);
   let installed = false;
   let rendering = false;
 
-  const changed = () => { ctx.savePrefs(); ctx.applyOutputEq?.(); render(); };
+  const apply = () => ctx.applyOutputEq?.()?.catch?.((e) => toast(`EQ-motor: ${e?.message || e}`));
+  const changed = () => { ctx.savePrefs(); apply(); render(); };
+  // Runs an engine task for the mic and keeps its test results.
+  const micTask = async (task) => {
+    const r = await engineTask(task);
+    saveVoiceTest(r);
+    return r;
+  };
 
   const render = async () => {
     if (rendering) return;
     rendering = true;
     try {
-      const [info, devs] = await Promise.all([engineInfo().catch(() => null), audioDevices(true)]);
+      const [info, devs, voiceTest, engineTest] = await Promise.all([engineInfo().catch(() => null), audioDevices(true), storeGet('voice-test', null).catch(() => null), storeGet('engine-test', null).catch(() => null)]);
       micCache = { at: Date.now(), list: info?.mics || [] };
       const mics = info?.mics || [];
       const chat = pickChatMic(mics);
       if (chat && (!cfg.device || !mics.some((d) => d.id.toLowerCase() === cfg.device.toLowerCase()))) { cfg.device = chat.id; cfg.deviceName = chat.name; ctx.savePrefs(); }
       const target = mics.find((d) => cfg.device && d.id.toLowerCase() === cfg.device.toLowerCase()) || null;
       installed = !!target?.installed;
-      Object.assign(seen, { info, target, devs });
+      Object.assign(seen, { info, target, devs, test: target ? latestMicTest([voiceTest, engineTest], target.id) : null });
       const fmt = target ? await deviceFormat(target.id).catch(() => null) : null;
       const builtin = info?.kind === 'builtin';
 
@@ -127,11 +140,11 @@ export function voiceCleanCard(ctx) {
           h('button', { class: 'btn sm primary', 'data-testid': 'voice-update', onclick: async (e) => {
             e.target.disabled = true;
             try {
-              const r = await engineTask({ action: 'set-mics', devices: mics.filter((d) => d.installed).map((d) => d.id) });
+              const r = await micTask({ action: 'set-mics', devices: mics.filter((d) => d.installed).map((d) => d.id) });
               toast(r?.ok ? 'Ren mikrofon er opdateret' : `Det lykkedes ikke: ${r?.error || '?'}`, r?.ok ? 'info' : 'error');
             } catch (err) { toast(String(err)); }
             await engineMics(true);
-            ctx.applyOutputEq?.();
+            apply();
             render();
           } }, 'Opdatér'))
         : '';
@@ -140,12 +153,12 @@ export function voiceCleanCard(ctx) {
           h('button', { class: 'btn sm primary', 'data-testid': 'voice-install', onclick: async (e) => {
             e.target.disabled = true;
             try {
-              const r = await engineTask({ action: 'set-mics', devices: [target.id] });
+              const r = await micTask({ action: 'set-mics', devices: [target.id] });
               toast(r?.ok ? 'Ren mikrofon er sat på Chat Mic' : `Det lykkedes ikke: ${r?.error || '?'}`, r?.ok ? 'info' : 'error');
               if (r?.ok) { cfg.enabled = true; ctx.savePrefs(); }
             } catch (err) { toast(String(err)); }
             await engineMics(true);
-            ctx.applyOutputEq?.();
+            apply();
             render();
           } }, 'Sæt den på'))
         : '';
@@ -153,12 +166,12 @@ export function voiceCleanCard(ctx) {
         ? h('button', { class: 'btn sm', 'data-testid': 'voice-remove', onclick: async () => {
           if (!(await confirmDialog('Fjerne EQ-motoren fra mikrofonen?\n\nMikrofonen virker som før, bare uden Ren mikrofon. Kræver administrator; Windows’ lyd genstarter et øjeblik.', { ok: 'Fjern' }))) return;
           try {
-            const r = await engineTask({ action: 'set-mics', devices: [] });
+            const r = await micTask({ action: 'set-mics', devices: [] });
             toast(r?.ok ? 'EQ-motoren er fjernet fra mikrofonen' : `Det lykkedes ikke: ${r?.error || '?'}`, r?.ok ? 'info' : 'error');
             if (r?.ok) { cfg.enabled = false; ctx.savePrefs(); }
           } catch (err) { toast(String(err)); }
           await engineMics(true);
-          ctx.applyOutputEq?.();
+          apply();
           render();
         } }, 'Fjern fra mikrofonen')
         : '';
@@ -204,12 +217,13 @@ export function voiceCleanCard(ctx) {
       seen.check = await voiceCheck().catch(() => null);
     }
     const nameOf = (id) => seen.devs.find((d) => d.id === id)?.name || id;
-    const diag = voiceDiagnosis({ cfg, mic: seen.target, outdated: !!seen.info?.voice_outdated, check: seen.check, status: st, nameOf });
+    const instances = smoothInstances(seen.inst, st?.instances, Date.now());
+    const diag = voiceDiagnosis({ cfg, mic: seen.target, outdated: !!seen.info?.voice_outdated, check: seen.check, status: st && { ...st, instances }, test: seen.test, nameOf });
     seen.diag = diag;
     renderCheck(diag);
   };
 
-  const FIX_LABEL = { install: 'Sæt den på', update: 'Opdatér', apply: 'Skriv igen', mode: 'Prøv en anden måde' };
+  const FIX_LABEL = { install: 'Sæt den på', update: 'Opdatér', apply: 'Skriv igen', mode: 'Prøv en anden måde', test: 'Test' };
   const runFix = async (fix, button) => {
     button.disabled = true;
     const mic = seen.target;
@@ -218,15 +232,20 @@ export function voiceCleanCard(ctx) {
         await ctx.applyOutputEq?.();
         toast('Indstillingerne er skrevet til EQ-motoren igen', 'info');
       } else if (mic) {
-        const task = fix === 'mode'
-          ? { action: 'set-mics', devices: [mic.id], mode: mic.mode === 'lfx-gfx' ? 'sfx-mfx' : 'lfx-gfx' }
-          : { action: 'set-mics', devices: fix === 'update' ? (seen.info?.mics || []).filter((d) => d.installed).map((d) => d.id) : [mic.id] };
-        const r = await engineTask(task);
+        const task = fix === 'test'
+          ? { action: 'test' }
+          : fix === 'mode'
+            ? { action: 'set-mics', devices: [mic.id], mode: mic.mode === 'lfx-gfx' ? 'sfx-mfx' : 'lfx-gfx' }
+            : { action: 'set-mics', devices: fix === 'update' ? (seen.info?.mics || []).filter((d) => d.installed).map((d) => d.id) : [mic.id] };
+        if (fix === 'test') toast('Ren mikrofon testes – Windows beder om administrator-adgang, og lyden afbrydes et par gange', 'info');
+        const r = await micTask(task);
+        if (fix === 'test' && r?.tests?.length) storeSet('engine-test', { at: Date.now(), tests: r.tests, sound: r.sound }).catch(() => {});
         toast(r?.ok ? 'Færdig – tjekket opdateres om et øjeblik' : `Det lykkedes ikke: ${r?.error || '?'}`, r?.ok ? 'info' : 'error');
         if (r?.ok && fix === 'install') { cfg.enabled = true; ctx.savePrefs(); }
         logActivity(`Ren mikrofon: ${FIX_LABEL[fix]} (${r?.ok ? 'ok' : 'fejlede'})`);
+        for (const l of (r?.log || []).filter((x) => /renses|Discord|afviste/.test(x))) logActivity(`Ren mikrofon: ${l}`);
         await engineMics(true);
-        ctx.applyOutputEq?.();
+        apply();
       }
     } catch (err) { toast(String(err)); }
     seen.checkedAt = 0;

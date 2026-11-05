@@ -190,7 +190,11 @@ async function applyOutputEq() {
   // Ren mikrofon: the mic's part of the same config (voiceclean.js).
   const mic = await voiceMicPayload(ctx).catch(() => null);
   if (mic) payload.mic = mic;
-  return setOutputEqEngine(payload);
+  // Callers often ignore the result; a config.txt that could not be written must not go unnoticed.
+  return setOutputEqEngine(payload).catch((e) => {
+    logActivity(`EQ-motor: indstillingerne kunne ikke skrives – ${e?.message || e}`);
+    throw e;
+  });
 }
 
 // What the engine plays: the active slot with Loudness/Crossfeed and the preamp offset from the
@@ -493,7 +497,10 @@ async function checkEngineRegistration() {
   ctx.engineRepair = { needed: problems.length > 0, outdated, problems, running: false };
   renderBanners();
   const version = (await appInfo().catch(() => ({}))).version || '?';
-  if ((problems.length || outdated) && ctx.prefs.engineRepairTried !== version) {
+  // 0.14.2: Ren mikrofon put on by an older version is set up for normal recordings only, so
+  // Discord's went around it; the test also puts the new plugin in.
+  const micUpgrade = (info.mics || []).some((m) => m.installed && m.voice_programs === false);
+  if ((problems.length || outdated || micUpgrade) && ctx.prefs.engineRepairTried !== version) {
     ctx.prefs.engineRepairTried = version; ctx.savePrefs();
     repairEngine(false);
   }

@@ -85,6 +85,16 @@ demoEngine.mics = new Set();
 // Demo ?oldvoice: Ren mikrofon from 0.13 (before Stemmeisolering) is installed.
 let demoOldVoice = typeof location !== 'undefined' && /[?&]oldvoice\b/.test(location.search);
 if (demoOldVoice) demoEngine.mics = new Set(['in-goxlr-chat']);
+// Demo ?discordbypass: Discord gets Chat Mic around the cleaner (the engine is only registered for
+// normal recordings, as before 0.14.2, and OBS records too).
+const demoBypass = typeof location !== 'undefined' && /[?&]discordbypass\b/.test(location.search);
+if (demoBypass) demoEngine.mics = new Set(['in-goxlr-chat']);
+let demoVoicePrograms = !demoOldVoice && !demoBypass;
+const demoMicTests = (ids) => ids.map((id) => ({
+  guid: id, name: demoDevices.find((x) => x.id === id)?.name || id, mode: 'sfx-mfx', pre_mix: true, post_mix: false, capture: true, ok: true, error: null,
+  streams: { default: true, communications: demoVoicePrograms, raw: true, all_modes: true, errors: [] },
+}));
+const demoStreamLine = (t) => `${t.streams.communications ? '✓' : '✗'} ${t.name}: almindelig optagelse renses · Discord/stemmeprogrammer ${t.streams.communications ? 'renses' : 'renses IKKE'} · rå optagelse renses`;
 
 export async function engineInfo() {
   if (isNative()) return invoke('engine_info');
@@ -114,7 +124,7 @@ export async function engineInfo() {
     voice_outdated: demoEngine.kind === 'builtin' && demoEngine.mics.size > 0 && demoOldVoice,
     mics: demoDevices.filter((d) => d.flow === 'capture').map((d) => {
       const installed = demoEngine.kind === 'builtin' && demoEngine.mics.has(d.id);
-      return { id: d.id, guid: d.id, name: d.name, installed, mode: installed ? 'sfx-mfx' : null };
+      return { id: d.id, guid: d.id, name: d.name, installed, mode: installed ? 'sfx-mfx' : null, voice_programs: installed ? demoVoicePrograms : null };
     }),
   };
 }
@@ -191,8 +201,9 @@ async function engineTaskRaw(task) {
     demoEngine.mics = new Set(task.devices);
     if (demoOldVoice && task.devices.length) { demoOldVoice = false; log.push('goxlr_studio_voice.dll opdateret'); }
     for (const d of task.devices) log.push(`EQ-motor sat på mikrofonen: ${demoDevices.find((x) => x.id === d)?.name || d} (sfx-mfx)`);
-    tests = task.devices.map((id) => ({ guid: id, name: demoDevices.find((x) => x.id === id)?.name || id, mode: 'sfx-mfx', pre_mix: true, post_mix: false, capture: true, ok: true, error: null }));
-    for (const t of tests) log.push(`✓ ${t.name}: Ren mikrofon kører (SFX/MFX)`);
+    if (task.devices.length && !demoVoicePrograms) { demoVoicePrograms = true; log.push(`${demoDevices.find((x) => x.id === task.devices[0])?.name}: renser nu også lyden til Discord og andre stemmeprogrammer`); }
+    tests = demoMicTests(task.devices);
+    for (const t of tests) log.push(`✓ ${t.name}: Ren mikrofon kører (SFX/MFX)`, demoStreamLine(t));
   } else if (task.action === 'disable-autostart') {
     for (const a of demoAutostarts) {
       if ((a.kind === 'task' && task.tasks?.includes(a.id)) || (a.kind === 'link' && task.links?.includes(a.id))) {
@@ -208,6 +219,11 @@ async function engineTaskRaw(task) {
       demoEngine.unregistered = false;
     }
     tests = demoTest(log);
+    if (demoEngine.kind === 'builtin' && demoEngine.mics.size) {
+      const mt = demoMicTests([...demoEngine.mics]);
+      for (const t of mt) log.push(`✓ ${t.name}: Ren mikrofon kører (SFX/MFX)`, demoStreamLine(t));
+      tests = [...tests, ...mt];
+    }
   } else if (task.action === 'uninstall') {
     demoEngine.kind = 'none'; demoEngine.uses_our_config = false; demoEngine.installed = new Set(); demoEngine.mics = new Set(); log.push('EQ-motoren er fjernet');
   } else if (task.action === 'use-external') { demoEngine.uses_our_config = true; log.push('Equalizer APO læser nu GoXLR Studios EQ'); }
@@ -466,7 +482,8 @@ export async function voiceCheck() {
   try { prefs = JSON.parse(localStorage.getItem('studio.prefs') || '{}'); } catch { /* demo */ }
   const vc = prefs.voiceClean || {};
   return {
-    recordings: [{ device: webcam ? 'in-webcam' : 'in-goxlr-chat', pid: 4242, exe: 'Discord.exe', active: true }],
+    recordings: [{ device: webcam ? 'in-webcam' : 'in-goxlr-chat', pid: 4242, exe: 'Discord.exe', active: true },
+      ...(demoBypass ? [{ device: 'in-goxlr-chat', pid: 5150, exe: 'obs64.exe', active: true }] : [])],
     config: { devices: vc.enabled ? on : [], plugin: !!vc.enabled && on.length > 0, isolate: !!vc.enabled && vc.noise === 'isolate' && !demoOldVoice },
     error: null,
   };
@@ -485,6 +502,7 @@ export async function voiceStatus() {
   return {
     enabled: true, connected: demoEngine.mics.size > 0, plugin: demoEngine.mics.size > 0, echo: demoVoice.sources.length > 0, noise: true, reference: demoVoice.sources.length > 0, bypassed: false, isolate: demoVoiceIsolate(),
     erle_db: 24 + 4 * Math.sin(t / 3), delay_ms: 38, playing: demoVoice.sources.length > 0, in_db: -31 + 3 * Math.sin(t), out_db: -57 + 3 * Math.sin(t),
+    instances: demoOldVoice ? null : demoBypass && !demoVoicePrograms ? 1 : demoBypass ? 2 : 1,
     sources: demoVoice.sources.map((s) => ({ device: s.device, ok: true, rate: 48000, playing: s.gain > 0, error: null })), error: null,
   };
 }

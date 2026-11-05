@@ -152,6 +152,7 @@ export function noteText(n) {
 
 // ---------- the check (what is wrong when teammates still hear everything) ----------
 const DISCORD = /^discord(ptb|canary|development)?\.exe$/i;
+const LEGACY_TIP = 'Prøv i Discord: Indstillinger → Stemme og video → Avanceret → Lyd-undersystem = Legacy, og genstart Discord helt (også i bakken).';
 // The GUID at the end of an endpoint id (what config.txt's Device: names); the whole id otherwise.
 const guidOf = (id) => (String(id || '').match(/\{[0-9a-f-]+\}$/i)?.[0] || String(id || '')).toLowerCase();
 
@@ -159,9 +160,10 @@ const guidOf = (id) => (String(id || '').match(/\{[0-9a-f-]+\}$/i)?.[0] || Strin
  * Ren mikrofon's check, step by step: { items: [{ id, ok: true|false|null, text, fix? }], allGood }.
  * ok null = cannot tell yet (e.g. Discord is not recording). Inputs: cfg (prefs.voiceClean),
  * mic (the engine's entry for the chosen mic), outdated, check (voice_check: recordings, config),
- * status (voice_status), nameOf(id) for device names.
+ * status (voice_status; `instances` = recordings being cleaned, smoothed by the caller), test
+ * (the mic's last engine test with `streams`, see engine.rs StreamTest), nameOf(id) for names.
  */
-export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, status = null, nameOf = (id) => id }) {
+export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, status = null, test = null, nameOf = (id) => id }) {
   const items = [];
   const add = (id, ok, text, fix) => items.push({ id, ok, text, ...(fix ? { fix } : {}) });
   if (!cfg?.enabled) return { items: [{ id: 'off', ok: null, text: 'Ren mikrofon er slået fra' }], allGood: false };
@@ -171,6 +173,12 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
   }
   add('installed', true, `EQ-motoren sidder på ${mic.name}`);
   if (outdated) add('version', false, 'Ren mikrofon-pluginnet er en ældre udgave', 'update');
+  // 0.14.2: registered for normal recordings only, Discord (communications) went around it.
+  const streams = test?.streams || null;
+  // (An outdated plugin's Opdatér fixes this too.)
+  if (mic.voice_programs === false && !outdated && !(streams && !streams.all_modes)) {
+    add('programs', false, 'EQ-motoren på mikrofonen er kun sat op til almindelige optagelser – Discord og andre stemmeprogrammer får mikrofonen urenset', 'update');
+  }
   const conf = check?.config;
   if (conf) {
     const here = conf.devices.some((d) => d.toLowerCase() === guidOf(mic.id));
@@ -194,6 +202,27 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
   if (status?.plugin) add('running', true, 'Renseren kører på mikrofonens lyd');
   else if (anyOnChat) add('running', false, 'Der optages fra Chat Mic, men renseren kører ikke på lyden – EQ-motoren bliver ikke indlæst på mikrofonen', 'mode');
   else add('running', null, 'Renseren starter, når et program optager fra Chat Mic');
+  // Every recording from the mic should have its own cleaner: fewer means a program gets the mic
+  // around it (plugins from 0.14.2 count themselves).
+  const active = recs.filter((r) => fromChat(r) && r.active);
+  const counted = status?.plugin && Number.isFinite(status.instances);
+  if (counted && active.length) {
+    const discordActive = active.some((r) => DISCORD.test(r.exe));
+    if (status.instances >= active.length) {
+      add('cleaned', true, discordActive ? 'Discords optagelse bliver renset' : `Alle ${active.length} optagelser fra Chat Mic bliver renset`);
+    } else {
+      const who = discordActive ? 'Discord' : (active[0]?.exe || 'et program');
+      add('cleaned', false, `Optager fra Chat Mic: ${active.length} · renses: ${status.instances} – ${who} får sikkert mikrofonen uden om renseren. ${LEGACY_TIP}`, 'test');
+    }
+  }
+  if (streams) {
+    if (streams.communications === true) add('streams', true, 'Testen viser: optagelser som Discords bliver renset');
+    else if (streams.communications === false) add('streams', false, `Testen viser: optagelser som Discords bliver ikke renset. ${LEGACY_TIP}`, 'test');
+    else if (!streams.all_modes) add('streams', false, `Windows afviste Discords optagetilstand med Ren mikrofon på, så den er slået fra. ${LEGACY_TIP}`);
+    else add('streams', null, 'Testen kunne ikke åbne en optagelse som Discords', 'test');
+  } else if (mic.voice_programs === true && !counted) {
+    add('streams', null, 'Test om optagelser som Discords bliver renset', 'test');
+  }
   if (status?.plugin) {
     if (status.bypassed) add('rate', false, 'Chat Mic kører ikke 48 kHz – lyden sendes urørt videre');
     if (cfg.noise === 'isolate') {
@@ -209,8 +238,27 @@ export function voiceDiagnosis({ cfg, mic, outdated = false, check = null, statu
       add('levels', null, `Mikrofonen ind ${Math.round(status.in_db)} dB → ud ${Math.round(status.out_db)} dB`);
     }
   }
-  const allGood = items.every((i) => i.ok !== false) && onChat && !!status?.plugin;
+  const allGood = items.every((i) => i.ok !== false) && onChat && !!status?.plugin && (!counted || items.some((i) => i.id === 'cleaned' && i.ok));
   return { items, allGood };
+}
+
+/** The newest engine test of this mic among saved test results ({at, tests}), or null. */
+export function latestMicTest(saved, micId) {
+  const g = guidOf(micId);
+  let best = null;
+  for (const r of saved || []) {
+    const t = (r?.tests || []).find((x) => x.capture && guidOf(x.guid) === g);
+    if (t && (!best || (r.at || 0) > best.at)) best = { at: r.at || 0, test: t };
+  }
+  return best?.test || null;
+}
+
+/** Recordings being cleaned, as the largest count of the last `ms` (a program that just stopped is
+ *  gone from the count before the recordings list notices). `hist` = [{at, n}], changed in place. */
+export function smoothInstances(hist, n, now, ms = 4000) {
+  if (Number.isFinite(n)) hist.push({ at: now, n });
+  while (hist.length && now - hist[0].at > ms) hist.shift();
+  return hist.length ? Math.max(...hist.map((x) => x.n)) : null;
 }
 
 /** The check as plain text (for "Kopiér tjek"). */

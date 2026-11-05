@@ -145,3 +145,64 @@ test('the check finds what stops Ren mikrofon from working', async () => {
   assert.equal(voiceDiagnosis({ cfg, mic: { ...mic, installed: false } }).items[0].fix, 'install');
   assert.equal(voiceDiagnosis({ cfg: { enabled: false }, mic }).allGood, false);
 });
+
+test('the check catches Discord getting the mic around the cleaner (0.14.2)', async () => {
+  const { voiceDiagnosis, diagnosisText } = await import('../public/js/voicemodel.js');
+  const mic = { id: '{0.0.1.00000000}.{aaaa}', name: 'Chat Mic (TC-Helicon GoXLR)', installed: true, mode: 'sfx-mfx', voice_programs: true };
+  const cfg = { enabled: true, echo: false, noise: 'strong' };
+  const config = { devices: ['{AAAA}'], plugin: true, isolate: false };
+  const rec = (exe, device = mic.id, active = true) => ({ device, pid: 1, exe, active });
+  const st = (instances) => ({ plugin: true, instances });
+  // Each recording has its cleaner: proven, Discord's own suppression may go.
+  let d = voiceDiagnosis({ cfg, mic, check: { recordings: [rec('Discord.exe')], config }, status: st(1) });
+  assert.equal(d.allGood, true, diagnosisText(d));
+  assert.match(diagnosisText(d), /✓ Discords optagelse bliver renset/);
+  // Discord and OBS record, only one is cleaned: Discord goes around it.
+  d = voiceDiagnosis({ cfg, mic, check: { recordings: [rec('Discord.exe'), rec('obs64.exe')], config }, status: st(1) });
+  assert.equal(d.allGood, false);
+  const bad = d.items.find((i) => i.id === 'cleaned');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.fix, 'test');
+  assert.match(bad.text, /Optager fra Chat Mic: 2 · renses: 1 – Discord får/);
+  assert.match(bad.text, /Legacy/);
+  // A paused recording does not count; another mic does not count.
+  d = voiceDiagnosis({ cfg, mic, check: { recordings: [rec('Discord.exe'), rec('obs64.exe', mic.id, false), rec('x.exe', '{0.0.1.00000000}.{cam}')], config }, status: st(1) });
+  assert.equal(d.items.find((i) => i.id === 'cleaned').ok, true);
+  // Installed by 0.14.1: registered for normal recordings only → Opdatér.
+  d = voiceDiagnosis({ cfg, mic: { ...mic, voice_programs: false }, check: { recordings: [], config }, status: null });
+  assert.equal(d.items.find((i) => i.id === 'programs').fix, 'update');
+  // The engine test's verdict.
+  const streams = (communications, all_modes = true) => ({ streams: { default: true, communications, raw: true, all_modes, errors: [] } });
+  d = voiceDiagnosis({ cfg, mic, check: { recordings: [], config }, status: null, test: streams(true) });
+  assert.equal(d.items.find((i) => i.id === 'streams').ok, true);
+  d = voiceDiagnosis({ cfg, mic, check: { recordings: [], config }, status: null, test: streams(false) });
+  assert.match(d.items.find((i) => i.id === 'streams').text, /ikke renset.*Legacy/);
+  // Rolled back by the test (Windows refused): no Opdatér that would not help.
+  d = voiceDiagnosis({ cfg, mic: { ...mic, voice_programs: false }, check: { recordings: [], config }, status: null, test: streams(null, false) });
+  assert.equal(d.items.find((i) => i.id === 'programs'), undefined);
+  assert.match(d.items.find((i) => i.id === 'streams').text, /Windows afviste/);
+  // Never tested and no count yet (plugin before 0.14.2): offer the test.
+  d = voiceDiagnosis({ cfg, mic, check: { recordings: [], config }, status: { plugin: true, instances: null } });
+  assert.equal(d.items.find((i) => i.id === 'streams').fix, 'test');
+  // Old plugin (no count): the check works as before.
+  d = voiceDiagnosis({ cfg, mic: { ...mic, voice_programs: undefined }, check: { recordings: [rec('Discord.exe')], config }, status: { plugin: true } });
+  assert.equal(d.allGood, true, diagnosisText(d));
+});
+
+test('the newest mic test is used, and the count is smoothed', async () => {
+  const { latestMicTest, smoothInstances } = await import('../public/js/voicemodel.js');
+  const a = { at: 1, tests: [{ guid: '{AAAA}', capture: true, streams: { communications: false } }, { guid: '{out}', capture: false }] };
+  const b = { at: 5, tests: [{ guid: '{aaaa}', capture: true, streams: { communications: true } }] };
+  assert.equal(latestMicTest([a, b], '{0.0.1.00000000}.{aaaa}').streams.communications, true);
+  assert.equal(latestMicTest([b, a, null], '{0.0.1.00000000}.{aaaa}').streams.communications, true);
+  assert.equal(latestMicTest([a], '{0.0.1.00000000}.{bbbb}'), null);
+  assert.equal(latestMicTest([null, undefined], 'x'), null);
+  const hist = [];
+  assert.equal(smoothInstances(hist, null, 0), null);
+  assert.equal(smoothInstances(hist, 2, 1000), 2);
+  // A program stopped: the count drops at once, the recordings list notices up to 3 s later.
+  assert.equal(smoothInstances(hist, 1, 2000), 2);
+  assert.equal(smoothInstances(hist, 1, 5500), 1);
+  assert.equal(smoothInstances(hist, null, 9000), 1);
+  assert.equal(smoothInstances(hist, null, 10000), null);
+});
