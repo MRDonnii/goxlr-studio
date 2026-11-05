@@ -53,6 +53,8 @@ pub struct Status {
     pub reference: bool,
     /// The plugin passes the mic through untouched (a problem, or not 48 kHz).
     pub bypassed: bool,
+    /// The plugin hit a problem and passes the mic through (plugins from 0.15.0).
+    pub broken: bool,
     /// Stemmeisolering: "running", "loading", "unavailable" (RNNoise instead) or None (off).
     pub isolate: Option<String>,
     /// The mic's level before and after cleaning (dBFS, last half second; plugins from 0.14.1).
@@ -79,6 +81,7 @@ pub fn plugin_status(st: &mut Status, report: (u64, u32, f32, i32), now_ms: u64)
     st.noise = on(ring::FLAG_NS_ON);
     st.reference = on(ring::FLAG_REFERENCE);
     st.bypassed = on(ring::FLAG_BYPASSED);
+    st.broken = on(ring::FLAG_BROKEN);
     st.isolate = if on(ring::FLAG_ISOLATE) {
         Some("running".into())
     } else if on(ring::FLAG_ISOLATE_LOADING) {
@@ -469,7 +472,7 @@ mod win {
     }
 
     unsafe fn create(name: &[u16]) -> Option<HANDLE> {
-        const SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;LS)(A;;GRGW;;;IU)S:(ML;;NW;;;LW)";
+        const SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;LS)(A;;GRGW;;;IU)S:(ML;;NW;;;ME)";
         let sddl = wide(SDDL);
         let mut sd = PSECURITY_DESCRIPTOR::default();
         ConvertStringSecurityDescriptorToSecurityDescriptorW(PCWSTR(sddl.as_ptr()), SDDL_REVISION_1, &mut sd, None).ok()?;

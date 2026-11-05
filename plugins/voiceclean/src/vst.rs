@@ -74,7 +74,7 @@ pub(crate) trait Reference: Send {
 }
 
 struct Plugin {
-    params: [f32; 4],
+    params: [f32; 5],
     dsp: Cleaner,
     rate: f32,
     broken: bool,
@@ -108,6 +108,7 @@ fn display(index: usize, v: f32) -> &'static str {
     match index {
         1 => if v < 0.25 { "Off" } else if v < 0.75 { "Normal" } else { "Strong" },
         3 => if v >= 0.5 { "Isolate" } else { "Off" },
+        4 => if v >= 0.995 { "Full" } else if v >= 0.5 { "Medium" } else { "Light" },
         _ => if v >= 0.5 { "On" } else { "Off" },
     }
 }
@@ -128,7 +129,7 @@ extern "C" fn dispatcher(e: *mut AEffect, opcode: i32, index: i32, _value: isize
     catch_unwind(AssertUnwindSafe(|| match opcode {
         EFF_GET_PARAM_NAME => { put(ptr, PARAMS.get(index as usize).copied().unwrap_or(""), 9); 1 }
         EFF_GET_PARAM_LABEL => { put(ptr, "", 9); 1 }
-        EFF_GET_PARAM_DISPLAY => { put(ptr, display(index as usize, p.params[index.clamp(0, 2) as usize]), 9); 1 }
+        EFF_GET_PARAM_DISPLAY => { put(ptr, display(index as usize, p.params[index.clamp(0, 4) as usize]), 9); 1 }
         EFF_SET_SAMPLE_RATE => { p.rate = opt; p.dsp.reset(); 0 }
         EFF_MAINS_CHANGED => { p.dsp.reset(); 0 }
         EFF_GET_PLUG_CATEGORY => CATEGORY_EFFECT,
@@ -153,6 +154,7 @@ extern "C" fn set_parameter(e: *mut AEffect, index: i32, value: f32) {
             if let Some(slot) = p.params.get_mut(index as usize) {
                 *slot = value.clamp(0.0, 1.0);
                 p.dsp.set(Settings::from_normalized(&p.params));
+                p.dsp.set_amount(p.params[4]);
             }
         }));
         if r.is_err() {
@@ -184,6 +186,7 @@ extern "C" fn process_replacing(e: *mut AEffect, inputs: *const *const f32, outp
     // Only 48 kHz is cleaned (the GoXLR's rate); anything else, or after a problem, passes through.
     if p.broken || (p.rate - RATE as f32).abs() > 1.0 {
         unsafe { pass_through(inputs, outputs, n) };
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe { report_bypass(p, inputs, n) }));
         return;
     }
     let ok = catch_unwind(AssertUnwindSafe(|| unsafe { process_block(p, inputs, outputs, n) })).is_ok();
@@ -191,6 +194,30 @@ extern "C" fn process_replacing(e: *mut AEffect, inputs: *const *const f32, outp
         p.broken = true;
         unsafe { pass_through(inputs, outputs, n) };
     }
+}
+
+/// While passing through, GoXLR Studio still hears from the plugin (twice a second), so its check
+/// can say why the mic is not cleaned (another sample rate, or a problem) instead of guessing.
+unsafe fn report_bypass(p: &mut Plugin, inputs: *const *const f32, n: usize) {
+    let il = *inputs;
+    if !il.is_null() {
+        p.e_in += (0..n).map(|i| (*il.add(i) as f64).powi(2)).sum::<f64>();
+        p.n_meas += n as u64;
+    }
+    p.blocks = p.blocks.wrapping_add(1);
+    if p.blocks % 50 != 0 {
+        return;
+    }
+    if let Some(r) = p.reference.as_mut() {
+        let mut flags = crate::ring::FLAG_RUNNING | crate::ring::FLAG_BYPASSED;
+        if p.broken {
+            flags |= crate::ring::FLAG_BROKEN;
+        }
+        let level = (10.0 * (p.e_in / p.n_meas.max(1) as f64).max(1e-10).log10()) as f32;
+        r.report(flags, f32::NAN, -1, level, level);
+    }
+    p.e_in = 0.0;
+    p.n_meas = 0;
 }
 
 unsafe fn process_block(p: &mut Plugin, inputs: *const *const f32, outputs: *mut *mut f32, n: usize) {
@@ -366,7 +393,7 @@ mod tests {
         let e = new_effect(Some(Box::new(TestRef { data: data.clone(), reports: reports.clone() })));
         let eff = unsafe { &mut *e };
         assert_eq!(eff.magic, MAGIC);
-        assert_eq!(eff.num_params, 4);
+        assert_eq!(eff.num_params, 5);
         let mut name = [0u8; 16];
         (eff.dispatcher)(e, EFF_GET_PARAM_NAME, 1, 0, name.as_mut_ptr() as *mut c_void, 0.0);
         assert_eq!(std::ffi::CStr::from_bytes_until_nul(&name).unwrap().to_str().unwrap(), "Noise");
@@ -409,6 +436,17 @@ mod tests {
         let (ol, or) = run(e, &l, &l);
         assert_eq!(ol, l);
         assert_eq!(or, l);
+        (eff.dispatcher)(e, EFF_CLOSE, 0, 0, std::ptr::null_mut(), 0.0);
+        // …and it says so, so GoXLR Studio can tell the user (Chat Mic not at 48 kHz).
+        let data = Arc::new(Mutex::new(vec![]));
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let e = new_effect(Some(Box::new(TestRef { data, reports: reports.clone() })));
+        let eff = unsafe { &mut *e };
+        (eff.dispatcher)(e, EFF_SET_SAMPLE_RATE, 0, 0, std::ptr::null_mut(), 44100.0);
+        for _ in 0..60 { let _ = run(e, &l[..441], &l[..441]); }
+        let last = *reports.lock().unwrap().last().expect("reported while passing through");
+        assert!(last & crate::ring::FLAG_BYPASSED != 0 && last & crate::ring::FLAG_RUNNING != 0);
+        assert!(last & crate::ring::FLAG_BROKEN == 0);
         (eff.dispatcher)(e, EFF_CLOSE, 0, 0, std::ptr::null_mut(), 0.0);
     }
 }

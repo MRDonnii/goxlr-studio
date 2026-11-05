@@ -1,6 +1,7 @@
 //! The echo reference's shared memory on Windows. The plugin runs in the audio engine (audiodg.exe,
 //! LOCAL SERVICE, session 0), which may create "Global\" objects; it creates the memory with access
-//! for the signed-in user and a low integrity label, so GoXLR Studio (medium integrity) can write.
+//! for the signed-in user and a medium integrity label, so GoXLR Studio (medium integrity) can write
+//! and low-integrity (sandboxed) processes cannot.
 use crate::ring::{Instances, Reader, Ring, INST_NAME_GLOBAL, INST_NAME_LOCAL, INST_SIZE, NAME_GLOBAL, NAME_LOCAL, SIZE};
 use crate::vst::Reference;
 use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, INVALID_HANDLE_VALUE};
@@ -9,8 +10,9 @@ use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows_sys::Win32::System::Memory::{CreateFileMappingW, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile, FILE_MAP_ALL_ACCESS, MEMORY_MAPPED_VIEW_ADDRESS, PAGE_READWRITE};
 use windows_sys::Win32::System::SystemInformation::GetTickCount64;
 
-/// SYSTEM, administrators and LOCAL SERVICE: all; interactive users: read/write; low integrity label.
-const SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;LS)(A;;GRGW;;;IU)S:(ML;;NW;;;LW)";
+/// SYSTEM, administrators and LOCAL SERVICE: all; interactive users: read/write; a medium integrity
+/// label, so GoXLR Studio (medium) may write but sandboxed low-integrity processes may not (0.15.0).
+const SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;LS)(A;;GRGW;;;IU)S:(ML;;NW;;;ME)";
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()

@@ -36,6 +36,8 @@ pub const FLAG_BYPASSED: u32 = 16;
 pub const FLAG_ISOLATE: u32 = 32;
 pub const FLAG_ISOLATE_LOADING: u32 = 64;
 pub const FLAG_ISOLATE_UNAVAILABLE: u32 = 128;
+/// The plugin hit a problem (caught) and passes the mic through until it is loaded again.
+pub const FLAG_BROKEN: u32 = 256;
 
 /// Running plugin instances (0.14.2): each one keeps a beat in a slot of its own small shared
 /// memory, so GoXLR Studio can tell how many recordings of the mic are being cleaned – fewer than
