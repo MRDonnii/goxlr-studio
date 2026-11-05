@@ -411,10 +411,31 @@ pub fn apply(eq: &OutputEq) -> Result<(), String> {
     // Virtuelle højttalere: the impulse files must be there before the config names them.
     let wanted: Vec<crate::surround::Surround> = if eq.enabled { eq.surround.into_iter().chain(eq.channels.iter().filter(|c| c.enabled).filter_map(|c| c.surround)).collect() } else { Vec::new() };
     crate::surround::ensure_files(&dir, &wanted)?;
-    // Write next to config.txt and rename, so the engine never reads a half-written file.
+    write_config(&dir, &text)
+}
+
+/// Writes config.txt: not at all when it is unchanged (every write makes the engine reload, which
+/// restarts the plugins), otherwise next to it and renamed, so the engine never reads a half-written
+/// file. While the engine has the file open the rename can fail for a moment (0.14.2: "the toggle
+/// does not change config.txt"), so it is retried and then written directly.
+pub fn write_config(dir: &std::path::Path, text: &str) -> Result<(), String> {
+    let path = dir.join("config.txt");
+    if std::fs::read(&path).is_ok_and(|old| old == text.as_bytes()) {
+        return Ok(());
+    }
     let tmp = dir.join("config.tmp");
-    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, dir.join("config.txt")).map_err(|e| e.to_string())
+    std::fs::write(&tmp, text).map_err(|e| format!("Kunne ikke skrive {}: {e}", tmp.display()))?;
+    let mut last = None;
+    for attempt in 0..6 {
+        match std::fs::rename(&tmp, &path) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30 << attempt.min(3)));
+    }
+    let direct = std::fs::write(&path, text);
+    let _ = std::fs::remove_file(&tmp);
+    direct.map_err(|e| format!("Kunne ikke skrive EQ-motorens config.txt ({}; {e})", last.map(|l| l.to_string()).unwrap_or_default()))
 }
 
 pub fn status() -> EngineStatus {
@@ -860,4 +881,22 @@ mod tests {
         let off = render(&OutputEq { enabled: false, ..eq }, None);
         assert!(off.contains("Device: all") && !off.contains("Preamp"));
     }
+
+    #[test]
+    fn config_is_written_only_when_changed() {
+        let dir = std::env::temp_dir().join(format!("gxs-apo-write-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.txt");
+        write_config(&dir, "a\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a\n");
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_config(&dir, "a\n").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before, "unchanged: not written");
+        write_config(&dir, "b\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "b\n");
+        assert!(!dir.join("config.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 }
