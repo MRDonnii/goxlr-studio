@@ -26,7 +26,7 @@ realfft = { version = "3.3", optional = true }
 deepfilter = ["dep:tract-onnx", "dep:tract-pulse", "dep:realfft"]
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemInformation", "Win32_System_LibraryLoader"] }
 
 [profile.release]
 opt-level = 3

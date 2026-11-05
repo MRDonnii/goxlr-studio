@@ -110,7 +110,8 @@ fn load(bytes: &[u8], facts: impl Fn(Symbol) -> Vec<(&'static str, InferenceFact
     Ok(Arc::new(pulsed.into_typed()?.into_optimized()?.into_runnable()?))
 }
 
-/// The three networks, built and optimized (the slow part; can be sent to another thread).
+/// The three networks, built and optimized (the slow part; shared between threads and instances).
+#[derive(Clone)]
 pub struct Plans {
     enc: Plan,
     erb_dec: Plan,

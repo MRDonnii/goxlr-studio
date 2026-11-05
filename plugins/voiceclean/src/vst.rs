@@ -301,6 +301,11 @@ fn new_effect(reference: Option<Box<dyn Reference>>) -> *mut AEffect {
 /// The plugin's entry point. The echo reference is opened here (not in the audio thread).
 #[no_mangle]
 pub extern "C" fn VSTPluginMain(_host: Option<HostCallback>) -> *mut AEffect {
+    // Never unloaded while the audio engine runs: the engine frees the DLL when it reloads its
+    // config, and the network's loader thread (or anything else still running) would then run in
+    // freed code – that crashed audiodg.exe (0xc0000005 in goxlr_studio_voice.dll_unloaded).
+    #[cfg(windows)]
+    pin_module();
     let reference = catch_unwind(|| {
         #[cfg(windows)]
         return crate::shm::open().map(|r| Box::new(r) as Box<dyn Reference>);
@@ -310,6 +315,16 @@ pub extern "C" fn VSTPluginMain(_host: Option<HostCallback>) -> *mut AEffect {
     .ok()
     .flatten();
     new_effect(reference)
+}
+
+/// Keeps this DLL loaded until the process ends (GET_MODULE_HANDLE_EX_FLAG_PIN).
+#[cfg(windows)]
+fn pin_module() {
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN};
+    let mut h = std::ptr::null_mut();
+    unsafe {
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, pin_module as *const u16, &mut h);
+    }
 }
 
 #[cfg(test)]

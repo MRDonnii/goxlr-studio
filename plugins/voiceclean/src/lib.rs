@@ -109,15 +109,18 @@ type Network = Box<deepfilter::DeepFilter>;
 #[cfg(not(feature = "deepfilter"))]
 type Network = ();
 
+/// The network's plans, built once per process and shared by every instance: the audio engine
+/// makes a new plugin instance for each recording and whenever config.txt changes, and building
+/// takes about a second (0.14.2).
 #[cfg(feature = "deepfilter")]
-type Built = deepfilter::Plans;
-#[cfg(not(feature = "deepfilter"))]
-type Built = ();
+static PLANS: std::sync::OnceLock<Result<deepfilter::Plans, String>> = std::sync::OnceLock::new();
+#[cfg(feature = "deepfilter")]
+static LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg_attr(not(feature = "deepfilter"), allow(dead_code))]
 enum Iso {
     Idle,
-    Loading(std::sync::mpsc::Receiver<Result<Built, String>>),
+    Loading,
     Ready(Network),
     Failed,
 }
@@ -147,19 +150,24 @@ pub struct Cleaner {
     pub stats: Stats,
 }
 
-/// Builds the network on its own thread (it takes too long for the audio thread).
+/// Builds the network on its own thread (it takes too long for the audio thread), once.
 fn start_network() -> Iso {
     #[cfg(feature = "deepfilter")]
     {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let spawned = std::thread::Builder::new().name("goxlr-studio-voice-isolate".into()).spawn(move || {
-            let r = std::panic::catch_unwind(deepfilter::load_plans).unwrap_or_else(|_| Err("panic".into()));
-            let _ = tx.send(r);
-        });
-        if spawned.is_ok() {
-            return Iso::Loading(rx);
+        use std::sync::atomic::Ordering;
+        if PLANS.get().is_none() && !LOADING.swap(true, Ordering::SeqCst) {
+            let spawned = std::thread::Builder::new().name("goxlr-studio-voice-isolate".into()).spawn(|| {
+                let r = std::panic::catch_unwind(deepfilter::load_plans).unwrap_or_else(|_| Err("panic".into()));
+                let _ = PLANS.set(r);
+            });
+            if spawned.is_err() {
+                LOADING.store(false, Ordering::SeqCst);
+                return Iso::Failed;
+            }
         }
+        return Iso::Loading;
     }
+    #[allow(unreachable_code)]
     Iso::Failed
 }
 
@@ -219,18 +227,22 @@ impl Cleaner {
     }
 
     fn poll_network(&mut self) {
-        if let Iso::Loading(rx) = &self.iso {
-            self.iso = match rx.try_recv() {
-                #[cfg(feature = "deepfilter")]
-                Ok(Ok(plans)) => match deepfilter::DeepFilter::from_plans(plans) {
-                    Ok(net) => Iso::Ready(Box::new(net)),
-                    Err(_) => Iso::Failed,
-                },
-                #[cfg(not(feature = "deepfilter"))]
-                Ok(Ok(net)) => Iso::Ready(net),
-                Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => Iso::Failed,
-                Err(std::sync::mpsc::TryRecvError::Empty) => return,
-            };
+        if let Iso::Loading = &self.iso {
+            #[cfg(feature = "deepfilter")]
+            {
+                self.iso = match PLANS.get() {
+                    None => return,
+                    Some(Ok(plans)) => match deepfilter::DeepFilter::from_plans(plans.clone()) {
+                        Ok(net) => Iso::Ready(Box::new(net)),
+                        Err(_) => Iso::Failed,
+                    },
+                    Some(Err(_)) => Iso::Failed,
+                };
+            }
+            #[cfg(not(feature = "deepfilter"))]
+            {
+                self.iso = Iso::Failed;
+            }
             #[cfg(feature = "deepfilter")]
             if let Iso::Ready(net) = &mut self.iso {
                 // Start where the fallback is: feed it the raw frames still in the delay.
@@ -390,7 +402,7 @@ impl Cleaner {
             self.iso = Iso::Failed;
         }
         // Meanwhile (or without the network): RNNoise, delayed as much as the network.
-        self.stats.isolate = if matches!(self.iso, Iso::Loading(_)) { Isolation::Loading } else { Isolation::Unavailable };
+        self.stats.isolate = if matches!(self.iso, Iso::Loading) { Isolation::Loading } else { Isolation::Unavailable };
         self.iso_raw.push_back(self.work);
         while self.iso_raw.len() > ISOLATE_FRAMES {
             self.iso_raw.pop_front();
