@@ -310,10 +310,11 @@ export function micTestVerdict({ typing = [], speech = [], noise = 'isolate', am
   const t = typing.filter(ok);
   const v = speech.filter(ok);
   if (!t.length && !v.length) return { code: 'not-running', typingCut: null, voiceLoss: null, lines: ['Renseren fik ingen lyd under testen – kører Ren mikrofon på Chat Mic?'] };
-  const heardKeys = t.filter((s) => s.in_db > -65);
+  // Quiet mics exist (a GoXLR Mini at −55 dB while talking): only near-silence counts as nothing.
+  const heardKeys = t.filter((s) => s.in_db > -75);
   const typingCut = heardKeys.length ? median(heardKeys.map((s) => s.in_db - s.out_db)) : null;
   // The voice: the louder half of the samples with speech in them.
-  const talk = v.filter((s) => s.in_db > -55).sort((a, b) => b.in_db - a.in_db);
+  const talk = v.filter((s) => s.in_db > -72).sort((a, b) => b.in_db - a.in_db);
   const loud = talk.slice(0, Math.max(1, Math.ceil(talk.length / 2)));
   const voiceLoss = talk.length ? median(loud.map((s) => s.in_db - s.out_db)) : null;
   const lines = [];
@@ -330,6 +331,10 @@ export function micTestVerdict({ typing = [], speech = [], noise = 'isolate', am
   const expected = isolating ? { full: 15, medium: 12, light: 6 }[amount] ?? 15 : 15;
   if (code === 'good' && typingCut !== null && typingCut < expected) code = 'weak';
   if (code === 'good' || code === 'no-typing') lines.push('Ren mikrofon virker: det er sådan, Discord får din mikrofon.');
+  // A very quiet voice is cleaned all right (0.15.2), but others hear it faintly or with Discord's
+  // gain control pumping the noise up.
+  const voiceIn = talk.length ? median(loud.map((s) => s.in_db)) : null;
+  if (voiceIn !== null && voiceIn < -45) lines.push(`Din stemme er meget svag (${Math.round(voiceIn)} dB, mens du taler). Skru gain op – Mikrofon-assistenten hjælper.`);
   if (code === 'weak') {
     if (!isolating) lines.push('Tasterne er ikke væk. Vælg Støjfjerner "Stemmeisolering".');
     else if (amount !== 'full') lines.push('Tasterne er ikke væk. Sæt Styrke på "Fuld".');

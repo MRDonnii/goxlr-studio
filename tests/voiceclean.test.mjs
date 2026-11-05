@@ -227,6 +227,7 @@ test('the mic test tells typing from the voice', async () => {
   assert.equal(micTestVerdict({ typing: [s(-40, -80)], speech: [s(-45, -60), s(-44, -59)] }).code, 'voice-cut');
   // Nothing heard while typing (the GoXLR's gate), voice fine.
   assert.equal(micTestVerdict({ typing: [s(-90, -120)], speech: [s(-25, -25)] }).code, 'no-typing');
+  assert.equal(micTestVerdict({ typing: [s(-80, -120)], speech: [s(-25, -25)] }).code, 'no-typing');
   // No speech, no sound at all.
   assert.equal(micTestVerdict({ typing: [s(-40, -80)], speech: [s(-80, -100)] }).code, 'no-speech');
   assert.equal(micTestVerdict({ typing: [{ in_db: null }], speech: [] }).code, 'not-running');
@@ -241,6 +242,11 @@ test('the mic test tells typing from the voice', async () => {
   assert.equal(micTestVerdict({ ...through, passing: 'rate' }).code, 'passing');
   assert.match(micTestVerdict({ ...through, passing: 'rate' }).lines[0], /48 kHz/);
   assert.match(micTestVerdict({ ...through, passing: 'broken' }).lines[0], /fejl/);
+  // A very quiet voice (a user's GoXLR Mini: −55 dB while talking): cleaned, but turn the gain up.
+  const quiet = micTestVerdict({ typing: [s(-60, -100)], speech: [s(-55, -55), s(-57, -57)] });
+  assert.equal(quiet.code, 'good');
+  assert.match(quiet.lines.join(' '), /meget svag \(-55 dB/);
+  assert.doesNotMatch(micTestVerdict({ typing: [s(-40, -80)], speech: [s(-25, -25)] }).lines.join(' '), /svag/);
 });
 
 test('passing the mic through: only the cause is shown', async () => {

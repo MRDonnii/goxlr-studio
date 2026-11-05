@@ -252,6 +252,7 @@ export const EN = {
  "Din mikrofon": "Your microphone",
  "Din mikrofon sendes ud på højttalerne (Mic Monitor) – det kan ikke fjernes som ekko. Skru Mic Monitor ned, eller fjern Mikrofon fra højttaler-udgangen i routingen.": "Your mic is sent to the speakers (Mic Monitor) – that cannot be removed as echo. Turn Mic Monitor down, or remove Microphone from the speaker output in the routing.",
  "Din stemme dæmpes {0} dB": "Your voice is lowered {0} dB",
+ "Din stemme er meget svag ({0} dB, mens du taler). Skru gain op – Mikrofon-assistenten hjælper.": "Your voice is very quiet ({0} dB while you talk). Turn the gain up – the Mic assistant helps.",
  "Din stemme kommer igennem uændret": "Your voice comes through unchanged",
  "Dine hovedtelefoner": "Your headphones",
  "Dine mikrofonindstillinger som en fil, du kan give til en ven": "Your mic settings as a file you can give to a friend",
