@@ -273,3 +273,83 @@ fn cleaner_isolates_after_loading_in_the_background() {
     assert!(after - before > 8.0);
 }
 
+
+/// Quiet speech (the mic at about −46 dBFS, as measured on a user's GoXLR) is kept: the network
+/// works on the level, not on loudness, and the voice gate does not take it for noise.
+#[test]
+fn df_keeps_quiet_speech() {
+    let Some(a) = load() else { return };
+    let rms = |x: &[f32]| db(energy(x) / x.len() as f64);
+    let g = 10f64.powf((-46.0 - rms(&a.clean)) / 20.0) as f32;
+    let quiet: Vec<f32> = a.clean.iter().map(|v| v * g).collect();
+    let out = run_df(&mut DeepFilter::new().unwrap(), &quiet);
+    let (o, c) = aligned(&out, &quiet);
+    let (sdr, loss) = (si_sdr(o, c), rms(c) - rms(o));
+    eprintln!("speech at {:.0} dBFS: SI-SDR {sdr:.1} dB, {loss:.1} dB quieter", rms(&quiet));
+    assert!(sdr > 20.0, "{sdr}");
+    assert!(loss.abs() < 3.0, "{loss}");
+    // Typing over it at the same level is removed (measured +14,9 dB).
+    let (noisy, _) = mix(&quiet, &keyboard(quiet.len(), 11), 0.0);
+    let out = run_df(&mut DeepFilter::new().unwrap(), &noisy);
+    let (o, c) = aligned(&out, &quiet);
+    let (before, after) = (si_sdr(&noisy, &quiet), si_sdr(o, c));
+    eprintln!("quiet speech + keyboard: SI-SDR {before:.1} → {after:.1} dB");
+    assert!(after - before > 10.0, "{before} → {after}");
+}
+
+/// Through the whole cleaner as installed (Stemmeisolering with "Fjern rumlen" on): WebRTC's
+/// high-pass splits the signal into bands, which turns the phase (so SI-SDR says little), so this
+/// measures what is left of the typing against the same chain's output for the speech alone.
+#[test]
+fn cleaner_removes_typing_with_the_high_pass_on() {
+    let Some(a) = load() else { return };
+    let settings = Settings { echo: false, noise: Noise::Isolate, high_pass: true };
+    let run = |x: &[f32]| -> Vec<f32> {
+        let mut c = Cleaner::new(settings);
+        let start = std::time::Instant::now();
+        while !c.isolating() {
+            let mut b = [0.0f32; FRAME];
+            c.process(&mut b);
+            assert!(start.elapsed().as_secs() < 60, "the network never loaded");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        c.reset();
+        let mut y = x.to_vec();
+        for ch in y.chunks_mut(480) {
+            c.process(ch);
+        }
+        y
+    };
+    let kb = keyboard(a.clean.len(), 11);
+    let (noisy, _) = mix(&a.clean, &kb, 0.0);
+    let speech = run(&a.clean);
+    let both = run(&noisy);
+    let left: Vec<f32> = both.iter().zip(&speech).map(|(x, y)| x - y).collect();
+    let kb_level = energy(&noisy.iter().zip(&a.clean).map(|(x, y)| x - y).collect::<Vec<f32>>());
+    let cut = db(kb_level / energy(&left));
+    let kept = db(energy(&speech) / energy(&a.clean));
+    eprintln!("typing under speech, high-pass on: {cut:.1} dB less typing; speech level {kept:+.1} dB");
+    assert!(cut > 10.0, "{cut}");
+    assert!(kept.abs() < 3.0, "{kept}");
+}
+
+/// The network is built once and shared: a second instance (a new recording, or the engine
+/// reloading config.txt) is ready at once.
+#[test]
+fn a_second_instance_reuses_the_network() {
+    if load().is_none() {
+        return;
+    }
+    let settings = Settings { echo: false, noise: Noise::Isolate, high_pass: false };
+    let mut first = Cleaner::new(settings);
+    let start = std::time::Instant::now();
+    while !first.isolating() {
+        assert!(start.elapsed().as_secs() < 60, "the network never loaded");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let t = std::time::Instant::now();
+    let mut second = Cleaner::new(settings);
+    assert!(second.isolating(), "ready without loading again");
+    eprintln!("second instance ready after {:?}", t.elapsed());
+    assert!(t.elapsed().as_millis() < 500);
+}
