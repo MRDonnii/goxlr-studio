@@ -75,10 +75,17 @@ pub struct MicClean {
     /// before 0.14 never sees a parameter it does not know.
     #[serde(default)]
     pub isolate: bool,
+    /// Styrke for Stemmeisolering (0.15.0, the plugin's Amount: 1 = full). Written only below full.
+    #[serde(default = "one")]
+    pub amount: f64,
 }
 
 fn yes() -> bool {
     true
+}
+
+fn one() -> f64 {
+    1.0
 }
 
 /// What config.txt says about the microphone (Ren mikrofon's check).
@@ -108,7 +115,8 @@ pub fn mic_config(text: &str) -> MicConfig {
             continue;
         }
         if let Some(d) = l.strip_prefix("Device:") {
-            c.devices.extend(d.split(';').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()));
+            // "Device: all" closes the mic part (see with_mic), it names no mic.
+            c.devices.extend(d.split(';').map(|x| x.trim().to_string()).filter(|x| !x.is_empty() && !x.eq_ignore_ascii_case("all")));
         }
         if l.starts_with("VSTPlugin:") && l.contains(crate::engine::VOICE_DLL) {
             c.plugin = true;
@@ -116,6 +124,21 @@ pub fn mic_config(text: &str) -> MicConfig {
         }
     }
     c
+}
+
+/// Before the engine goes on a microphone (elevated task): config.txt gets the stage split with an
+/// empty mic part, so the playback EQ never runs on the mic – also while the task restarts the
+/// audio service, and if the app does not write the config afterwards.
+pub fn ensure_stage_split() -> Result<(), String> {
+    let dir = engine::config_dir();
+    let path = dir.join("config.txt");
+    let Ok(text) = read_text(&path) else { return Ok(()) };
+    if text.lines().any(|l| l.trim().replace(' ', "") == "If:stage==\"capture\"") {
+        return Ok(());
+    }
+    // with_mic keeps the first line (our header) outside the If:, so it must be a comment.
+    let text = if text.trim_start_matches('\u{feff}').starts_with('#') { text } else { format!("# GoXLR Studio\n{text}") };
+    write_config(&dir, &with_mic(&text, None, "", &|_| None))
 }
 
 /// The current config.txt's mic part.
@@ -134,6 +157,9 @@ pub fn voice_line(dll: &str, m: &MicClean) -> String {
     line.push_str(&format!(" Echo {:.4} Noise {:.4} HighPass {:.4}", flag(m.echo), noise, flag(m.high_pass)));
     if m.isolate {
         line.push_str(" Isolate 1.0000");
+        if m.amount.is_finite() && m.amount < 0.995 {
+            line.push_str(&format!(" Amount {:.4}", m.amount.clamp(0.0, 1.0)));
+        }
     }
     line.push('\n');
     line
@@ -159,6 +185,11 @@ pub fn with_mic(playback: &str, mic: Option<&MicClean>, dll: &str, name_of: &dyn
             out.push_str(&voice_line(dll, m));
         }
     }
+    // Equalizer APO's Device: filter runs before If:, and after a Device: line that does not match
+    // it blanks every command – also "Else:", which the If: filter then never sees, so on the
+    // outputs the whole playback part would be skipped (found in 0.15.0: with Ren mikrofon on, the
+    // EQ was gone everywhere). "Device: all" makes the Else: reach the If: filter again.
+    out.push_str("Device: all\n");
     out.push_str("Else:\n");
     out.push_str(rest);
     out.push_str("EndIf:\n");
@@ -400,6 +431,7 @@ pub fn apply(eq: &OutputEq) -> Result<(), String> {
         if m.isolate && crate::engine::plugin_outdated(crate::engine::VOICE_DLL) {
             m.isolate = false;
             m.noise = 1.0;
+            m.amount = 1.0;
         }
     }
     let eq = &eq;
@@ -627,8 +659,143 @@ pub fn list_configs() -> Result<Vec<ConfigFile>, String> {
 mod tests {
     use super::*;
 
+    /// Which commands Equalizer APO 1.4.2 runs from `config` on an endpoint, as its FilterEngine
+    /// does: the factories in its order – DeviceFilterFactory (a non-matching Device: blanks every
+    /// following command, also If/Else/EndIf), then IfFilterFactory (with its trueCount/falseCount/
+    /// executeElse) – and only the commands left over run. Expressions: `stage == "…"` and
+    /// `sampleRate == N`. Ported from FilterEngine.cpp, DeviceFilterFactory.cpp, IfFilterFactory.cpp.
+    pub(crate) fn apo_runs(config: &str, device: &str, stage: &str, rate: u32) -> Vec<String> {
+        let device = device.to_lowercase();
+        let matches = |pattern: &str| -> bool {
+            pattern.split(';').map(|alt| alt.split_whitespace().map(|w| w.to_lowercase()).collect::<Vec<_>>()).filter(|w| !w.is_empty()).any(|words| {
+                (words.len() == 1 && words[0] == "all") || words.iter().all(|w| device.contains(w.as_str()))
+            })
+        };
+        let eval = |expr: &str| -> bool {
+            let e = expr.replace(' ', "");
+            if let Some(v) = e.strip_prefix("stage==") {
+                return v.trim_matches('"') == stage;
+            }
+            if let Some(v) = e.strip_prefix("sampleRate==") {
+                return v.parse::<u32>().ok() == Some(rate);
+            }
+            false
+        };
+        let (mut device_ok, mut true_count, mut false_count, mut execute_else) = (true, 0u32, 0u32, false);
+        let mut out = Vec::new();
+        for line in config.lines() {
+            let Some(pos) = line.find(':') else { continue };
+            let mut key = line[..pos].trim().to_string();
+            let value = line[pos + 1..].trim();
+            if key.starts_with('#') {
+                continue;
+            }
+            // DeviceFilterFactory
+            if key == "Device" {
+                device_ok = matches(value);
+            }
+            if !device_ok {
+                key.clear();
+            }
+            if key.is_empty() {
+                continue;
+            }
+            // IfFilterFactory
+            match key.as_str() {
+                "If" => {
+                    if false_count == 0 {
+                        if eval(value) {
+                            true_count += 1;
+                        } else {
+                            false_count += 1;
+                            execute_else = true;
+                        }
+                    } else {
+                        false_count += 1;
+                    }
+                }
+                "Else" => {
+                    if false_count == 0 {
+                        if true_count > 0 {
+                            false_count += 1;
+                            true_count -= 1;
+                        }
+                    } else if false_count == 1 && execute_else {
+                        false_count -= 1;
+                        true_count += 1;
+                        execute_else = false;
+                    }
+                }
+                "EndIf" => {
+                    if false_count == 0 {
+                        true_count = true_count.saturating_sub(1);
+                    } else {
+                        false_count -= 1;
+                    }
+                    if false_count == 0 {
+                        execute_else = false;
+                    }
+                }
+                _ => {}
+            }
+            if false_count > 0 || matches!(key.as_str(), "If" | "Else" | "EndIf" | "Device") {
+                continue;
+            }
+            out.push(line.trim().to_string());
+        }
+        out
+    }
+
+    #[test]
+    fn equalizer_apo_runs_the_playback_part_on_outputs_and_the_mic_part_on_the_mic() {
+        let mut eq = OutputEq { enabled: true, preamp: -3.0, bands: vec![], target: None, extra: vec![], graphic: vec![], devices: None, channels: vec![], surround: None, denoise: false, dynamics: None, mic: None };
+        let out_dev = "Speakers TC-Helicon GoXLR {bbbb-2222}";
+        let mic_dev = "Chat Mic TC-Helicon GoXLR {aaaa-1111}";
+        let other_mic = "Mikrofon Webcam {cccc-3333}";
+        let m = mic(&["{0.0.1.00000000}.{aaaa-1111}"]);
+        // Playback EQ on all outputs (Device: all), and on one output only.
+        for target in [None, Some("{0.0.0.00000000}.{bbbb-2222}".to_string())] {
+            eq.target = target.clone();
+            let text = with_mic(&render(&eq, None), Some(&m), "v.dll", &|_| None);
+            let on_out = apo_runs(&text, out_dev, "pre-mix", 48000);
+            assert!(on_out.iter().any(|l| l == "Preamp: -3.0 dB"), "playback EQ runs on the output: {on_out:?} in {text}");
+            assert!(!on_out.iter().any(|l| l.starts_with("VSTPlugin")), "no mic cleaner on the output");
+            let on_out_post = apo_runs(&text, out_dev, "post-mix", 48000);
+            assert!(on_out_post.iter().any(|l| l == "Preamp: -3.0 dB"));
+            let on_mic = apo_runs(&text, mic_dev, "capture", 48000);
+            assert_eq!(on_mic.len(), 1, "only the cleaner on the mic: {on_mic:?}");
+            assert!(on_mic[0].starts_with("VSTPlugin: Library \"v.dll\""));
+            // Another mic the engine is on: nothing at all (not the playback EQ).
+            assert!(apo_runs(&text, other_mic, "capture", 48000).is_empty(), "{:?}", apo_runs(&text, other_mic, "capture", 48000));
+        }
+        // Ren mikrofon off with the engine on the mic: outputs as before, the mic untouched.
+        eq.target = None;
+        let text = with_mic(&render(&eq, None), None, "v.dll", &|_| None);
+        assert!(apo_runs(&text, out_dev, "pre-mix", 48000).iter().any(|l| l == "Preamp: -3.0 dB"));
+        assert!(apo_runs(&text, mic_dev, "capture", 48000).is_empty());
+        // EQ pr. kanal and chat denoise sections (several Device: and If: sampleRate) still run.
+        eq.denoise = true;
+        eq.extra = vec!["If: sampleRate == 48000".into(), "Convolution: fir-a.wav".into(), "EndIf:".into()];
+        let text = with_mic(&render(&eq, None), Some(&m), "v.dll", &|_| None);
+        let runs = apo_runs(&text, out_dev, "pre-mix", 48000);
+        assert!(runs.iter().any(|l| l == "Convolution: fir-a.wav"), "{runs:?}\n{text}");
+        assert!(!apo_runs(&text, out_dev, "pre-mix", 44100).iter().any(|l| l.starts_with("Convolution")));
+        assert_eq!(apo_runs(&text, mic_dev, "capture", 48000).len(), 1);
+    }
+
+    #[test]
+    fn the_simulator_follows_equalizer_apo_on_a_plain_config() {
+        // The bug it catches: without "Device: all" before Else:, the outputs got nothing.
+        let broken = "# x\nIf: stage == \"capture\"\nDevice: {aaaa}\nVSTPlugin: Library \"v.dll\"\nElse:\nDevice: all\nPreamp: -3 dB\nEndIf:\n";
+        assert!(apo_runs(broken, "Speakers {bbbb}", "pre-mix", 48000).is_empty());
+        let plain = ["Device: {bbbb}", "Preamp: -1 dB", "Device: all", "Preamp: -2 dB"].join("\n");
+        let plain = plain.as_str();
+        assert_eq!(apo_runs(plain, "Speakers {bbbb}", "pre-mix", 48000), vec!["Preamp: -1 dB", "Preamp: -2 dB"]);
+        assert_eq!(apo_runs(plain, "Other {cccc}", "pre-mix", 48000), vec!["Preamp: -2 dB"]);
+    }
+
     fn mic(devices: &[&str]) -> MicClean {
-        MicClean { devices: devices.iter().map(|d| d.to_string()).collect(), echo: true, noise: 0.5, high_pass: true, isolate: false }
+        MicClean { devices: devices.iter().map(|d| d.to_string()).collect(), echo: true, noise: 0.5, high_pass: true, isolate: false, amount: 1.0 }
     }
 
     #[test]
@@ -641,6 +808,10 @@ mod tests {
         let l = voice_line("x.dll", &MicClean { isolate: true, ..mic(&[]) });
         assert!(l.trim_end().ends_with("HighPass 1.0000 Isolate 1.0000"), "{l}");
         assert!(!voice_line("x.dll", &mic(&[])).contains("Isolate"));
+        // Styrke: only below full and only with Stemmeisolering.
+        assert!(voice_line("x.dll", &MicClean { isolate: true, amount: 0.5, ..mic(&[]) }).trim_end().ends_with("Isolate 1.0000 Amount 0.5000"));
+        assert!(!voice_line("x.dll", &MicClean { isolate: false, amount: 0.5, ..mic(&[]) }).contains("Amount"));
+        assert!(!voice_line("x.dll", &MicClean { isolate: true, amount: f64::NAN, ..mic(&[]) }).contains("Amount"));
     }
 
     #[test]
@@ -655,15 +826,16 @@ mod tests {
         assert_eq!(lines[1], "If: stage == \"capture\"");
         assert_eq!(lines[2], "Device: {aaaa-1111}");
         assert!(lines[3].starts_with("VSTPlugin: Library \"v.dll\" Echo 1.0000"));
-        assert_eq!(lines[4], "Else:");
-        assert_eq!(lines[5], "Device: all");
-        assert_eq!(lines[6], "Preamp: -3.0 dB");
+        assert_eq!(lines[4], "Device: all");
+        assert_eq!(lines[5], "Else:");
+        assert_eq!(lines[6], "Device: all");
+        assert_eq!(lines[7], "Preamp: -3.0 dB");
         assert_eq!(*lines.last().unwrap(), "EndIf:");
         assert_eq!(text.matches("If:").count() - text.matches("EndIf:").count(), text.matches("EndIf:").count(), "balanced");
         // The engine on a mic, Ren mikrofon off: the mic gets nothing, playback is unchanged.
         let text = with_mic(&playback, None, "v.dll", &|_| None);
         assert!(!text.contains("VSTPlugin"));
-        assert!(text.contains("If: stage == \"capture\"\nElse:\nDevice: all\n"));
+        assert!(text.contains("If: stage == \"capture\"\nDevice: all\nElse:\nDevice: all\n"));
         // Everything off or no devices: no mic section either.
         let off = MicClean { echo: false, noise: 0.0, high_pass: false, ..m.clone() };
         assert!(!with_mic(&playback, Some(&off), "v.dll", &|_| None).contains("VSTPlugin"));
