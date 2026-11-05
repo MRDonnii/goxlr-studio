@@ -387,3 +387,49 @@ fn amount_keeps_some_background() {
     eprintln!("speech at medium: SI-SDR {sdr:.1} dB");
     assert!(sdr > 25.0, "{sdr}");
 }
+
+/// Diagnostics: speech through a GoXLR-like noise gate (closed between the words) at a low level.
+#[test]
+#[ignore]
+fn gated_speech_matrix() {
+    let Some(a) = load() else { return };
+    let rms = |x: &[f32]| db(energy(x) / x.len() as f64);
+    for level in [-30.0, -46.0] {
+        let g = 10f64.powf((level - rms(&a.clean)) / 20.0) as f32;
+        let sp: Vec<f32> = a.clean.iter().map(|v| v * g).collect();
+        // Gate on 10 ms frames: open while the frame is within 20 dB of the loudest, attack 1 frame,
+        // release 10 frames; closed = `floor`.
+        let n = 480;
+        let frames = sp.len() / n;
+        let lv: Vec<f64> = (0..frames).map(|k| rms(&sp[k * n..(k + 1) * n])).collect();
+        let top = lv.iter().cloned().fold(-200.0, f64::max);
+        for floor_db in [-200.0f64, -90.0, -60.0, -40.0] {
+            let floor = 10f64.powf(floor_db / 20.0) as f32;
+            let mut gated = sp.clone();
+            let mut hold = 0;
+            let mut open_frames = 0;
+            for k in 0..frames {
+                if lv[k] > top - 25.0 { hold = 10; }
+                let open = hold > 0;
+                if hold > 0 { hold -= 1; }
+                if open { open_frames += 1; }
+                for v in &mut gated[k * n..(k + 1) * n] { *v *= if open { 1.0 } else { floor }; }
+            }
+            let out = run_df(&mut DeepFilter::new().unwrap(), &gated);
+            let (o, c) = aligned(&out, &gated);
+            // Per open frame: how much of the voice came out.
+            let mut kept = vec![];
+            for k in 0..(o.len() / n) {
+                let ec = energy(&c[k * n..(k + 1) * n]);
+                if 10.0 * (ec / n as f64).max(1e-30).log10() > top - 25.0 {
+                    kept.push(db(energy(&o[k * n..(k + 1) * n]) / ec));
+                }
+            }
+            kept.sort_by(|x, y| x.partial_cmp(y).unwrap());
+            let med = kept[kept.len() / 2];
+            let low = kept[kept.len() / 10];
+            let lost = kept.iter().filter(|d| **d < -10.0).count() as f64 / kept.len() as f64;
+            eprintln!("speech {level} dBFS, gate floor {floor_db} dB (open {open_frames}/{frames}): voice frames median {med:.1} dB, 10th pct {low:.1} dB, {:.0}% lose > 10 dB, SI-SDR {:.1}", lost * 100.0, si_sdr(o, c));
+        }
+    }
+}
