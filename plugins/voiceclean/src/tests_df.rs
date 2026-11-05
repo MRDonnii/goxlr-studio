@@ -394,7 +394,8 @@ fn amount_keeps_some_background() {
 fn gated_speech_matrix() {
     let Some(a) = load() else { return };
     let rms = |x: &[f32]| db(energy(x) / x.len() as f64);
-    for level in [-30.0, -46.0] {
+    let levels: Vec<f64> = std::env::var("DF_LEVELS").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or(vec![-30.0, -46.0]);
+    for level in levels {
         let g = 10f64.powf((level - rms(&a.clean)) / 20.0) as f32;
         let sp: Vec<f32> = a.clean.iter().map(|v| v * g).collect();
         // Gate on 10 ms frames: open while the frame is within 20 dB of the loudest, attack 1 frame,
@@ -431,5 +432,97 @@ fn gated_speech_matrix() {
             let lost = kept.iter().filter(|d| **d < -10.0).count() as f64 / kept.len() as f64;
             eprintln!("speech {level} dBFS, gate floor {floor_db} dB (open {open_frames}/{frames}): voice frames median {med:.1} dB, 10th pct {low:.1} dB, {:.0}% lose > 10 dB, SI-SDR {:.1}", lost * 100.0, si_sdr(o, c));
         }
+    }
+}
+
+/// The real cause of "the cleaner removes my voice" (0.15.1): DeepFilterNet takes speech below
+/// about −50 dBFS for noise. Through the whole cleaner (with the level lift) a quiet mic behind a
+/// GoXLR-like gate keeps its voice at every level, and comes out at its own level.
+#[test]
+fn quiet_mic_keeps_the_voice() {
+    let Some(a) = load() else { return };
+    let rms = |x: &[f32]| db(energy(x) / x.len() as f64);
+    let n = 480;
+    for level in [-20.0, -30.0, -46.0, -56.0, -66.0, -72.0] {
+        let g = 10f64.powf((level - rms(&a.clean)) / 20.0) as f32;
+        let mut sp: Vec<f32> = a.clean.iter().map(|v| v * g).collect();
+        // GoXLR gate: digital silence where the frame is more than 25 dB under the loudest.
+        let frames = sp.len() / n;
+        let lv: Vec<f64> = (0..frames).map(|k| rms(&sp[k * n..(k + 1) * n])).collect();
+        let top = lv.iter().cloned().fold(-300.0, f64::max);
+        let mut hold = 0;
+        for k in 0..frames {
+            if lv[k] > top - 25.0 {
+                hold = 10;
+            }
+            if hold == 0 {
+                sp[k * n..(k + 1) * n].iter_mut().for_each(|v| *v = 0.0);
+            } else {
+                hold -= 1;
+            }
+        }
+        let mut c = Cleaner::new(Settings { echo: false, noise: Noise::Isolate, high_pass: false });
+        while !c.isolating() {
+            let mut b = [0.0f32; FRAME];
+            c.process(&mut b);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        c.reset();
+        let mut out = sp.clone();
+        for ch in out.chunks_mut(480) {
+            c.process(ch);
+        }
+        let d = c.latency();
+        let (o, r) = (&out[d..], &sp[..sp.len() - d]);
+        let mut kept = vec![];
+        for k in 0..(o.len() / n) {
+            let er = energy(&r[k * n..(k + 1) * n]);
+            if 10.0 * (er / n as f64).max(1e-30).log10() > top - 20.0 {
+                kept.push(db(energy(&o[k * n..(k + 1) * n]) / er));
+            }
+        }
+        kept.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let (med, low) = (kept[kept.len() / 2], kept[kept.len() / 10]);
+        let sdr = si_sdr(o, r);
+        eprintln!("speech at {level} dBFS behind a gate: voice frames median {med:.1} dB, 10th percentile {low:.1} dB, SI-SDR {sdr:.1} dB, level out {:.1} dB vs in {:.1} dB", rms(o), rms(r));
+        assert!(med.abs() < 2.0, "{level}: {med}");
+        assert!(low > -6.0, "{level}: {low}");
+        assert!(sdr > 15.0, "{level}: {sdr}");
+    }
+}
+
+/// …and the typing under a quiet voice is still removed (the lift is undone on the output).
+#[test]
+fn quiet_mic_typing_is_removed() {
+    let Some(a) = load() else { return };
+    let rms = |x: &[f32]| db(energy(x) / x.len() as f64);
+    for level in [-56.0, -66.0] {
+        let g = 10f64.powf((level - rms(&a.clean)) / 20.0) as f32;
+        let sp: Vec<f32> = a.clean.iter().map(|v| v * g).collect();
+        let (noisy, _) = mix(&sp, &keyboard(sp.len(), 11), 0.0);
+        let run = |x: &[f32]| -> Vec<f32> {
+            let mut c = Cleaner::new(Settings { echo: false, noise: Noise::Isolate, high_pass: false });
+            while !c.isolating() {
+                let mut b = [0.0f32; FRAME];
+                c.process(&mut b);
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            c.reset();
+            let mut y = x.to_vec();
+            for ch in y.chunks_mut(480) {
+                c.process(ch);
+            }
+            y
+        };
+        let out = run(&noisy);
+        let d = 1920;
+        let (before, after) = (si_sdr(&noisy, &sp), si_sdr(&out[d..], &sp[..sp.len() - d]));
+        eprintln!("quiet speech {level} dBFS + typing: SI-SDR {before:.1} → {after:.1} dB");
+        assert!(after - before > 10.0, "{level}: {before} → {after}");
+        // Typing alone at that level: gone.
+        let kb: Vec<f32> = keyboard(48000 * 6, 3).iter().map(|v| v * g * 0.3).collect();
+        let cut = db(energy(&kb[48000..]) / energy(&run(&kb)[48000..]).max(1e-30));
+        eprintln!("typing alone at a quiet mic: {cut:.1} dB quieter");
+        assert!(cut > 30.0, "{cut}");
     }
 }

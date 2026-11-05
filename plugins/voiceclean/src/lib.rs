@@ -165,7 +165,70 @@ pub struct Cleaner {
     /// What goes into the network, delayed like its output, for `residual` (Styrke).
     iso_dry: std::collections::VecDeque<[f32; FRAME]>,
     residual: f32,
+    lift: Lift,
     pub stats: Stats,
+}
+
+/// Level lift in front of Stemmeisolering. DeepFilterNet only knows speech at normal levels: below
+/// about −50 dBFS it takes a voice for noise and removes it completely (measured on real speech:
+/// −46 dBFS kept, −56 dBFS gone – a user's GoXLR Mini Chat Mic gave −55 dB while talking, 0.15.1).
+/// So the mic is lifted so its loud frames sit near −20 dBFS before the network, and the network's
+/// output is lowered by exactly the same gain (the one its frame had going in): what comes out has
+/// the mic's own level, only cleaned.
+#[cfg_attr(not(feature = "deepfilter"), allow(dead_code))]
+pub(crate) struct Lift {
+    /// Level of the loud frames (dBFS): rises at once, falls 5 dB/s.
+    level_db: f32,
+    gain_db: f32,
+    /// Gains of the frames still inside the network (its delay), oldest first.
+    pending: std::collections::VecDeque<f32>,
+}
+
+#[cfg_attr(not(feature = "deepfilter"), allow(dead_code))]
+impl Lift {
+    const TARGET_DB: f32 = -20.0;
+    const MAX_GAIN_DB: f32 = 40.0;
+    /// Frames below this are the GoXLR's gate or digital silence: they say nothing about the level.
+    const FLOOR_DB: f32 = -90.0;
+    const FALL_DB: f32 = 0.05;
+    const STEP_DB: f32 = 6.0;
+
+    pub(crate) fn new() -> Lift {
+        Lift { level_db: -60.0, gain_db: 0.0, pending: std::collections::VecDeque::new() }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        *self = Lift::new();
+    }
+
+    /// The linear gain for this frame going into the network (and remembered for its output).
+    pub(crate) fn gain_in(&mut self, frame: &[f32]) -> f32 {
+        let ms = frame.iter().map(|v| v * v).sum::<f32>() / frame.len().max(1) as f32;
+        let db = 10.0 * (ms + 1e-20).log10();
+        if db > Self::FLOOR_DB {
+            self.level_db = db.max(self.level_db - Self::FALL_DB);
+        }
+        let want = (Self::TARGET_DB - self.level_db).clamp(0.0, Self::MAX_GAIN_DB);
+        // Down at most 6 dB a frame (a loud word after a quiet spell); up as the level falls (slowly).
+        self.gain_db = if want < self.gain_db { want.max(self.gain_db - Self::STEP_DB) } else { want };
+        let g = 10f32.powf(self.gain_db / 20.0);
+        self.pending.push_back(g);
+        g
+    }
+
+    /// The gain to undo on the network's output (the frame `delay` frames back).
+    pub(crate) fn gain_out(&mut self, delay: usize) -> f32 {
+        if self.pending.len() > delay {
+            self.pending.pop_front().unwrap_or(1.0)
+        } else {
+            self.pending.front().copied().unwrap_or(1.0)
+        }
+    }
+
+    /// Frames fed to the network without a lift (when it starts where the fallback is).
+    pub(crate) fn seed(&mut self, frames: usize) {
+        self.pending = std::iter::repeat(1.0).take(frames).collect();
+    }
 }
 
 /// Builds the network on its own thread (it takes too long for the audio thread), once.
@@ -288,6 +351,7 @@ impl Cleaner {
             iso_raw: std::collections::VecDeque::new(),
             iso_dry: std::collections::VecDeque::new(),
             residual: 0.0,
+            lift: Lift::new(),
             stats: Stats::default(),
         }
     }
@@ -319,6 +383,7 @@ impl Cleaner {
             if let Iso::Ready(net) = &mut self.iso {
                 // Start where the fallback is: feed it the raw frames still in the delay.
                 self.iso_dry = self.iso_raw.clone();
+                self.lift.seed(self.iso_raw.len());
                 let mut sink = [0f32; FRAME];
                 for f in &self.iso_raw {
                     if net.process(f, &mut sink).is_err() {
@@ -370,6 +435,7 @@ impl Cleaner {
         self.iso_delay.clear();
         self.iso_raw.clear();
         self.iso_dry.clear();
+        self.lift.reset();
         #[cfg(feature = "deepfilter")]
         if let Iso::Ready(net) = &mut self.iso {
             if net.reset().is_err() {
@@ -478,7 +544,12 @@ impl Cleaner {
         #[cfg(feature = "deepfilter")]
         if let Iso::Ready(net) = &mut self.iso {
             let mut out = [0f32; FRAME];
-            if net.process(&self.work, &mut out).is_ok() {
+            let g = self.lift.gain_in(&self.work);
+            let mut lifted = self.work;
+            lifted.iter_mut().for_each(|v| *v *= g);
+            if net.process(&lifted, &mut out).is_ok() {
+                let undo = 1.0 / self.lift.gain_out(ISOLATE_FRAMES);
+                out.iter_mut().for_each(|v| *v *= undo);
                 // Styrke: some of the mic as it came in, aligned with the network's output.
                 self.iso_dry.push_back(self.work);
                 if self.iso_dry.len() > ISOLATE_FRAMES {
