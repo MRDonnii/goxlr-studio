@@ -10,6 +10,9 @@
 //!   32 plugin_beat u64 (reader's clock in ms) · 40 erle u32 (f32 bits, dB) · 44 flags u32
 //!   48 delay_ms i32 · 52 in_db f32 bits · 56 out_db f32 bits (0 = not reported, plugins before
 //!   0.14.1) · 60 reserved · 64 samples f32[CAPACITY]
+//!
+//! The layout never changes size: GoXLR Studio keeps the memory open across plugin updates, and an
+//! existing mapping cannot grow. New things get their own memory (`Instances`, 0.14.2).
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 pub const MAGIC: u32 = u32::from_le_bytes(*b"GXVR");
@@ -33,6 +36,69 @@ pub const FLAG_BYPASSED: u32 = 16;
 pub const FLAG_ISOLATE: u32 = 32;
 pub const FLAG_ISOLATE_LOADING: u32 = 64;
 pub const FLAG_ISOLATE_UNAVAILABLE: u32 = 128;
+
+/// Running plugin instances (0.14.2): each one keeps a beat in a slot of its own small shared
+/// memory, so GoXLR Studio can tell how many recordings of the mic are being cleaned – fewer than
+/// the programs recording from it means a program gets the mic around the cleaner.
+pub const INST_NAME_GLOBAL: &str = "Global\\GoXLRStudioVoiceInst";
+pub const INST_NAME_LOCAL: &str = "Local\\GoXLRStudioVoiceInst";
+/// Plugin instances that can be counted (more than this many streams at once is not expected).
+pub const SLOTS: usize = 8;
+pub const INST_SIZE: usize = SLOTS * 8;
+/// An instance that has not reported for this long is gone.
+pub const INSTANCE_STALE_MS: u64 = 2000;
+
+pub struct Instances {
+    base: *mut u8,
+}
+
+unsafe impl Send for Instances {}
+unsafe impl Sync for Instances {}
+
+impl Instances {
+    /// # Safety
+    /// `base` must point to at least `INST_SIZE` bytes, 8-byte aligned, valid for the value's life
+    /// (writable for the plugin's calls).
+    pub unsafe fn from_ptr(base: *mut u8) -> Instances {
+        Instances { base }
+    }
+
+    fn slot(&self, i: usize) -> &AtomicU64 {
+        unsafe { &*(self.base.add(i * 8) as *const AtomicU64) }
+    }
+
+    /// Takes a free (or stale) slot for a new instance.
+    pub fn claim(&self, now_ms: u64) -> Option<usize> {
+        let now = now_ms.max(1);
+        (0..SLOTS).find(|&i| {
+            let slot = self.slot(i);
+            let old = slot.load(Ordering::Acquire);
+            (old == 0 || now.saturating_sub(old) > INSTANCE_STALE_MS) && slot.compare_exchange(old, now, Ordering::AcqRel, Ordering::Acquire).is_ok()
+        })
+    }
+
+    pub fn beat(&self, i: usize, now_ms: u64) {
+        if i < SLOTS {
+            self.slot(i).store(now_ms.max(1), Ordering::Release);
+        }
+    }
+
+    pub fn release(&self, i: usize) {
+        if i < SLOTS {
+            self.slot(i).store(0, Ordering::Release);
+        }
+    }
+
+    /// How many plugin instances are running now (= streams on the mic being cleaned).
+    pub fn count(&self, now_ms: u64) -> usize {
+        (0..SLOTS)
+            .filter(|&i| {
+                let b = self.slot(i).load(Ordering::Acquire);
+                b != 0 && now_ms.saturating_sub(b) <= INSTANCE_STALE_MS
+            })
+            .count()
+    }
+}
 
 /// A ring placed over shared memory (or any 8-byte aligned buffer of `SIZE` bytes).
 pub struct Ring {
@@ -244,5 +310,32 @@ mod tests {
         assert_eq!(ring.plugin_levels(), (None, None), "not measured");
         ring.report_levels(10, FLAG_RUNNING, 0.0, -1, -32.5, -61.0);
         assert_eq!(ring.plugin_levels(), (Some(-32.5), Some(-61.0)));
+    }
+
+    #[test]
+    fn instances_are_counted_and_stale_slots_reused() {
+        let mut m = vec![0u64; INST_SIZE / 8];
+        let inst = unsafe { Instances::from_ptr(m.as_mut_ptr() as *mut u8) };
+        let a = inst.claim(1000).unwrap();
+        let b = inst.claim(1000).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(inst.count(1500), 2);
+        inst.release(a);
+        assert_eq!(inst.count(1500), 1);
+        // b stops reporting (the engine dropped it without closing): after 2 s it no longer counts
+        // and its slot is taken again.
+        assert_eq!(inst.count(3100), 0);
+        for _ in 0..SLOTS {
+            assert!(inst.claim(3100).is_some());
+        }
+        assert!(inst.claim(3100).is_none(), "all slots in use");
+        inst.beat(b, 3200);
+        assert_eq!(inst.count(3200), SLOTS);
+    }
+
+    #[test]
+    fn layout_is_unchanged() {
+        // GoXLR Studio keeps the memory open while the plugin is updated: never change its size.
+        assert_eq!((VERSION, HEADER, SIZE), (1, 64, 64 + 65536 * 4));
     }
 }

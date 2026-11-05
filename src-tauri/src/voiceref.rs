@@ -58,6 +58,9 @@ pub struct Status {
     /// The mic's level before and after cleaning (dBFS, last half second; plugins from 0.14.1).
     pub in_db: Option<f32>,
     pub out_db: Option<f32>,
+    /// Recordings of the mic being cleaned right now (one plugin instance each; None = a plugin
+    /// before 0.14.2, which does not count them).
+    pub instances: Option<usize>,
     /// How much echo is removed right now (WebRTC's ERLE).
     pub erle_db: Option<f32>,
     pub delay_ms: Option<i32>,
@@ -290,6 +293,7 @@ fn run(state: Arc<State>) {
     let mut scratch = Vec::with_capacity(4800);
     let mut last_status = 0u64;
     let mut last_sound = 0u64;
+    let mut inst: Option<win::InstanceCount> = None;
     while !state.stop.load(Ordering::SeqCst) {
         let now_ms = win::tick_ms();
         let wanted = state.config.lock().unwrap().clone();
@@ -298,9 +302,14 @@ fn run(state: Arc<State>) {
             mixer = Mixer::new(loops.len());
         }
         cfg = wanted;
-        if shm.is_none() && now_ms.saturating_sub(shm_tried) >= 2000 {
+        if (shm.is_none() || inst.is_none()) && now_ms.saturating_sub(shm_tried) >= 2000 {
             shm_tried = now_ms;
-            shm = win::Shared::open();
+            if shm.is_none() {
+                shm = win::Shared::open();
+            }
+            if inst.is_none() {
+                inst = win::InstanceCount::open();
+            }
         }
         for (i, lp) in loops.iter_mut().enumerate() {
             let gain = cfg.sources.get(i).map(|s| s.gain).filter(|g| g.is_finite()).unwrap_or(0.0).clamp(0.0, 4.0);
@@ -323,6 +332,7 @@ fn run(state: Arc<State>) {
                     (st.in_db, st.out_db) = s.levels();
                 }
             }
+            st.instances = inst.as_ref().map(|c| c.count(now_ms));
             st.sources = loops.iter().map(|l| l.status(now_ms)).collect();
             *state.status.lock().unwrap() = st;
         }
@@ -333,7 +343,7 @@ fn run(state: Arc<State>) {
 
 #[cfg(windows)]
 mod win {
-    use super::ring::{Ring, NAME_GLOBAL, SIZE};
+    use super::ring::{Instances, Ring, INST_NAME_GLOBAL, INST_SIZE, NAME_GLOBAL, SIZE};
     use super::{index_of, to_mono, Resampler, SourceStatus};
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HLOCAL, INVALID_HANDLE_VALUE};
@@ -417,6 +427,44 @@ mod win {
 
         pub fn levels(&self) -> (Option<f32>, Option<f32>) {
             self.ring.plugin_levels()
+        }
+
+    }
+
+    /// The plugin instances' memory (created by plugins from 0.14.2), read only.
+    pub struct InstanceCount {
+        handle: HANDLE,
+        view: MEMORY_MAPPED_VIEW_ADDRESS,
+        inst: Instances,
+    }
+
+    unsafe impl Send for InstanceCount {}
+
+    impl Drop for InstanceCount {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = UnmapViewOfFile(self.view);
+                let _ = CloseHandle(self.handle);
+            }
+        }
+    }
+
+    impl InstanceCount {
+        pub fn open() -> Option<InstanceCount> {
+            unsafe {
+                let name = wide(INST_NAME_GLOBAL);
+                let handle = OpenFileMappingW(FILE_MAP_READ.0, false, PCWSTR(name.as_ptr())).ok()?;
+                let view = MapViewOfFile(handle, FILE_MAP_READ, 0, 0, INST_SIZE);
+                if view.Value.is_null() {
+                    let _ = CloseHandle(handle);
+                    return None;
+                }
+                Some(InstanceCount { handle, view, inst: Instances::from_ptr(view.Value as *mut u8) })
+            }
+        }
+
+        pub fn count(&self, now_ms: u64) -> usize {
+            self.inst.count(now_ms)
         }
     }
 
