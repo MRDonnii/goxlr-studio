@@ -43,6 +43,7 @@ reqwest = { version = "0.12.23", default-features = false, features = ["native-t
 windows = { version = "0.58", features = [
   "Foundation",
   "Media_Control",
+  "Storage_Streams",
   "Win32_Foundation",
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",

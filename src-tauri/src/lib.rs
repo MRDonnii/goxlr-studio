@@ -15,6 +15,7 @@ mod history;
 mod keys;
 mod media;
 mod meters;
+mod musicpop;
 mod midi;
 mod migrate;
 mod movepc;
@@ -141,6 +142,18 @@ async fn media_now() -> Result<media::NowPlaying, String> {
 #[tauri::command]
 async fn media_control(cmd: String) -> Result<(), String> {
     blocking(move || media::control(&cmd)).await
+}
+
+/// The current song's cover as a data: URL (read once per song), or null.
+#[tauri::command]
+async fn media_art() -> Result<Option<String>, String> {
+    blocking(|| Ok(media::art())).await
+}
+
+/// Musik-popup: show/hide/toggle (`show` null) the player card; returns whether it is visible.
+#[tauri::command]
+fn music_popup(app: AppHandle, show: Option<bool>, auto: Option<bool>, corner: Option<String>, seconds: Option<u32>) -> bool {
+    musicpop::set(&app, show, auto.unwrap_or(false), corner.as_deref().unwrap_or("bottom-right"), seconds.unwrap_or(6))
 }
 
 /// Fodpedal: start reading every MIDI input (pedals, controllers) – messages arrive as `midi` events.
@@ -1046,6 +1059,9 @@ pub fn run() {
             if let Err(e) = osd::create(&handle) {
                 log::warn!("OSD: {e}");
             }
+            if let Err(e) = musicpop::create(&handle) {
+                log::warn!("Musik-popup: {e}");
+            }
 
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
@@ -1096,6 +1112,8 @@ pub fn run() {
             midi_start,
             media_now,
             media_control,
+            media_art,
+            music_popup,
             midi_stop,
             midi_ports,
             output_eq_status,
