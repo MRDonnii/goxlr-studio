@@ -26,5 +26,6 @@
  "GoXLR-indstillinger": "GoXLR settings",
  "{0} tændt": "{0} on",
  "{0} muted": "{0} muted",
- "Opdatér": "Update"
+ "Opdatér": "Update",
+ "Stemme: {0}": "Voice: {0}"
 }

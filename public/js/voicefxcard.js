@@ -124,7 +124,7 @@ export function voiceFxCard(ctx, { keyPool }) {
     slider(ctx.binder, { label: 'Styrke', min: 10, max: 100, get: () => s.mix ?? 100, set: (v) => { s.mix = v; ctx.savePrefs(); pushVoiceNow(); }, fmt: (v) => `${v} %` }),
     h('label', { class: 'engine-dev' }, hold, h('span', {}, 'Nye taster virker kun, mens de holdes nede')),
     h('div', { class: 'row', style: { marginTop: '8px' } }, listen, h('span', { class: 'hint' }, 'Brug hovedtelefoner, ellers hyler det.')),
-    h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Stemmen ændres på Chat Mic – det Discord, spil og opkald hører. Stream og optagelse (Broadcast Mix) får din normale stemme. Kører i GoXLR Studio, så den er hurtig og bruger næsten ingen CPU. Under Genveje kan du også vælge "Stemme: …, mens tasten holdes".'));
+    h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Stemmen ændres på Chat Mic – det Discord, spil og opkald hører. Stream og optagelse (Broadcast Mix) får din normale stemme. Kører i GoXLR Studio og bruger næsten ingen CPU. Dyb, Lysere, Jordegern, Monster og Robot kommer 0,04 s forsinket – det kræver det at flytte tonehøjden, og de andre mærker det ikke. Under Genveje kan du også vælge "Stemme: …, mens tasten holdes".'));
   render();
   refresh();
   return card;

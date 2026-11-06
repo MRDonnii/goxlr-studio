@@ -5,14 +5,14 @@
 
 // `n` = the plugin's number (fx.rs Effect::from_id) – never renumber.
 export const VOICE_FX = [
-  { id: 'deep', n: 1, label: 'Dyb', hint: 'Fem halvtoner dybere' },
-  { id: 'high', n: 2, label: 'Lysere', hint: 'Fire halvtoner lysere' },
-  { id: 'chipmunk', n: 3, label: 'Jordegern', hint: 'Ni halvtoner op' },
-  { id: 'monster', n: 4, label: 'Monster', hint: 'Ni halvtoner ned, forvrænget' },
-  { id: 'robot', n: 5, label: 'Robot', hint: 'Metallisk ringmodulation' },
-  { id: 'megaphone', n: 6, label: 'Megafon', hint: 'Smalt bånd, overstyret' },
-  { id: 'radio', n: 7, label: 'Radio', hint: 'Som en walkie-talkie' },
-  { id: 'cave', n: 8, label: 'Hule', hint: 'Stort rum med efterklang' },
+  { id: 'deep', n: 1, label: 'Dyb', hint: 'Dybere og større stemme' },
+  { id: 'high', n: 2, label: 'Lysere', hint: 'Lysere og lettere stemme' },
+  { id: 'chipmunk', n: 3, label: 'Jordegern', hint: 'Højt og spinkelt' },
+  { id: 'monster', n: 4, label: 'Monster', hint: 'Dyb og knurrende' },
+  { id: 'robot', n: 5, label: 'Robot', hint: 'Én tone, metallisk' },
+  { id: 'megaphone', n: 6, label: 'Megafon', hint: 'Som gennem et horn' },
+  { id: 'radio', n: 7, label: 'Radio', hint: 'Walkie-talkie med sus' },
+  { id: 'cave', n: 8, label: 'Hule', hint: 'Stort stenrum' },
   { id: 'echo', n: 9, label: 'Ekko', hint: 'Ekko efter 0,3 s' },
 ];
 
