@@ -120,6 +120,8 @@ pub fn open() -> Option<Shared> {
 
 /// The writer must have written within the last half second, otherwise nothing is read.
 const STALE_MS: u64 = 500;
+/// The effect stays on through a hiccup of the app, not after it is closed.
+const FX_STALE_MS: u64 = 1500;
 
 impl Reference for Shared {
     fn read(&mut self, out: &mut [f32]) -> usize {
@@ -133,6 +135,17 @@ impl Reference for Shared {
             return 0;
         }
         self.reader.read(&self.ring, out)
+    }
+
+    fn fx(&mut self) -> u32 {
+        // Only while GoXLR Studio is running: if it is closed, the voice goes back to normal.
+        let now = unsafe { GetTickCount64() };
+        let beat = self.ring.writer_beat();
+        if beat == 0 || now.saturating_sub(beat) > FX_STALE_MS {
+            0
+        } else {
+            self.ring.fx_command()
+        }
     }
 
     fn report(&mut self, flags: u32, erle_db: f32, delay_ms: i32, in_db: f32, out_db: f32) {

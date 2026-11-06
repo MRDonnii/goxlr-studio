@@ -71,11 +71,16 @@ pub(crate) trait Reference: Send {
     /// Tells GoXLR Studio how it is going.
     /// `in_db`/`out_db`: the mic's level before and after cleaning (dBFS RMS).
     fn report(&mut self, flags: u32, erle_db: f32, delay_ms: i32, in_db: f32, out_db: f32);
+    /// Stemmeskifter: the effect GoXLR Studio asks for (0 = none, also when the app is gone).
+    fn fx(&mut self) -> u32 {
+        0
+    }
 }
 
 struct Plugin {
     params: [f32; 5],
     dsp: Cleaner,
+    fx: crate::fx::VoiceFx,
     rate: f32,
     broken: bool,
     reference: Option<Box<dyn Reference>>,
@@ -248,6 +253,11 @@ unsafe fn process_block(p: &mut Plugin, inputs: *const *const f32, outputs: *mut
     p.e_in += mono.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>();
     p.dsp.process(mono);
     p.e_out += mono.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>();
+    // Stemmeskifter after the cleaning (the levels above are the cleaner's).
+    if let Some(r) = p.reference.as_mut() {
+        p.fx.set_command(r.fx());
+    }
+    p.fx.process(mono);
     p.n_meas += n as u64;
     let (ol, or) = (*outputs, *outputs.add(1));
     for (i, &v) in mono.iter().enumerate() {
@@ -266,6 +276,7 @@ unsafe fn process_block(p: &mut Plugin, inputs: *const *const f32, outputs: *mut
             if s.echo { flags |= crate::ring::FLAG_AEC_ON; }
             if st.reference { flags |= crate::ring::FLAG_REFERENCE; }
             if s.noise != crate::Noise::Off { flags |= crate::ring::FLAG_NS_ON; }
+            if p.fx.active() != crate::fx::Effect::Off { flags |= crate::ring::FLAG_FX; }
             flags |= match st.isolate {
                 crate::Isolation::Running => crate::ring::FLAG_ISOLATE,
                 crate::Isolation::Loading => crate::ring::FLAG_ISOLATE_LOADING,
@@ -288,6 +299,7 @@ fn new_effect(reference: Option<Box<dyn Reference>>) -> *mut AEffect {
     let object = Box::into_raw(Box::new(Plugin {
         params: DEFAULTS,
         dsp,
+        fx: crate::fx::VoiceFx::new(),
         rate: RATE as f32,
         broken: false,
         reference,
@@ -449,4 +461,50 @@ mod tests {
         assert!(last & crate::ring::FLAG_BROKEN == 0);
         (eff.dispatcher)(e, EFF_CLOSE, 0, 0, std::ptr::null_mut(), 0.0);
     }
+
+    struct FxRef {
+        cmd: Arc<Mutex<u32>>,
+        reports: Arc<Mutex<Vec<u32>>>,
+    }
+    impl Reference for FxRef {
+        fn read(&mut self, _out: &mut [f32]) -> usize {
+            0
+        }
+        fn report(&mut self, flags: u32, _erle: f32, _delay: i32, _in_db: f32, _out_db: f32) {
+            self.reports.lock().unwrap().push(flags);
+        }
+        fn fx(&mut self) -> u32 {
+            *self.cmd.lock().unwrap()
+        }
+    }
+
+    /// Stemmeskifter with all cleaning off (Ren mikrofon off, only the effect): the app's command
+    /// switches it on and off at once, and the plugin says when it runs.
+    #[test]
+    fn stemmeskifter_follows_the_app() {
+        let cmd = Arc::new(Mutex::new(0u32));
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let e = new_effect(Some(Box::new(FxRef { cmd: cmd.clone(), reports: reports.clone() })));
+        let eff = unsafe { &mut *e };
+        (eff.dispatcher)(e, EFF_SET_SAMPLE_RATE, 0, 0, std::ptr::null_mut(), 48000.0);
+        for i in 0..4 { (eff.set_parameter)(e, i, 0.0); }
+        let l: Vec<f32> = (0..480).map(|i| ((i as f32) * 0.03).sin() * 0.3).collect();
+        let r = vec![0f32; 480];
+        let mut plain = vec![];
+        for _ in 0..60 { plain.extend(run(e, &l, &r).0); }
+        assert!(reports.lock().unwrap().iter().all(|f| f & crate::ring::FLAG_FX == 0));
+        *cmd.lock().unwrap() = crate::fx::encode(5, 100); // Robot
+        let mut changed = vec![];
+        for _ in 0..60 { changed.extend(run(e, &l, &r).0); }
+        let diff: f32 = changed[4800..].iter().zip(&plain[4800..]).map(|(a, b)| (a - b).abs()).sum();
+        assert!(diff > 10.0, "the effect is heard: {diff}");
+        assert!(reports.lock().unwrap().last().unwrap() & crate::ring::FLAG_FX != 0);
+        // Off again (or the app closed): the mic as it was.
+        *cmd.lock().unwrap() = 0;
+        for _ in 0..10 { let _ = run(e, &l, &r); }
+        let (back, _) = run(e, &l, &r);
+        assert_eq!(&back[FRAME..], &l[..480 - FRAME]);
+        (eff.dispatcher)(e, EFF_CLOSE, 0, 0, std::ptr::null_mut(), 0.0);
+    }
+
 }

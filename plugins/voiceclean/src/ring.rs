@@ -4,7 +4,7 @@
 //! (src-tauri/src/voiceref.rs includes it), so both sides always agree on the layout.
 //!
 //! Layout (little endian, `SIZE` bytes):
-//!   0  magic u32 · 4 version u32 · 8 rate u32 · 12 reserved u32
+//!   0  magic u32 · 4 version u32 · 8 rate u32 · 12 fx command u32 (Stemmeskifter, 0.16.0; 0 = off)
 //!   16 write u64 (samples written so far, the ring position is `write % CAPACITY`)
 //!   24 writer_beat u64 (writer's clock in ms, 0 = never)
 //!   32 plugin_beat u64 (reader's clock in ms) · 40 erle u32 (f32 bits, dB) · 44 flags u32
@@ -38,6 +38,8 @@ pub const FLAG_ISOLATE_LOADING: u32 = 64;
 pub const FLAG_ISOLATE_UNAVAILABLE: u32 = 128;
 /// The plugin hit a problem (caught) and passes the mic through until it is loaded again.
 pub const FLAG_BROKEN: u32 = 256;
+/// A Stemmeskifter effect is running (0.16.0).
+pub const FLAG_FX: u32 = 512;
 
 /// Running plugin instances (0.14.2): each one keeps a beat in a slot of its own small shared
 /// memory, so GoXLR Studio can tell how many recordings of the mic are being cleaned – fewer than
@@ -153,6 +155,16 @@ impl Ring {
         }
         self.u64_at(16).store(w + samples.len() as u64, Ordering::Release);
         self.u64_at(24).store(now_ms.max(1), Ordering::Release);
+    }
+
+    /// Stemmeskifter: the effect GoXLR Studio wants (`fx::encode`). In a field that was reserved
+    /// (and zero) before 0.16.0, so older plugins ignore it.
+    pub fn set_fx_command(&self, cmd: u32) {
+        self.u32_at(12).store(cmd, Ordering::Release);
+    }
+
+    pub fn fx_command(&self) -> u32 {
+        self.u32_at(12).load(Ordering::Acquire)
     }
 
     pub fn writer_beat(&self) -> u64 {
@@ -333,6 +345,19 @@ mod tests {
         assert!(inst.claim(3100).is_none(), "all slots in use");
         inst.beat(b, 3200);
         assert_eq!(inst.count(3200), SLOTS);
+    }
+
+    #[test]
+    fn fx_command_round_trips_and_starts_off() {
+        let mut m = mem();
+        let ring = unsafe { Ring::from_ptr(m.as_mut_ptr() as *mut u8) };
+        ring.init();
+        assert_eq!(ring.fx_command(), 0);
+        ring.set_fx_command(0x4605);
+        assert_eq!(ring.fx_command(), 0x4605);
+        // The samples after the header are not touched.
+        ring.write(&[0.25; 10], 5);
+        assert_eq!(ring.fx_command(), 0x4605);
     }
 
     #[test]

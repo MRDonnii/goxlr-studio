@@ -19,6 +19,7 @@ use sonora::{AudioProcessing, Config, StreamConfig};
 
 #[cfg(feature = "deepfilter")]
 pub mod deepfilter;
+pub mod fx;
 pub mod ring;
 #[cfg(windows)]
 mod shm;
