@@ -10,8 +10,31 @@ on:
 permissions:
   contents: write
 
+# GitHub Actions minutes: a private repository has a monthly allowance, and Windows minutes count
+# double. So the tests run on Linux on every push, and the Windows app is only built when there is
+# something to release (a new version on main, a v* tag) or when started by hand.
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: New version?
+        id: plan
+        run: |
+          v=$(jq -r .version src-tauri/tauri.conf.json)
+          exists=$(git ls-remote --tags origin "refs/tags/v$v")
+          build=false
+          case "${{ github.ref }}" in refs/tags/v*) build=true ;; esac
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then build=true; fi
+          if [ "${{ github.ref }}" = refs/heads/main ] && [ "${{ github.event_name }}" = push ] && [ -z "$exists" ]; then build=true; fi
+          echo "Version $v, tag v$v exists: $([ -n "$exists" ] && echo yes || echo no) → build the Windows app: $build"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   windows:
+    needs: [plan, rust-tests, frontend, plugin-tests]
+    if: needs.plan.outputs.build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +43,13 @@ jobs:
 
       # The GoXLR engine (GoXLR Utility's daemon, MIT) is compiled into the app from
       # src-tauri/goxlr-engine; its sibling crates come from GoXLR Utility's v1.2.4 tag.
+      # The plugins are cached too (Stemmeisolering's tract takes minutes to build from scratch).
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            plugins/dynamics
+            plugins/voiceclean
 
       # Built-in EQ engine: Equalizer APO's engine files (GPL), taken unchanged from the official
       # installer, verified by SHA-256. The matching source code is attached to every release.
@@ -57,55 +84,35 @@ jobs:
           "ENGINE_DIR=$((Resolve-Path engine).Path)" >> $env:GITHUB_ENV
           "ENGINE_VERSION=1.4.2" >> $env:GITHUB_ENV
 
-      # Dynamik: GoXLR Studio's own limiter/compressor VST plugin (plugins/dynamics), tested and built
-      # here and embedded next to the EQ engine like the noise-suppression plugin.
+      # Dynamik: GoXLR Studio's own limiter/compressor VST plugin (plugins/dynamics), built here
+      # (tested in plugin-tests) and embedded next to the EQ engine like the noise-suppression plugin.
       - name: Build Dynamik plugin
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           # From its own folder, so its .cargo/config.toml (static C runtime) applies.
           Push-Location plugins/dynamics
-          cargo test
-          if ($LASTEXITCODE -ne 0) { throw 'Dynamik tests failed' }
           cargo build --release
           if ($LASTEXITCODE -ne 0) { throw 'Dynamik build failed' }
           Pop-Location
           Copy-Item plugins/dynamics/target/release/goxlr_studio_dynamics.dll $env:ENGINE_DIR
 
-      # Ren mikrofon: echo cancellation + noise suppression on the GoXLR's Chat Mic (plugins/voiceclean).
-      # Its tests run in release (they include a speed test for the audio engine).
-      # Stemmeisolering: DeepFilterNet 3's model (MIT/Apache-2.0) from DeepFilterNet's v0.5.6 tag,
-      # SHA-256 checked, built into the plugin; its speech/noise test recordings (freesound.org)
-      # are only used by the tests and not shipped.
+      # Ren mikrofon: echo cancellation + noise suppression on the GoXLR's Chat Mic (plugins/voiceclean),
+      # tested in plugin-tests. Stemmeisolering: DeepFilterNet 3's model (MIT/Apache-2.0) from
+      # DeepFilterNet's v0.5.6 tag, SHA-256 checked, built into the plugin.
       - name: Build Ren mikrofon plugin
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $base = 'https://raw.githubusercontent.com/Rikorose/DeepFilterNet/v0.5.6'
-          $files = @{
-            'models/DeepFilterNet3_onnx.tar.gz' = 'c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616'
-            'assets/clean_freesound_33711.wav' = '2d885e9f45c0f9381aee09a397ecd160aff1875ffb75ebe2217d21c3511b0d5d'
-            'assets/noise_freesound_2530.wav' = 'cc774d58170fc5b8f143345ef8ff31583feef71f23f447336fdd56c8478d8a8a'
-            'assets/noise_freesound_573577.wav' = 'cb367b36e4e9d72d112377dd57bf354e13f0b30f8402c9e841ac47639e773497'
-          }
           $dl = Join-Path $env:RUNNER_TEMP 'deepfilternet'
-          New-Item -ItemType Directory -Force "$dl/assets", "$dl/model" | Out-Null
-          foreach ($f in $files.Keys) {
-            $out = if ($f -like 'assets/*') { "$dl/$f" } else { "$dl/model.tar.gz" }
-            Invoke-WebRequest -Uri "$base/$f" -OutFile $out
-            $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $out).Hash.ToLower()
-            if ($sha -ne $files[$f]) { throw "SHA-256 mismatch for $f ($sha)" }
-          }
+          New-Item -ItemType Directory -Force "$dl/model" | Out-Null
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Rikorose/DeepFilterNet/v0.5.6/models/DeepFilterNet3_onnx.tar.gz' -OutFile "$dl/model.tar.gz"
+          $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath "$dl/model.tar.gz").Hash.ToLower()
+          if ($sha -ne 'c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616') { throw "SHA-256 mismatch for the model ($sha)" }
           tar -xzf "$dl/model.tar.gz" -C "$dl/model"
           if ($LASTEXITCODE -ne 0) { throw 'Could not unpack the model' }
           $env:DF_MODEL_DIR = (Get-ChildItem -Recurse -Filter enc.onnx "$dl/model" | Select-Object -First 1).DirectoryName
-          $env:DF_TEST_ASSETS = "$dl/assets"
-          $env:DF_REQUIRE_ASSETS = '1'
           Push-Location plugins/voiceclean
-          cargo test --release
-          if ($LASTEXITCODE -ne 0) { throw 'Ren mikrofon tests failed' }
-          cargo test --release --features deepfilter
-          if ($LASTEXITCODE -ne 0) { throw 'Stemmeisolering tests failed' }
           cargo build --release --features deepfilter
           if ($LASTEXITCODE -ne 0) { throw 'Ren mikrofon build failed' }
           Pop-Location
@@ -240,6 +247,44 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - name: Unit tests (engine registration logic, migration, API)
         run: cargo test --lib --manifest-path src-tauri/Cargo.toml
+
+  # The plugins' tests (on Linux: the DSP is the same, and Linux minutes count once).
+  # Stemmeisolering's tests use DeepFilterNet's speech/noise recordings (freesound.org, SHA-256
+  # checked); they are only used here and not shipped.
+  plugin-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            plugins/dynamics
+            plugins/voiceclean
+      - name: Dynamik tests
+        working-directory: plugins/dynamics
+        run: cargo test
+      - name: DeepFilterNet model and test recordings
+        run: |
+          set -euo pipefail
+          base=https://raw.githubusercontent.com/Rikorose/DeepFilterNet/v0.5.6
+          dl="$RUNNER_TEMP/deepfilternet"
+          mkdir -p "$dl/assets" "$dl/model"
+          fetch() { curl -sSfL --retry 3 -o "$2" "$base/$1"; echo "$3  $2" | sha256sum -c -; }
+          fetch models/DeepFilterNet3_onnx.tar.gz "$dl/model.tar.gz" c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616
+          fetch assets/clean_freesound_33711.wav "$dl/assets/clean_freesound_33711.wav" 2d885e9f45c0f9381aee09a397ecd160aff1875ffb75ebe2217d21c3511b0d5d
+          fetch assets/noise_freesound_2530.wav "$dl/assets/noise_freesound_2530.wav" cc774d58170fc5b8f143345ef8ff31583feef71f23f447336fdd56c8478d8a8a
+          fetch assets/noise_freesound_573577.wav "$dl/assets/noise_freesound_573577.wav" cb367b36e4e9d72d112377dd57bf354e13f0b30f8402c9e841ac47639e773497
+          tar -xzf "$dl/model.tar.gz" -C "$dl/model"
+          echo "DF_MODEL_DIR=$(dirname "$(find "$dl/model" -name enc.onnx | head -1)")" >> "$GITHUB_ENV"
+          echo "DF_TEST_ASSETS=$dl/assets" >> "$GITHUB_ENV"
+          echo "DF_REQUIRE_ASSETS=1" >> "$GITHUB_ENV"
+      - name: Ren mikrofon tests
+        working-directory: plugins/voiceclean
+        run: cargo test --release
+      - name: Stemmeisolering tests
+        working-directory: plugins/voiceclean
+        run: cargo test --release --features deepfilter
 
   frontend:
     runs-on: ubuntu-latest
