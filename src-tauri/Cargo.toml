@@ -1,6 +1,6 @@
 [package]
 name = "goxlr-studio"
-version = "0.16.1"
+version = "0.17.0"
 description = "GoXLR Studio"
 edition = "2021"
 license = "MIT"
