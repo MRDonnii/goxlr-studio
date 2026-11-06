@@ -133,12 +133,13 @@ jobs:
           Write-Host "Update public key: $pub"
           "UPDATE_PUBKEY=$pub" >> $env:GITHUB_ENV
 
+      # Tauri's CLI as its ready-built program from npm (compiling it with cargo install took ~10 min).
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+        run: npm install --global @tauri-apps/cli@^2
 
       - name: Build
         working-directory: src-tauri
-        run: cargo tauri build
+        run: tauri build
 
       - name: Collect artifacts
         shell: pwsh
