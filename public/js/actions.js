@@ -8,6 +8,8 @@ import { obsScene, streamSafeMusic } from './obs.js';
 import { toast, logActivity } from './ui.js';
 import { openMicDown, openMicUp, OPEN_MIC_ACTION } from './openmic.js';
 import { setAutoGate } from './autogate.js';
+import { VOICE_FX, fxSettings, fxAction, fxById } from './voicefx.js';
+import { pushVoiceNow } from './voiceclean.js';
 
 // Toast in the app, plus the on-screen display when the app is in the background.
 const notify = (ctx, text, kind = 'info') => (ctx.notify ? ctx.notify(text, kind) : toast(text, 'info'));
@@ -54,8 +56,30 @@ export function toggleEq(ctx) {
 // Push-to-talk mutes to everything unless the user chose the cough button's own setting.
 export const pttMuteState = (ctx) => (ctx.prefs.ptt?.target === 'x' ? 'MutedToX' : 'MutedToAll');
 
-/** A held key was let go (push-to-talk / push-to-mute). */
+// Stemmeskifter: an effect while a key is held (wins over the chosen one), or the chosen one.
+function voiceFx(ctx, arg, held) {
+  const s = fxSettings(ctx.prefs);
+  if (held !== undefined) {
+    ctx.voiceFxHeld = held;
+    if (held && !s.enabled) {
+      s.enabled = true;
+      ctx.savePrefs?.();
+      ctx.applyOutputEq?.()?.catch?.(() => {});
+    }
+  } else {
+    const { enable } = fxAction(s, arg);
+    ctx.savePrefs?.();
+    if (enable) ctx.applyOutputEq?.()?.catch?.(() => {});
+    const e = fxById(s.active);
+    notify(ctx, e ? `Stemme: ${e.label}` : 'Stemme: normal', e ? 'ok' : 'info');
+  }
+  pushVoiceNow();
+  ctx.onStateChanged?.('voice-fx');
+}
+
+/** A held key was let go (push-to-talk / push-to-mute / Stemmeskifter). */
 export function releaseAction(ctx, id) {
+  if (id.startsWith('hold:voice-fx:')) return voiceFx(ctx, null, null);
   if (!ctx.conn.mixer) return;
   if (id === OPEN_MIC_ACTION) openMicUp(ctx);
   else if (id === 'hold:ptt') ctx.conn.command('SetCoughMuteState', pttMuteState(ctx));
@@ -147,8 +171,10 @@ export async function runAction(ctx, id, source = 'handling') {
     case 'eq-toggle': return toggleEq(ctx);
     case 'restore-sound': return restoreSound(ctx);
     // Push-to-talk / push-to-mute: pressed here, let go in releaseAction.
+    case 'voice-fx': return voiceFx(ctx, arg);
     case 'hold':
       if (arg === 'open-mic') return openMicDown(ctx);
+      if (arg.startsWith('voice-fx:')) return fxById(arg.slice(9)) ? voiceFx(ctx, null, arg.slice(9)) : undefined;
       if (m) ctx.conn.command('SetCoughMuteState', arg === 'ptt' ? 'Unmuted' : pttMuteState(ctx));
       return;
     case 'sound': return playSound(ctx, arg).then(() => notify(ctx, `▶ ${arg.replace(/\.[^.]+$/, '')}`)).catch((e) => notify(ctx, `Lyd: ${e.message || e}`, 'mute'));
@@ -238,6 +264,11 @@ export async function actionCatalog(ctx) {
     ...sounds.map((x) => ({ id: `sound:${x.file}`, label: `Afspil "${x.name}"` })),
     { id: 'sounds-stop', label: 'Stop alle lyde' },
   ] : []);
+  g('Stemmeskifter', [
+    ...VOICE_FX.map((e) => ({ id: `voice-fx:${e.id}`, label: `Stemme: ${e.label} (til/fra)` })),
+    { id: 'voice-fx:off', label: 'Stemme: normal' },
+    ...VOICE_FX.map((e) => ({ id: `hold:voice-fx:${e.id}`, label: `Stemme: ${e.label}, mens tasten holdes` })),
+  ]);
   g('Høreværn', [
     ...[50, 60, 70, 80].map((p) => ({ id: `hearing-cap:${p}`, label: `Loft for hovedtelefonerne: ${p} %` })),
     { id: 'hearing-cap:off', label: 'Intet loft for hovedtelefonerne' },
@@ -288,7 +319,9 @@ export function actionLabel(ctx, id) {
     case 'auto-gate': return arg === 'on' ? 'Automatisk noise gate til' : arg === 'off' ? 'Automatisk noise gate fra' : 'Automatisk noise gate til/fra';
     case 'mic-limiter': return arg === 'on' ? 'Mikrofon-limiter til' : arg === 'off' ? 'Mikrofon-limiter fra' : 'Mikrofon-limiter til/fra';
     case 'sound': return `Afspil "${arg.replace(/\.[^.]+$/, '')}"`;
-    case 'hold': return arg === 'open-mic' ? 'Fang alt (noise gate fra mens du holder)' : arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
+    case 'voice-fx': return arg === 'off' ? 'Stemme: normal' : `Stemme: ${fxById(arg)?.label || arg} (til/fra)`;
+    case 'hold': if (arg.startsWith('voice-fx:')) return `Stemme: ${fxById(arg.slice(9))?.label || arg.slice(9)}, mens tasten holdes`;
+      return arg === 'open-mic' ? 'Fang alt (noise gate fra mens du holder)' : arg === 'ptt' ? 'Push-to-talk (hold for at tale)' : 'Push-to-mute (hold for at mute)';
     case 'sounds-stop': return 'Stop alle lyde';
     case 'hearing-cap': return arg === 'off' ? 'Intet loft for hovedtelefonerne' : `Loft for hovedtelefonerne: ${arg} %`;
     case 'sampler-bank': return `Sampler: bank ${arg}`;

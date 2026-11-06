@@ -90,21 +90,28 @@ test('payloads: the mic part only on a microphone with the engine, the reference
   assert.equal(pickChatMic(mics).id, mics[0].id);
   assert.equal(pickChatMic([{ id: 'w', name: 'Mikrofon (Webcam)' }]), null);
   Object.assign(cfg, { enabled: true, device: '{0.0.1.00000000}.{aaa}', noise: 'strong' });
-  assert.deepEqual(micPayload(cfg, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: false, amount: 1 });
+  assert.deepEqual(micPayload(cfg, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: false, amount: 1, fx: false });
   // Stemmeisolering: the Isolate parameter, with strong noise suppression for an older plugin.
-  assert.deepEqual(micPayload({ ...cfg, noise: 'isolate' }, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: true, amount: 1 });
+  assert.deepEqual(micPayload({ ...cfg, noise: 'isolate' }, mics), { devices: [mics[0].id], echo: true, noise: 1, high_pass: true, isolate: true, amount: 1, fx: false });
   assert.equal(micPayload({ ...cfg, noise: 'isolate', amount: 'medium' }, mics).amount, 0.5);
   assert.equal(micPayload({ ...cfg, noise: 'isolate', amount: 'light' }, mics).amount, 0);
   assert.equal(micPayload({ ...cfg, noise: 'strong', amount: 'light' }, mics).amount, 1);
   assert.equal(micPayload(cfg, [{ ...mics[0], installed: false }]), null);
   assert.equal(micPayload({ ...cfg, enabled: false }, mics), null);
+  // Stemmeskifter only: the plugin on Chat Mic with all cleaning off (also before the Ren mikrofon
+  // card was ever opened, so without a chosen device).
+  assert.deepEqual(micPayload({ enabled: false }, mics, { fx: true }), { devices: [mics[0].id], echo: false, noise: 0, high_pass: false, isolate: false, amount: 1, fx: true });
+  assert.equal(micPayload(cfg, mics, { fx: true }).fx, true);
+  assert.equal(micPayload({ enabled: false }, mics, { fx: true, openMicHeld: true }), null);
   // "Fang alt" held: everything comes through untouched.
   assert.equal(micPayload(cfg, mics, { openMicHeld: true }), null);
   const ref = referencePayload(cfg, mixer(), endpointOf);
   assert.equal(ref.enabled, true);
   assert.deepEqual(Object.keys(ref.sources[0]), ['device', 'gain']);
-  assert.deepEqual(referencePayload({ ...cfg, echo: false }, mixer(), endpointOf), { enabled: true, sources: [] });
-  assert.deepEqual(referencePayload({ ...cfg, enabled: false }, mixer(), endpointOf), { enabled: false, sources: [] });
+  assert.deepEqual(referencePayload({ ...cfg, echo: false }, mixer(), endpointOf), { enabled: true, sources: [], fx: 0 });
+  assert.deepEqual(referencePayload({ ...cfg, enabled: false }, mixer(), endpointOf), { enabled: false, sources: [], fx: 0 });
+  // The writer also runs for a Stemmeskifter effect (no speakers captured then).
+  assert.deepEqual(referencePayload({ ...cfg, enabled: false }, mixer(), endpointOf, 0x6405), { enabled: true, sources: [], fx: 0x6405 });
 });
 
 test('status line tells what is happening', () => {

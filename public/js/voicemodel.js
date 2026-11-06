@@ -110,22 +110,30 @@ export function pickChatMic(mics = []) {
 
 // For config.txt (apo.rs MicClean): on the microphone(s) the engine is on. While "Fang alt" is held
 // (`openMicHeld`) the mic passes untouched, so everything comes through.
-export function micPayload(cfg, mics = [], { openMicHeld = false } = {}) {
-  if (!cfg?.enabled || !cfg.device || openMicHeld) return null;
-  const on = mics.find((d) => d.installed && d.id.toLowerCase() === cfg.device.toLowerCase());
+// `fx` = Stemmeskifter is on: the plugin goes on the mic even with Ren mikrofon off (then with
+// all cleaning off).
+export function micPayload(cfg, mics = [], { openMicHeld = false, fx = false } = {}) {
+  const clean = !!cfg?.enabled;
+  if ((!clean && !fx) || openMicHeld) return null;
+  const device = cfg?.device || pickChatMic(mics)?.id;
+  if (!device) return null;
+  const on = mics.find((d) => d.installed && d.id.toLowerCase() === device.toLowerCase());
   if (!on) return null;
+  if (!clean) return { devices: [on.id], echo: false, noise: 0, high_pass: false, isolate: false, amount: 1, fx: true };
   const isolate = cfg.noise === 'isolate';
   const amount = isolate ? AMOUNT_VALUE[cfg.amount] ?? 1 : 1;
-  return { devices: [on.id], echo: !!cfg.echo, noise: NOISE_VALUE[cfg.noise] ?? 0.5, high_pass: cfg.highPass !== false, isolate, amount };
+  return { devices: [on.id], echo: !!cfg.echo, noise: NOISE_VALUE[cfg.noise] ?? 0.5, high_pass: cfg.highPass !== false, isolate, amount, fx: !!fx };
 }
 
 // For the echo reference writer (voiceref.rs). It also reads the plugin's status, so it runs
 // whenever Ren mikrofon is on; the speakers are only captured with the echo canceller on.
-export function referencePayload(cfg, mixer, endpointOf) {
-  if (!cfg?.enabled) return { enabled: false, sources: [] };
-  if (!cfg.echo) return { enabled: true, sources: [] };
+// `fx` = the Stemmeskifter command (voicefx.js fxCommand): the writer also runs for it, since the
+// plugin only keeps an effect while GoXLR Studio is alive and writing.
+export function referencePayload(cfg, mixer, endpointOf, fx = 0) {
+  if (!cfg?.enabled) return { enabled: fx > 0, sources: [], fx };
+  if (!cfg.echo) return { enabled: true, sources: [], fx };
   const { sources } = referenceSources(mixer, cfg.speakers, endpointOf);
-  return { enabled: true, sources: sources.map(({ device, gain }) => ({ device, gain })) };
+  return { enabled: true, sources: sources.map(({ device, gain }) => ({ device, gain })), fx };
 }
 
 // One line for the card and the Diagnose page: { level, parts, text }.

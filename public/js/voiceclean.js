@@ -6,6 +6,7 @@
 import { h, toast, confirmDialog, logActivity } from './ui.js';
 import { engineInfo, engineTask, listAudioDevices, deviceFormat, voiceConfigure, voiceStatus, voiceCheck, storeGet, storeSet, setDemoVoicePhase } from './native.js';
 import { channelEndpoint } from './extras.js';
+import { fxSettings, fxCommand } from './voicefx.js';
 import { voiceSettings, NOISE_LEVELS, NOISE_HINT, AMOUNT_LEVELS, AMOUNT_HINT, GOXLR_SPEAKER_OUTPUTS, referenceSources, referencePayload, micPayload, pickChatMic, voiceStatusLine, noteText, voiceDiagnosis, diagnosisText, latestMicTest, smoothInstances, MIC_TEST_STEPS, micTestVerdict } from './voicemodel.js';
 
 let devCache = { at: 0, list: [] };
@@ -22,8 +23,15 @@ async function engineMics(force = false) {
 /** The mic part of the EQ engine's config (apo.rs MicClean), or null. */
 export async function voiceMicPayload(ctx) {
   const cfg = voiceSettings(ctx.prefs);
-  if (!cfg.enabled) return null;
-  return micPayload(cfg, await engineMics(), { openMicHeld: !!ctx.prefs.openMic?.saved });
+  const fx = fxSettings(ctx.prefs).enabled;
+  if (!cfg.enabled && !fx) return null;
+  return micPayload(cfg, await engineMics(), { openMicHeld: !!ctx.prefs.openMic?.saved, fx });
+}
+
+// Sends the settings to the echo reference writer now (a Stemmeskifter key must act at once).
+let kick = () => {};
+export function pushVoiceNow() {
+  kick();
 }
 
 /** Saves the microphone tests of an engine task (set-mics/test), so the check can show them. */
@@ -42,7 +50,7 @@ export function startVoiceClean(ctx) {
     try {
       const cfg = voiceSettings(ctx.prefs);
       const devs = cfg.enabled && cfg.echo ? await audioDevices() : [];
-      const payload = referencePayload(cfg, ctx.conn.mixer, (ch) => channelEndpoint(ch, devs));
+      const payload = referencePayload(cfg, ctx.conn.mixer, (ch) => channelEndpoint(ch, devs), fxCommand(fxSettings(ctx.prefs), ctx.voiceFxHeld));
       const key = JSON.stringify(payload);
       if (key !== last) {
         await voiceConfigure(payload);
@@ -50,6 +58,7 @@ export function startVoiceClean(ctx) {
       }
     } catch { /* tried again in half a second */ } finally { busy = false; }
   };
+  kick = tick;
   tick();
   setInterval(tick, 500);
 }
