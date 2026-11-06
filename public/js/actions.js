@@ -1,4 +1,4 @@
-import { MEDIA_COMMANDS } from './media.js';
+import { MEDIA_COMMANDS, showMusicPopup } from './media.js';
 import { HEARING_DEFAULTS } from './hearing.js';
 import { chatMixAction } from './chatmix.js';
 import { saveClip } from './clips.js';
@@ -179,6 +179,7 @@ export async function runAction(ctx, id, source = 'handling') {
       return;
     case 'sound': return playSound(ctx, arg).then(() => notify(ctx, `▶ ${arg.replace(/\.[^.]+$/, '')}`)).catch((e) => notify(ctx, `Lyd: ${e.message || e}`, 'mute'));
     case 'sounds-stop': stopSounds(); return notify(ctx, 'Lyde stoppet');
+    case 'music-popup': return showMusicPopup(ctx, arg === 'show' ? true : arg === 'hide' ? false : null).catch(() => {});
     case 'media': {
       await mediaControl(arg).catch((e) => notify(ctx, `Medier: ${e.message || e}`, 'mute'));
       return notify(ctx, MEDIA_COMMANDS.find(([c]) => c === arg)?.[1] || arg);
@@ -278,7 +279,7 @@ export async function actionCatalog(ctx) {
     ...['A', 'B', 'C'].flatMap((b) => SAMPLER_PADS.map(([k, n]) => ({ id: `sampler-pad:${b}|${k}`, label: `Afspil sampler-knap ${n} (bank ${b})` }))),
   ] : []);
   g('ChatMix', [{ id: 'chatmix:chat', label: 'ChatMix mod chat' }, { id: 'chatmix:game', label: 'ChatMix mod spil' }, { id: 'chatmix:center', label: 'ChatMix i midten' }]);
-  g('Medier', MEDIA_COMMANDS.map(([c, label]) => ({ id: `media:${c}`, label })));
+  g('Medier', [...MEDIA_COMMANDS.map(([c, label]) => ({ id: `media:${c}`, label })), { id: 'music-popup', label: 'Musik-popup (vis/skjul)' }]);
   g('Andet', [
     m?.effects ? { id: 'fx-toggle', label: 'Effekter til/fra' } : null,
     { id: 'ducking-toggle', label: 'Auto-ducking til/fra' },
@@ -329,6 +330,7 @@ export function actionLabel(ctx, id) {
     case 'clip-save': return 'Gem lydklip';
     case 'chatmix': return arg === 'center' ? 'ChatMix i midten' : arg === 'chat' ? 'ChatMix mod chat' : 'ChatMix mod spil';
     case 'media': return MEDIA_COMMANDS.find(([c]) => c === arg)?.[1] || arg;
+    case 'music-popup': return arg === 'show' ? 'Vis musik-popup' : arg === 'hide' ? 'Skjul musik-popup' : 'Musik-popup (vis/skjul)';
     case 'mute-fader': return `Mute fader ${arg}`;
     case 'scene': return `Scene "${ctx.scenes.find((s) => s.id === arg)?.name || 'slettet'}"`;
     case 'eq-preset': return `EQ-preset "${arg}"`;

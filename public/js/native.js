@@ -273,7 +273,7 @@ export async function apoListConfigs() {
 }
 
 // Medieknapper (media.rs). The browser demo has a pretend player.
-const demoMedia = { available: true, playing: true, title: 'Demo-sang', artist: 'Demo-kunstner', app: 'Spotify', n: 1 };
+const demoMedia = { available: true, playing: true, title: 'Demo-sang', artist: 'Demo-kunstner', app: 'Spotify', n: 1, position_ms: 42000, duration_ms: 214000 };
 export async function mediaNow() { if (isNative()) return invoke('media_now'); return { ...demoMedia }; }
 export async function mediaControl(cmd) {
   if (isNative()) return invoke('media_control', { cmd });
@@ -281,6 +281,24 @@ export async function mediaControl(cmd) {
   if (cmd === 'next' || cmd === 'previous') { demoMedia.n += cmd === 'next' ? 1 : -1; demoMedia.title = `Demo-sang ${demoMedia.n}`; demoMedia.playing = true; }
   if (cmd === 'stop') demoMedia.playing = false;
   return null;
+}
+
+/** The current song's cover as a data: URL, or null (media.rs, read once per song). */
+export async function mediaArt() { if (isNative()) return invoke('media_art'); return null; }
+
+// Musik-popup (musicpop.rs): show (true), hide (false) or toggle (null). The browser demo has no
+// separate window – public/music.html opened on its own shows a pretend player instead.
+export async function musicPopup(show = null, { auto = false, corner = 'bottom-right', seconds = 6 } = {}) {
+  if (isNative()) return invoke('music_popup', { show, auto, corner, seconds });
+  return false;
+}
+
+/** The pop-up asks for the Music channel (want) and moves its slider (volume): wired by media.js. */
+export async function onMusicPopup({ want, volume }) {
+  if (!isNative()) return;
+  const { listen, emit } = window.__TAURI__.event;
+  await listen('music-want-state', () => emit('music-state', want()));
+  await listen('music-volume', (ev) => volume(ev.payload?.value));
 }
 
 // Fodpedal: MIDI inputs (midi.rs). The browser demo has one pretend pedal (window.studioDemo.midi).
