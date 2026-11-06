@@ -508,6 +508,7 @@ export async function voiceStatus() {
     in_db: (demoVoicePhase === 'speech' ? -24 : -31) + 3 * Math.sin(t),
     out_db: (demoVoicePhase === 'speech' ? -25 : demoVoicePhase === 'typing' ? -78 : -57) + 3 * Math.sin(t),
     instances: demoOldVoice ? null : demoBypass && !demoVoicePrograms ? 1 : demoBypass ? 2 : 1,
+    fx: demoEngine.mics.size > 0 && !demoOldVoice && (demoVoice.fx || 0) > 0,
     sources: demoVoice.sources.map((s) => ({ device: s.device, ok: true, rate: 48000, playing: s.gain > 0, error: null })), error: null,
   };
 }

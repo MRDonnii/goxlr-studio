@@ -3,6 +3,7 @@ import { isNative, soundsList, soundsSave, soundsDelete, soundsRename, soundsOpe
 import { playSound, stopSounds, forgetSound } from './soundboard.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { clipsCard } from './clips.js';
+import { voiceFxCard } from './voicefxcard.js';
 
 const KEY_POOL = Array.from({ length: 12 }, (_, i) => `Ctrl+Alt+Shift+F${i + 1}`)
   .concat(['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((d) => `Ctrl+Alt+Shift+${d}`));
@@ -71,9 +72,11 @@ export function soundsView(ctx) {
     if (!sounds.length) pads.append(h('div', { class: 'hint' }, 'Ingen lyde endnu. Tilføj mp3-, wav- eller ogg-filer – fx et airhorn, en applaus eller en "ba dum tss".'));
   };
 
-  const fileIn = h('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.ogg,.opus,.flac,.m4a,.aac', multiple: true, style: { display: 'none' }, 'data-testid': 'sound-file', onchange: async () => {
-    const files = [...fileIn.files];
-    fileIn.value = '';
+  const AUDIO = /\.(mp3|wav|ogg|opus|flac|m4a|aac)$/i;
+  const addFiles = async (input) => {
+    const files = [...input.files].filter((f) => AUDIO.test(f.name) || f.type.startsWith('audio/'));
+    input.value = '';
+    if (!files.length) { toast('Der var ingen lydfiler'); return; }
     let n = 0;
     for (const f of files) {
       if (f.size > 20 * 1024 * 1024) { toast(`${f.name} er større end 20 MB`); continue; }
@@ -82,7 +85,10 @@ export function soundsView(ctx) {
     const what = `${n} ${n === 1 ? 'lyd' : 'lyde'}`;
     if (n) { logActivity(`Lydbank: ${what} tilføjet`); toast(`${what} tilføjet`, 'info'); }
     reload();
-  } });
+  };
+  const fileIn = h('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.ogg,.opus,.flac,.m4a,.aac', multiple: true, style: { display: 'none' }, 'data-testid': 'sound-file', onchange: () => addFiles(fileIn) });
+  // A whole folder (e.g. the sounds from another soundboard); only the audio files are taken.
+  const dirIn = h('input', { type: 'file', multiple: true, webkitdirectory: true, style: { display: 'none' }, 'data-testid': 'sound-dir', onchange: () => addFiles(dirIn) });
 
   // The Sample channel's routing: where the sounds go.
   const route = (out, label) => {
@@ -96,9 +102,11 @@ export function soundsView(ctx) {
     h('div', { class: 'card' },
       h('h2', {}, 'Lydbank', h('span', { class: 'row' },
         h('button', { class: 'btn sm primary', 'data-testid': 'sound-add', onclick: () => fileIn.click() }, '+ Tilføj lyde …'),
+        h('button', { class: 'btn sm', 'data-testid': 'sound-add-dir', title: 'Alle lydfiler i en mappe, fx dine lyde fra et andet soundboard', onclick: () => dirIn.click() }, 'Importér mappe …'),
         h('button', { class: 'btn sm', 'data-testid': 'sound-stop', onclick: stopSounds }, 'Stop alle'))),
-      fileIn, pads,
-      h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Lydene spilles på GoXLR’ens Sample-kanal. Giv dem en tast, så kan de også ligge på din Stream Deck (Stream Deck-siden) eller G-taster.')),
+      fileIn, dirIn, pads,
+      h('div', { class: 'hint', style: { marginTop: '8px' } }, 'Lydene spilles på GoXLR’ens Sample-kanal. Giv dem en tast, så kan de også ligge på din Stream Deck (Stream Deck-siden) eller G-taster. Har du lyde i et andet soundboard (fx Voicemod), så vælg dem med “Importér mappe …”.')),
+    voiceFxCard(ctx, { keyPool: KEY_POOL }),
     h('div', { class: 'grid cols-2' },
       h('div', { class: 'card' }, h('h2', {}, 'Hvor lyden går hen'),
         route('ChatMic', 'Discord og andre opkald (Chat Mic)'),
