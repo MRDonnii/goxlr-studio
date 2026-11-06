@@ -78,6 +78,10 @@ pub struct MicClean {
     /// Styrke for Stemmeisolering (0.15.0, the plugin's Amount: 1 = full). Written only below full.
     #[serde(default = "one")]
     pub amount: f64,
+    /// Stemmeskifter is on (0.16.0): the plugin must be on the mic even with all cleaning off – the
+    /// effect itself is chosen through the shared memory, so a key switches it without a reload.
+    #[serde(default)]
+    pub fx: bool,
 }
 
 fn yes() -> bool {
@@ -180,7 +184,7 @@ pub fn with_mic(playback: &str, mic: Option<&MicClean>, dll: &str, name_of: &dyn
     out.push('\n');
     if let Some(m) = mic {
         let sel: Vec<String> = m.devices.iter().filter_map(|id| selector(id, name_of)).collect();
-        if !sel.is_empty() && (m.echo || m.noise > 0.0 || m.high_pass || m.isolate) {
+        if !sel.is_empty() && (m.echo || m.noise > 0.0 || m.high_pass || m.isolate || m.fx) {
             out.push_str(&format!("Device: {}\n", sel.join("; ")));
             out.push_str(&voice_line(dll, m));
         }
@@ -871,7 +875,7 @@ mod tests {
     }
 
     fn mic(devices: &[&str]) -> MicClean {
-        MicClean { devices: devices.iter().map(|d| d.to_string()).collect(), echo: true, noise: 0.5, high_pass: true, isolate: false, amount: 1.0 }
+        MicClean { devices: devices.iter().map(|d| d.to_string()).collect(), echo: true, noise: 0.5, high_pass: true, isolate: false, amount: 1.0, fx: false }
     }
 
     #[test]
@@ -915,6 +919,9 @@ mod tests {
         // Everything off or no devices: no mic section either.
         let off = MicClean { echo: false, noise: 0.0, high_pass: false, ..m.clone() };
         assert!(!with_mic(&playback, Some(&off), "v.dll", &|_| None).contains("VSTPlugin"));
+        // Only Stemmeskifter: the plugin is there, with all cleaning off.
+        let fx_only = with_mic(&playback, Some(&MicClean { fx: true, ..off.clone() }), "v.dll", &|_| None);
+        assert!(fx_only.contains("VSTPlugin: Library \"v.dll\" Echo 0.0000 Noise 0.0000 HighPass 0.0000\n"), "{fx_only}");
         assert!(!with_mic(&playback, Some(&mic(&[])), "v.dll", &|_| None).contains("VSTPlugin"));
     }
 

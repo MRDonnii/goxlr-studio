@@ -29,6 +29,9 @@ pub struct Config {
     pub enabled: bool,
     #[serde(default)]
     pub sources: Vec<Source>,
+    /// Stemmeskifter: the effect for the plugin (fx::encode in plugins/voiceclean; 0 = off).
+    #[serde(default)]
+    pub fx: u32,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -55,6 +58,8 @@ pub struct Status {
     pub bypassed: bool,
     /// The plugin hit a problem and passes the mic through (plugins from 0.15.0).
     pub broken: bool,
+    /// A Stemmeskifter effect runs in the plugin (plugins from 0.16.0).
+    pub fx: bool,
     /// Stemmeisolering: "running", "loading", "unavailable" (RNNoise instead) or None (off).
     pub isolate: Option<String>,
     /// The mic's level before and after cleaning (dBFS, last half second; plugins from 0.14.1).
@@ -82,6 +87,7 @@ pub fn plugin_status(st: &mut Status, report: (u64, u32, f32, i32), now_ms: u64)
     st.reference = on(ring::FLAG_REFERENCE);
     st.bypassed = on(ring::FLAG_BYPASSED);
     st.broken = on(ring::FLAG_BROKEN);
+    st.fx = on(ring::FLAG_FX);
     st.isolate = if on(ring::FLAG_ISOLATE) {
         Some("running".into())
     } else if on(ring::FLAG_ISOLATE_LOADING) {
@@ -325,6 +331,7 @@ fn run(state: Arc<State>) {
         }
         if let Some(s) = shm.as_ref() {
             s.write(&out, now_ms);
+            s.set_fx(cfg.fx);
         }
         if now_ms.saturating_sub(last_status) >= 100 {
             last_status = now_ms;
@@ -340,6 +347,10 @@ fn run(state: Arc<State>) {
             *state.status.lock().unwrap() = st;
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    // Stopped (Ren mikrofon and Stemmeskifter off): the effect ends now, not when it goes stale.
+    if let Some(s) = shm.as_ref() {
+        s.set_fx(0);
     }
     *state.status.lock().unwrap() = Status::default();
 }
@@ -421,6 +432,12 @@ mod win {
         pub fn write(&self, x: &[f32], now_ms: u64) {
             if self.ring.valid() {
                 self.ring.write(x, now_ms);
+            }
+        }
+
+        pub fn set_fx(&self, cmd: u32) {
+            if self.ring.valid() && self.ring.fx_command() != cmd {
+                self.ring.set_fx_command(cmd);
             }
         }
 
