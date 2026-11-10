@@ -319,3 +319,14 @@ test('"Hvad er nyt": the notes in the right language, drawn as blocks', () => {
   assert.deepEqual(b.map((y) => y.kind), ['h', 'p', 'li']);
   assert.deepEqual(b[1].parts, [{ text: 'Nyt: Dansk.', bold: true }, { text: ' Tekst' }]);
 });
+
+test('headphoneLevel: the mix the headphones hear', async () => {
+  const { headphoneLevel } = await import('../public/js/extras.js');
+  const base = { levels: { volumes: { Sample: 100 }, submix: null } };
+  assert.deepEqual(headphoneLevel(base, 'Sample'), { mix: 'A', linked: false, volume: 100, command: 'SetVolume' });
+  const sub = { levels: { volumes: { Sample: 100 }, submix: { inputs: { Sample: { volume: 30, linked: false, ratio: 1 } }, outputs: { Headphones: 'B', BroadcastMix: 'A' } } } };
+  assert.deepEqual(headphoneLevel(sub, 'Sample'), { mix: 'B', linked: false, volume: 30, command: 'SetSubMixVolume' });
+  sub.levels.submix.outputs.Headphones = 'A';
+  assert.equal(headphoneLevel(sub, 'Sample').mix, 'A');
+  assert.equal(headphoneLevel(null, 'Sample').mix, 'A');
+});

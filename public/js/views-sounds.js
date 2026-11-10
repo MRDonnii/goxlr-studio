@@ -3,6 +3,7 @@ import { isNative, soundsList, soundsSave, soundsDelete, soundsRename, soundsOpe
 import { playSound, stopSounds, forgetSound } from './soundboard.js';
 import { prettyAccel } from './views-hotkeys.js';
 import { clipsCard } from './clips.js';
+import { headphoneLevel } from './extras.js';
 import { voiceFxCard } from './voicefxcard.js';
 
 const KEY_POOL = Array.from({ length: 12 }, (_, i) => `Ctrl+Alt+Shift+F${i + 1}`)
@@ -97,6 +98,12 @@ export function soundsView(ctx) {
     return h('label', { class: 'engine-dev', 'data-testid': `sound-route-${out}` }, cb, h('span', {}, label));
   };
 
+  const sampleMixHint = h('div', { class: 'hint', 'data-testid': 'sound-sample-mix' });
+  binder.add(() => {
+    const l = headphoneLevel(conn.mixer, 'Sample');
+    sampleMixHint.textContent = l.mix === 'B' ? 'Dine hovedtelefoner får Submix (Mix B), så skyderen styrer Sample i Mix B – det du hører.' : '';
+  });
+
   reload();
   return h('div', { class: 'grid' },
     h('div', { class: 'card' },
@@ -115,7 +122,9 @@ export function soundsView(ctx) {
         h('div', { class: 'hint', style: { marginTop: '6px' } }, 'Det er GoXLR’ens routing for Sample-kanalen – den samme som under Routing.')),
       h('div', { class: 'card' }, h('h2', {}, 'Afspilning'),
         slider(binder, { label: 'Lydstyrke', min: 0, max: 100, get: () => sb.volume ?? 80, set: (v) => { sb.volume = v; ctx.savePrefs(); }, fmt: (v) => `${v} %` }),
-        slider(binder, { label: 'Sample-kanal', min: 0, max: 255, get: () => conn.mixer?.levels?.volumes?.Sample ?? 0, set: (v) => conn.command('SetVolume', 'Sample', v), fmt: (v) => `${Math.round((v / 255) * 100)} %` }),
+        // What you hear: with Submix on and the headphones on Mix B, the Sample level of Mix B.
+        slider(binder, { label: 'Sample-kanal', min: 0, max: 255, get: () => headphoneLevel(conn.mixer, 'Sample').volume ?? 0, set: (v) => conn.command(headphoneLevel(conn.mixer, 'Sample').command, 'Sample', v), fmt: (v) => `${Math.round((v / 255) * 100)} %` }),
+        sampleMixHint,
         h('label', { class: 'engine-dev' }, h('input', { type: 'checkbox', checked: sb.overlap !== false, onchange: (e) => { sb.overlap = e.target.checked; ctx.savePrefs(); } }), h('span', {}, 'Flere lyde på én gang')),
         isNative() ? h('button', { class: 'btn sm', style: { marginTop: '8px' }, onclick: () => soundsOpenDir().catch((e) => toast(String(e))) }, 'Åbn mappen med lyde') : null),
       clipsCard(ctx)));

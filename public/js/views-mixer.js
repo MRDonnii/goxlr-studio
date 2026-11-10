@@ -154,7 +154,15 @@ export function mixerView(ctx) {
   }
   root.append(strips);
 
-  const chans = h('div', { class: 'card chan-list' }, h('h2', {}, 'Alle kanaler'));
+  // With Submix on and the headphones on Mix B, these sliders (Mix A) are not what you hear.
+  const mixBHint = h('div', { class: 'hint warn-text', 'data-testid': 'chan-mixb-hint' });
+  binder.add(() => {
+    const sub = m()?.levels?.submix;
+    mixBHint.textContent = sub && sub.outputs?.Headphones === 'B'
+      ? 'Dine hovedtelefoner får Submix (Mix B). Skyderne her ændrer Mix A – det, du hører, ændres kun for kanaler med "Følg" slået til. Brug Submix-kortet.'
+      : '';
+  });
+  const chans = h('div', { class: 'card chan-list' }, h('h2', {}, 'Alle kanaler'), mixBHint);
   for (const c of CHANNELS) {
     chans.append(slider(binder, { label: CHANNEL_LABEL[c], min: 0, max: 255, get: () => m().levels.volumes[c], set: (v) => conn.command('SetVolume', c, v), fmt: pct }));
   }

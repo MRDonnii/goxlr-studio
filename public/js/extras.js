@@ -510,3 +510,17 @@ export function markdownBlocks(md) {
   }
   return out;
 }
+
+/**
+ * What a channel's level is for the headphones: with Submix on and the headphones on Mix B, they
+ * hear the submix level – a fader/slider (Mix A) then only moves it if the channel is linked
+ * ("Følg"). Returns { mix: 'A'|'B', linked, volume, command } where command is the GoXLR command
+ * that changes what you hear.
+ */
+export function headphoneLevel(mixer, channel) {
+  const sub = mixer?.levels?.submix;
+  const onB = !!sub && sub.outputs?.Headphones === 'B';
+  const input = sub?.inputs?.[channel];
+  if (onB && input) return { mix: 'B', linked: !!input.linked, volume: input.volume, command: 'SetSubMixVolume' };
+  return { mix: 'A', linked: false, volume: mixer?.levels?.volumes?.[channel], command: 'SetVolume' };
+}
