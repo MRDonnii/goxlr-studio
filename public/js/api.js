@@ -43,6 +43,8 @@ export class GoXLRConnection extends EventTarget {
     this.pending = new Map();
     this.retryTimer = null;
     this.transport = null;
+    this.connected = false;
+    this.loading = false;
   }
 
   get mixer() {
@@ -73,17 +75,31 @@ export class GoXLRConnection extends EventTarget {
     this.onConnection(await invoke('daemon_connected'));
   }
 
+  // The app's connection to the engine changed. Connected: fetch the status – and keep trying until
+  // it comes (right after a start the engine can answer before it is ready; before, one failed
+  // GetStatus left the app showing the demo while the sliders' commands went nowhere).
   async onConnection(connected) {
+    this.connected = connected;
     if (!connected) {
       if (this.mode !== 'demo') this.enterDemo();
       return;
     }
-    const res = await this.request('GetStatus');
-    if (res && res.Status) {
-      this.status = res.Status;
-      this.mode = 'live';
-      this.pickSerial();
-      this.emit();
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      for (let i = 0; this.connected; i++) {
+        const res = await this.request('GetStatus');
+        if (res && res.Status) {
+          this.status = res.Status;
+          this.mode = 'live';
+          this.pickSerial();
+          this.emit();
+          return;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(5000, 300 * 2 ** i)));
+      }
+    } finally {
+      this.loading = false;
     }
   }
 
@@ -162,6 +178,13 @@ export class GoXLRConnection extends EventTarget {
   }
 
   async command(name, ...args) {
+    // In the Windows app a command must reach the GoXLR – never vanish into the demo in silence.
+    if (window.__TAURI__ && (this.mode !== 'live' || !this.serial)) {
+      const why = this.mode !== 'live' ? 'ikke forbundet til GoXLR-motoren' : 'ingen GoXLR fundet';
+      this.dispatchEvent(new CustomEvent('error', { detail: `${name}: ${why} – ændringen blev ikke sendt` }));
+      if (this.connected && this.mode !== 'live') this.onConnection(true);
+      return;
+    }
     if (!this.serial) return;
     if (this.mode === 'demo') {
       applyDemoCommand(this.status, this.serial, { [name]: args });
