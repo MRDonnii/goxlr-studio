@@ -20,6 +20,7 @@ import { soundsView } from './views-sounds.js';
 import { migrateView } from './views-migrate.js';
 import { startDiscordSync } from './discord.js';
 import { applyStartLevels } from './startlevels.js';
+import { createMuteLinks } from './mutelinks.js';
 import { playbackOffset } from './eqchain.js';
 import { dbToMeter, notesFor, markdownBlocks, channelEndpoint, enginePayload, resolveDevice, deviceName, compareVersions, pickUpdateAsset, takeoverMessage, updateOutcome, micIsMuted, mutedSpeechThreshold } from './extras.js';
 import { hotkeysView, accelFromEvent, prettyAccel } from './views-hotkeys.js';
@@ -826,8 +827,12 @@ function maybeStartLevels() {
   if (ctx.hotkeys.some((b) => b.action === 'hold:ptt' && b.accel)) setTimeout(() => conn.command('SetCoughMuteState', pttMuteState(ctx)), 1600);
 }
 
+// Mute buttons that take other channels along (mutelinks.js).
+const followMuteLinks = createMuteLinks(ctx);
+
 conn.addEventListener('change', () => {
   maybeStartLevels();
+  followMuteLinks();
   updateChrome();
   syncTray();
   syncTrayStatus();

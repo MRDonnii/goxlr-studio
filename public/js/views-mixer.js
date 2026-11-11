@@ -1,6 +1,7 @@
 import { nowPlayingCard } from './media.js';
 import { FADER_LEDS, faderLeds, peakToMeter, dbToMeter, channelEndpoint, vuStep } from './extras.js';
-import { h, slider, segmented, selectBox, toggle, throttle, toast } from './ui.js';
+import { h, slider, segmented, selectBox, toggle, throttle, toast, infoDialog } from './ui.js';
+import { muteLinkSettings, LINKABLE } from './mutelinks.js';
 import { chatMixCard } from './chatmix.js';
 import { CHANNELS, INPUTS, OUTPUTS } from './demo.js';
 import { listAudioDevices, setDefaultDevice } from './native.js';
@@ -124,6 +125,14 @@ export function mixerView(ctx) {
       const st = fs().mute_state;
       conn.command('SetFaderMuteState', f, st === 'Unmuted' ? (e.shiftKey ? 'MutedToAll' : 'MutedToX') : 'Unmuted');
     });
+    // "Muter også": more channels that follow this mute button (mutelinks.js).
+    const alsoBtn = h('button', { class: 'btn sm mute-also', 'data-testid': `mute-also-${f}`, title: 'Vælg kanaler, som denne mute-knap også muter', onclick: () => editMuteLinks(ctx, f) });
+    binder.add(() => {
+      const list = (muteLinkSettings(ctx.prefs)[f] || []).filter((c) => c !== fs().channel);
+      // Each name in its own element, so i18n.js translates them.
+      if (list.length) alsoBtn.replaceChildren(h('span', {}, 'Muter også:'), ' ', ...list.flatMap((c, i) => [i ? ', ' : '', h('span', {}, CHANNEL_LABEL[c] || c)]));
+      else alsoBtn.replaceChildren(h('span', {}, 'Muter også …'));
+    });
     const strip = h('div', { class: 'strip' },
       scribble,
       selectBox(binder, { options: CHANNELS.map((c) => [c, CHANNEL_LABEL[c]]), get: () => fs().channel, set: (v) => conn.command('SetFader', f, v) }),
@@ -138,6 +147,7 @@ export function mixerView(ctx) {
       pctEl,
       muteBtn,
       selectBox(binder, { options: Object.entries(MUTE_FN_LABEL), get: () => fs().mute_type, set: (v) => conn.command('SetFaderMuteFunction', f, v) }),
+      alsoBtn,
     );
     binder.add(() => {
       const st = fs();
@@ -199,6 +209,24 @@ export function mixerView(ctx) {
 
   root.append(h('div', { class: 'grid cols-2' }, h('div', { class: 'grid' }, chans, startLevelsCard(ctx)), h('div', { class: 'grid' }, micCard, chatMixCard(ctx), duckingCard(ctx), submixCard(ctx))));
   return root;
+}
+
+/** Which channels mute button `f` takes along (saved at once). */
+function editMuteLinks(ctx, f) {
+  const links = muteLinkSettings(ctx.prefs);
+  const own = ctx.conn.mixer?.fader_status?.[f]?.channel;
+  const boxes = LINKABLE.filter((c) => c !== own).map((c) => {
+    const cb = h('input', { type: 'checkbox', 'data-testid': `mute-also-${f}-${c}`, checked: links[f].includes(c), onchange: () => {
+      links[f] = cb.checked ? [...new Set([...links[f], c])] : links[f].filter((x) => x !== c);
+      ctx.savePrefs?.();
+      ctx.binder.run();
+    } });
+    return h('label', { class: 'engine-dev' }, cb, h('span', {}, CHANNEL_LABEL[c] || c));
+  });
+  return infoDialog(`Mute-knap ${f}: muter også`, h('div', {},
+    h('p', { class: 'hint' }, `Når knappen muter ${CHANNEL_LABEL[own] || own || 'sin kanal'}, muter GoXLR Studio også de valgte kanaler, og slår dem til igen sammen med knappen. Ligger kanalen på en anden fader, trykkes dens mute-knap; ellers skrues den ned til 0 og tilbage igen.`),
+    ...boxes,
+    h('p', { class: 'hint' }, 'Det virker også med knappen på selve GoXLR’en, så længe GoXLR Studio kører.')), { ok: 'Færdig', testid: 'mute-also-dialog' });
 }
 
 function submixCard(ctx) {
